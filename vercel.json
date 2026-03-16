@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/content/api/cron/pull-metrics",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
