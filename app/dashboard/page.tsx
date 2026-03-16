@@ -6,7 +6,6 @@ import { supabase, Account, DailyMetric } from "@/lib/supabase";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import Link from "next/link";
-import Tutorial from "@/components/Tutorial";
 
 function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
@@ -20,7 +19,6 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<Record<string, MetricPair>>({});
   const [employeeName, setEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showTutorial, setShowTutorial] = useState(false);
   const router = useRouter();
   const { lang, setLang, t } = useLang();
 
@@ -75,8 +73,6 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen p-6 max-w-4xl mx-auto">
-      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
-
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -84,12 +80,14 @@ export default function Dashboard() {
           <p className="text-sm text-[#737373]">{accounts.length} {t("accounts")}</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowTutorial(true)}
+          <a
+            href="/tutorial"
+            target="_blank"
+            rel="noopener noreferrer"
             className="px-3 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
           >
             {t("tutorial")}
-          </button>
+          </a>
           <button
             onClick={() => setLang(lang === "en" ? "vi" : "en")}
             className="px-3 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
