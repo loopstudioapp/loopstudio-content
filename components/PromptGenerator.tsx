@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { pick, pickN } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 import { SPACE_TYPES, HOME_STYLES as A1_HOME_STYLES, FLOORINGS, LIGHTINGS as A1_LIGHTINGS, VIBES, A1_TITLES, A1_CAPTIONS } from "@/lib/prompts/angle1";
 import { ROOM_TYPES, ROOM_CONDITIONS, ROOM_DETAILS, REMODEL_STYLES, A2_TITLES, A2_CAPTIONS, HOME_STYLES as A2_HOME_STYLES, LIGHTINGS as A2_LIGHTINGS } from "@/lib/prompts/angle2";
 import { HASHTAGS } from "@/lib/prompts/shared";
@@ -10,6 +11,7 @@ type Prompt = { text: string; tags: { label: string; color: string }[] };
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useLang();
   const copy = useCallback(() => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -26,7 +28,7 @@ function CopyButton({ text }: { text: string }) {
         borderColor: "#333",
       }}
     >
-      {copied ? "Copied!" : "Copy to Clipboard"}
+      {copied ? t("copied") : t("copyToClipboard")}
     </button>
   );
 }
@@ -89,6 +91,7 @@ function Angle1Generator() {
   const [transform, setTransform] = useState<Prompt[] | null>(null);
   const [title, setTitle] = useState<Prompt | null>(null);
   const [desc, setDesc] = useState<Prompt | null>(null);
+  const { t } = useLang();
 
   const genBase = useCallback(() => {
     const space = pick(SPACE_TYPES);
@@ -115,20 +118,20 @@ function Angle1Generator() {
 
   return (
     <div className="space-y-6">
-      <Section label="Title (text overlay on slide 1)">
-        <GenButton onClick={() => setTitle({ text: pick(A1_TITLES), tags: [{ label: "title", color: "#f59e0b" }] })} label="Generate Title" color="#f59e0b" />
+      <Section label={t("titleOverlay")}>
+        <GenButton onClick={() => setTitle({ text: pick(A1_TITLES), tags: [{ label: "title", color: "#f59e0b" }] })} label={t("generateTitle")} color="#f59e0b" />
         {title && <PromptDisplay prompt={title} />}
       </Section>
-      <Section label="Description (caption)">
-        <GenButton onClick={() => setDesc({ text: addHashtags(pick(A1_CAPTIONS)), tags: [{ label: "description", color: "#f59e0b" }] })} label="Generate Description" color="#f59e0b" />
+      <Section label={t("descriptionCaption")}>
+        <GenButton onClick={() => setDesc({ text: addHashtags(pick(A1_CAPTIONS)), tags: [{ label: "description", color: "#f59e0b" }] })} label={t("generateDescription")} color="#f59e0b" />
         {desc && <PromptDisplay prompt={desc} />}
       </Section>
-      <Section label="Base Prompt — Awkward Empty Space">
-        <GenButton onClick={genBase} label="Generate Base Prompt" color="#22c55e" />
+      <Section label={t("basePromptA1")}>
+        <GenButton onClick={genBase} label={t("generateBasePrompt")} color="#22c55e" />
         {base && <PromptDisplay prompt={base} />}
       </Section>
-      <Section label="Transform Prompt">
-        <GenButton onClick={genTransform} label="Generate Transform Prompt" color="#a855f7" textColor="#fff" />
+      <Section label={t("transformPrompt")}>
+        <GenButton onClick={genTransform} label={t("generateTransformPrompt")} color="#a855f7" textColor="#fff" />
         {transform?.map((p, i) => <PromptDisplay key={i} prompt={p} />)}
       </Section>
     </div>
@@ -140,6 +143,7 @@ function Angle2Generator() {
   const [transform, setTransform] = useState<Prompt[] | null>(null);
   const [title, setTitle] = useState<Prompt | null>(null);
   const [desc, setDesc] = useState<Prompt | null>(null);
+  const { t } = useLang();
 
   const genBase = useCallback(() => {
     const room = pick(ROOM_TYPES);
@@ -166,20 +170,20 @@ function Angle2Generator() {
 
   return (
     <div className="space-y-6">
-      <Section label="Title (text overlay on slide 1)">
-        <GenButton onClick={() => setTitle({ text: pick(A2_TITLES), tags: [{ label: "title", color: "#f59e0b" }] })} label="Generate Title" color="#f59e0b" />
+      <Section label={t("titleOverlay")}>
+        <GenButton onClick={() => setTitle({ text: pick(A2_TITLES), tags: [{ label: "title", color: "#f59e0b" }] })} label={t("generateTitle")} color="#f59e0b" />
         {title && <PromptDisplay prompt={title} />}
       </Section>
-      <Section label="Description (caption)">
-        <GenButton onClick={() => setDesc({ text: addHashtags(pick(A2_CAPTIONS)), tags: [{ label: "description", color: "#f59e0b" }] })} label="Generate Description" color="#f59e0b" />
+      <Section label={t("descriptionCaption")}>
+        <GenButton onClick={() => setDesc({ text: addHashtags(pick(A2_CAPTIONS)), tags: [{ label: "description", color: "#f59e0b" }] })} label={t("generateDescription")} color="#f59e0b" />
         {desc && <PromptDisplay prompt={desc} />}
       </Section>
-      <Section label="Base Prompt — Outdated Room">
-        <GenButton onClick={genBase} label="Generate Base Prompt" color="#22c55e" />
+      <Section label={t("basePromptA2")}>
+        <GenButton onClick={genBase} label={t("generateBasePrompt")} color="#22c55e" />
         {base && <PromptDisplay prompt={base} />}
       </Section>
-      <Section label="Remodel Prompt">
-        <GenButton onClick={genTransform} label="Generate Remodel Prompt" color="#a855f7" textColor="#fff" />
+      <Section label={t("remodelPrompt")}>
+        <GenButton onClick={genTransform} label={t("generateRemodelPrompt")} color="#a855f7" textColor="#fff" />
         {transform?.map((p, i) => <PromptDisplay key={i} prompt={p} />)}
       </Section>
     </div>
@@ -187,11 +191,12 @@ function Angle2Generator() {
 }
 
 export default function PromptGenerator({ angle }: { angle: number }) {
+  const { t } = useLang();
   if (angle === 1) return <Angle1Generator />;
   if (angle === 2) return <Angle2Generator />;
   return (
     <div className="text-[#525252] text-sm italic py-4">
-      Prompt generator for Angle {angle} coming soon.
+      {t("comingSoon", { angle: String(angle) })}
     </div>
   );
 }

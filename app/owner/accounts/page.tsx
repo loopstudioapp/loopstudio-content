@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase, Employee, Account } from "@/lib/supabase";
 import { ANGLE_NAMES } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 import Link from "next/link";
 
 const AVATAR_COLORS = [
@@ -24,6 +25,7 @@ export default function AccountsPage() {
   const [accForm, setAccForm] = useState(emptyAccForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAccForm, setShowAccForm] = useState(false);
+  const { lang, setLang, t } = useLang();
 
   const load = () => {
     supabase.from("employees").select("*").order("name").then(({ data }) => setEmployees(data || []));
@@ -59,7 +61,7 @@ export default function AccountsPage() {
   };
 
   const deleteEmployee = async (id: string) => {
-    if (!confirm("Delete this employee and all their accounts?")) return;
+    if (!confirm(t("deleteEmployeeConfirm"))) return;
     await supabase.from("employees").delete().eq("id", id);
     load();
   };
@@ -104,7 +106,7 @@ export default function AccountsPage() {
   };
 
   const deleteAccount = async (id: string) => {
-    if (!confirm("Delete this account and all its metrics?")) return;
+    if (!confirm(t("deleteAccountConfirm"))) return;
     await supabase.from("daily_metrics").delete().eq("account_id", id);
     await supabase.from("accounts").delete().eq("id", id);
     load();
@@ -114,15 +116,21 @@ export default function AccountsPage() {
     <div className="min-h-screen p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-bold text-white">Accounts</h1>
-          <p className="text-sm text-[#525252]">Manage employees & accounts</p>
+          <h1 className="text-xl font-bold text-white">{t("accountsLink")}</h1>
+          <p className="text-sm text-[#525252]">{t("manageEmployeesAccounts")}</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setLang(lang === "en" ? "vi" : "en")}
+            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
+          >
+            {lang === "en" ? "VN" : "EN"}
+          </button>
           <Link href="/owner" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
-            Overview
+            {t("overview")}
           </Link>
           <Link href="/" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
-            Home
+            {t("home")}
           </Link>
         </div>
       </div>
@@ -131,31 +139,31 @@ export default function AccountsPage() {
       <div className="mb-10">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-            Employees ({employees.length})
+            {t("employees")} ({employees.length})
           </h2>
           <button
             onClick={() => { setEditingEmpId(null); setEmpForm({ name: "", pin: "" }); setShowEmpForm(!showEmpForm); }}
             className="px-3 py-1.5 bg-[#22c55e] text-black text-xs font-semibold rounded-lg"
           >
-            + Add
+            {t("add")}
           </button>
         </div>
 
         {showEmpForm && (
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5 mb-4">
             <p className="text-xs text-[#a3a3a3] font-semibold uppercase tracking-wider mb-4">
-              {editingEmpId ? "Edit Employee" : "New Employee"}
+              {editingEmpId ? t("editEmployee") : t("newEmployee")}
             </p>
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <Input label="Name" value={empForm.name} onChange={(v) => setEmpForm({ ...empForm, name: v })} />
-              <Input label="4-digit PIN" value={empForm.pin} onChange={(v) => setEmpForm({ ...empForm, pin: v.slice(0, 4) })} />
+              <Input label={t("name")} value={empForm.name} onChange={(v) => setEmpForm({ ...empForm, name: v })} />
+              <Input label={t("pin4digit")} value={empForm.pin} onChange={(v) => setEmpForm({ ...empForm, pin: v.slice(0, 4) })} />
             </div>
             <div className="flex gap-2">
               <button onClick={saveEmployee} className="px-4 py-2 bg-[#22c55e] text-black text-sm font-semibold rounded-lg">
-                {editingEmpId ? "Update" : "Save"}
+                {editingEmpId ? t("update") : t("save")}
               </button>
               <button onClick={() => { setShowEmpForm(false); setEditingEmpId(null); }} className="px-4 py-2 bg-[#1a1a1a] text-[#737373] text-sm rounded-lg border border-[#333]">
-                Cancel
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -175,20 +183,20 @@ export default function AccountsPage() {
                   </div>
                   <div className="flex-1">
                     <p className="text-white font-semibold text-sm">{emp.name}</p>
-                    <p className="text-[#525252] text-xs">PIN: {emp.pin} &middot; {empAccounts.length} accounts</p>
+                    <p className="text-[#525252] text-xs">PIN: {emp.pin} &middot; {empAccounts.length} {t("accounts")}</p>
                   </div>
                   <div className="flex gap-3">
                     <button
                       onClick={() => openEditEmployee(emp)}
                       className="text-[#3b82f6] text-xs hover:underline"
                     >
-                      Edit
+                      {t("edit")}
                     </button>
                     <button
                       onClick={() => deleteEmployee(emp.id)}
                       className="text-[#ef4444] text-xs hover:underline"
                     >
-                      Delete
+                      {t("delete")}
                     </button>
                   </div>
                 </div>
@@ -202,50 +210,50 @@ export default function AccountsPage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-            Accounts ({accounts.length})
+            {t("accountsLink")} ({accounts.length})
           </h2>
           <button
             onClick={openAdd}
             className="px-3 py-1.5 bg-[#3b82f6] text-white text-xs font-semibold rounded-lg"
           >
-            + Add
+            {t("add")}
           </button>
         </div>
 
         {showAccForm && (
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5 mb-4">
             <p className="text-xs text-[#a3a3a3] font-semibold uppercase tracking-wider mb-4">
-              {editingId ? "Edit Account" : "New Account"}
+              {editingId ? t("editAccount") : t("newAccount")}
             </p>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">Employee</p>
+                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("employee")}</p>
                 <select
                   value={accForm.employee_id}
                   onChange={(e) => setAccForm({ ...accForm, employee_id: e.target.value })}
                   className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
                 >
-                  <option value="">Select...</option>
+                  <option value="">{t("select")}</option>
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
               <div>
-                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">Angle</p>
+                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("angle")}</p>
                 <select
                   value={accForm.angle}
                   onChange={(e) => setAccForm({ ...accForm, angle: e.target.value })}
                   className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
                 >
-                  {[1, 2, 3].map((n) => <option key={n} value={n}>Angle {n} — {ANGLE_NAMES[n]}</option>)}
+                  {[1, 2, 3].map((n) => <option key={n} value={n}>{t("angle")} {n} — {ANGLE_NAMES[n]}</option>)}
                 </select>
               </div>
-              <Input label="Username" value={accForm.username} onChange={(v) => setAccForm({ ...accForm, username: v })} placeholder="@handle" />
-              <Input label="Login Email" value={accForm.login_email} onChange={(v) => setAccForm({ ...accForm, login_email: v })} />
-              <Input label="Login Method" value={accForm.login_method} onChange={(v) => setAccForm({ ...accForm, login_method: v })} />
-              <Input label="Device" value={accForm.device} onChange={(v) => setAccForm({ ...accForm, device: v })} />
-              <Input label="App" value={accForm.app} onChange={(v) => setAccForm({ ...accForm, app: v })} />
+              <Input label={t("username")} value={accForm.username} onChange={(v) => setAccForm({ ...accForm, username: v })} placeholder="@handle" />
+              <Input label={t("loginEmail")} value={accForm.login_email} onChange={(v) => setAccForm({ ...accForm, login_email: v })} />
+              <Input label={t("loginMethod")} value={accForm.login_method} onChange={(v) => setAccForm({ ...accForm, login_method: v })} />
+              <Input label={t("device")} value={accForm.device} onChange={(v) => setAccForm({ ...accForm, device: v })} />
+              <Input label={t("app")} value={accForm.app} onChange={(v) => setAccForm({ ...accForm, app: v })} />
               <div>
-                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">Status</p>
+                <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("status")}</p>
                 <select
                   value={accForm.status}
                   onChange={(e) => setAccForm({ ...accForm, status: e.target.value })}
@@ -257,18 +265,18 @@ export default function AccountsPage() {
                 </select>
               </div>
               <div className="col-span-2">
-                <Input label="Notes" value={accForm.notes} onChange={(v) => setAccForm({ ...accForm, notes: v })} />
+                <Input label={t("notes")} value={accForm.notes} onChange={(v) => setAccForm({ ...accForm, notes: v })} />
               </div>
             </div>
             <div className="flex gap-2">
               <button onClick={saveAccount} className="px-4 py-2 bg-[#3b82f6] text-white text-sm font-semibold rounded-lg">
-                {editingId ? "Update" : "Save"}
+                {editingId ? t("update") : t("save")}
               </button>
               <button
                 onClick={() => { setShowAccForm(false); setEditingId(null); }}
                 className="px-4 py-2 bg-[#1a1a1a] text-[#737373] text-sm rounded-lg border border-[#333]"
               >
-                Cancel
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -282,7 +290,7 @@ export default function AccountsPage() {
                 <div>
                   <p className="text-white text-sm font-semibold">{acc.username}</p>
                   <p className="text-[#525252] text-xs">
-                    {emp?.name || "Unassigned"} &middot; Angle {acc.angle} &middot; {acc.device || "No device"} &middot; {acc.status}
+                    {emp?.name || t("unassigned")} &middot; {t("angle")} {acc.angle} &middot; {acc.device || t("noDevice")} &middot; {acc.status}
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -290,13 +298,13 @@ export default function AccountsPage() {
                     onClick={() => openEdit(acc)}
                     className="text-[#3b82f6] text-xs hover:underline"
                   >
-                    Edit
+                    {t("edit")}
                   </button>
                   <button
                     onClick={() => deleteAccount(acc.id)}
                     className="text-[#ef4444] text-xs hover:underline"
                   >
-                    Delete
+                    {t("delete")}
                   </button>
                 </div>
               </div>

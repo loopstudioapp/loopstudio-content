@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase, Employee } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import { useLang } from "@/lib/i18n";
 
 const AVATAR_COLORS = [
   "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444",
@@ -17,6 +18,7 @@ export default function ProfilePicker() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const { t } = useLang();
 
   useEffect(() => {
     supabase
@@ -36,7 +38,7 @@ export default function ProfilePicker() {
       document.cookie = `employee_name=${selected.name}; path=/; max-age=86400`;
       router.push("/dashboard");
     } else {
-      setError("Wrong PIN");
+      setError(t("wrongPin"));
       setPin("");
     }
   };
@@ -44,7 +46,7 @@ export default function ProfilePicker() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-[#737373]">Loading...</div>
+        <div className="text-[#737373]">{t("loading")}</div>
       </div>
     );
   }
@@ -59,20 +61,18 @@ export default function ProfilePicker() {
       setPin(next);
       setError("");
 
-      // Auto-focus next input
       if (value && index < 3) {
         const nextInput = document.getElementById(`pin-${index + 1}`);
         nextInput?.focus();
       }
 
-      // Auto-submit on 4 digits
       if (next.length === 4) {
         setTimeout(() => {
           if (isAdmin) {
             if (next === "8888") {
               router.push("/owner");
             } else {
-              setError("Wrong PIN");
+              setError(t("wrongPin"));
               setPin("");
               document.getElementById("pin-0")?.focus();
             }
@@ -81,7 +81,7 @@ export default function ProfilePicker() {
             document.cookie = `employee_name=${selected.name}; path=/; max-age=86400`;
             router.push("/dashboard");
           } else {
-            setError("Wrong PIN");
+            setError(t("wrongPin"));
             setPin("");
             document.getElementById("pin-0")?.focus();
           }
@@ -102,7 +102,7 @@ export default function ProfilePicker() {
           onClick={() => { setSelected(null); setIsAdmin(false); setPin(""); setError(""); }}
           className="absolute top-6 left-6 text-[#737373] hover:text-white text-sm"
         >
-          &larr; Back
+          &larr; {t("back")}
         </button>
 
         <div
@@ -135,7 +135,7 @@ export default function ProfilePicker() {
         </div>
 
         {error && <p className="text-[#ef4444] text-sm">{error}</p>}
-        {!error && <p className="text-[#333] text-xs">Enter 4-digit PIN</p>}
+        {!error && <p className="text-[#333] text-xs">{t("enterPin")}</p>}
       </div>
     );
   }
@@ -144,7 +144,7 @@ export default function ProfilePicker() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6">
       <h1 className="text-2xl font-bold text-white mb-2">Loop Studio</h1>
-      <p className="text-[#737373] text-sm mb-10">Who&apos;s working today?</p>
+      <p className="text-[#737373] text-sm mb-10">{t("whoWorking")}</p>
 
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-6 max-w-lg">
         {/* Admin tile */}

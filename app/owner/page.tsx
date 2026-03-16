@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase, Employee, Account, DailyMetric } from "@/lib/supabase";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 import Link from "next/link";
 
 type MetricPair = { latest: DailyMetric | null; previous: DailyMetric | null };
@@ -14,6 +15,7 @@ export default function OwnerDashboard() {
   const [loading, setLoading] = useState(true);
   const [filterEmployee, setFilterEmployee] = useState("all");
   const [filterAngle, setFilterAngle] = useState("all");
+  const { lang, setLang, t } = useLang();
 
   const load = async () => {
     const [{ data: emps }, { data: accs }] = await Promise.all([
@@ -53,7 +55,7 @@ export default function OwnerDashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-[#737373]">Loading...</div>
+        <div className="text-[#737373]">{t("loading")}</div>
       </div>
     );
   }
@@ -64,7 +66,6 @@ export default function OwnerDashboard() {
     return true;
   });
 
-  // Totals from filtered
   const tkLikes = filtered.reduce((s, a) => s + (metrics[a.id]?.latest?.total_likes || 0), 0);
   const tkPosts = filtered.reduce((s, a) => s + (metrics[a.id]?.latest?.posts || 0), 0);
   const lmLikes = filtered.reduce((s, a) => s + (metrics[a.id]?.latest?.lm8_total_likes || 0), 0);
@@ -79,14 +80,20 @@ export default function OwnerDashboard() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-xl font-bold text-white">Loop Studio</h1>
-          <p className="text-sm text-[#525252]">Owner Overview</p>
+          <p className="text-sm text-[#525252]">{t("ownerOverview")}</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setLang(lang === "en" ? "vi" : "en")}
+            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
+          >
+            {lang === "en" ? "VN" : "EN"}
+          </button>
           <Link href="/owner/accounts" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
-            Accounts
+            {t("accountsLink")}
           </Link>
           <Link href="/" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
-            Home
+            {t("home")}
           </Link>
         </div>
       </div>
@@ -94,24 +101,24 @@ export default function OwnerDashboard() {
       {/* Stats row */}
       <div className="grid grid-cols-5 gap-3 mb-8">
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#525252] text-[10px] uppercase tracking-wider">Accounts</p>
+          <p className="text-[#525252] text-[10px] uppercase tracking-wider">{t("accountsLink")}</p>
           <p className="text-white text-2xl font-bold mt-1">{activeCount}<span className="text-[#525252] text-sm font-normal">/{filtered.length}</span></p>
-          <p className="text-[#525252] text-[10px]">active</p>
+          <p className="text-[#525252] text-[10px]">{t("active")}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">TikTok Likes</p>
+          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokLikes")}</p>
           <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkLikes)}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">TikTok Posts</p>
+          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokPosts")}</p>
           <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkPosts)}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">Lemon8 Likes</p>
+          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Likes")}</p>
           <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmLikes)}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">Lemon8 Posts</p>
+          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Posts")}</p>
           <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmPosts)}</p>
         </div>
       </div>
@@ -123,7 +130,7 @@ export default function OwnerDashboard() {
           onChange={(e) => setFilterEmployee(e.target.value)}
           className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
         >
-          <option value="all">All Employees</option>
+          <option value="all">{t("allEmployees")}</option>
           {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
         <select
@@ -131,10 +138,10 @@ export default function OwnerDashboard() {
           onChange={(e) => setFilterAngle(e.target.value)}
           className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
         >
-          <option value="all">All Angles</option>
-          {angles.map((n) => <option key={n} value={n}>Angle {n} — {ANGLE_NAMES[n]}</option>)}
+          <option value="all">{t("allAngles")}</option>
+          {angles.map((n) => <option key={n} value={n}>{t("angle")} {n} — {ANGLE_NAMES[n]}</option>)}
         </select>
-        <p className="self-center text-xs text-[#525252]">{filtered.length} accounts</p>
+        <p className="self-center text-xs text-[#525252]">{filtered.length} {t("accounts")}</p>
       </div>
 
       {/* Table */}
@@ -142,14 +149,14 @@ export default function OwnerDashboard() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[#262626]">
-              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">Account</th>
-              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">Assigned To</th>
-              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">Angle</th>
-              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">Status</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK Likes</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK Posts</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM Likes</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM Posts</th>
+              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("account")}</th>
+              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("assignedTo")}</th>
+              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("angle")}</th>
+              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("status")}</th>
+              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("likes")}</th>
+              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("posts")}</th>
+              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("likes")}</th>
+              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("posts")}</th>
             </tr>
           </thead>
           <tbody>
@@ -202,7 +209,7 @@ export default function OwnerDashboard() {
           </tbody>
           <tfoot>
             <tr className="border-t border-[#262626]">
-              <td className="px-4 py-3 text-[#525252] text-xs font-semibold" colSpan={4}>TOTAL</td>
+              <td className="px-4 py-3 text-[#525252] text-xs font-semibold" colSpan={4}>{t("total")}</td>
               <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkLikes)}</td>
               <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkPosts)}</td>
               <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(lmLikes)}</td>

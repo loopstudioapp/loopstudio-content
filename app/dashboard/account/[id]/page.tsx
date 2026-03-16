@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react";
 import { supabase, Account, DailyMetric } from "@/lib/supabase";
 import { formatNumber, formatDelta, ANGLE_NAMES } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import PromptGenerator from "@/components/PromptGenerator";
 
@@ -11,6 +12,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
   const [account, setAccount] = useState<Account | null>(null);
   const [allMetrics, setAllMetrics] = useState<DailyMetric[]>([]);
   const router = useRouter();
+  const { t } = useLang();
 
   useEffect(() => {
     Promise.all([
@@ -25,7 +27,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
   if (!account) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-[#737373]">Loading...</div>
+        <div className="text-[#737373]">{t("loading")}</div>
       </div>
     );
   }
@@ -36,7 +38,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
   return (
     <div className="min-h-screen p-6 max-w-2xl mx-auto">
       <button onClick={() => router.back()} className="text-[#737373] hover:text-white text-sm mb-6 inline-block">
-        &larr; Back
+        &larr; {t("back")}
       </button>
 
       {/* Account header */}
@@ -59,12 +61,12 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <InfoRow label="Angle" value={`${account.angle} — ${ANGLE_NAMES[account.angle]}`} />
-          <InfoRow label="Device" value={account.device} />
-          <InfoRow label="Email" value={account.login_email} />
-          <InfoRow label="Login Method" value={account.login_method} />
-          <InfoRow label="App" value={account.app} />
-          <InfoRow label="Notes" value={account.notes} />
+          <InfoRow label={t("angle")} value={`${account.angle} — ${ANGLE_NAMES[account.angle]}`} />
+          <InfoRow label={t("device")} value={account.device} />
+          <InfoRow label={t("email")} value={account.login_email} />
+          <InfoRow label={t("loginMethod")} value={account.login_method} />
+          <InfoRow label={t("app")} value={account.app} />
+          <InfoRow label={t("notes")} value={account.notes} />
         </div>
       </div>
 
@@ -72,10 +74,10 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
       <div className="bg-[#141414] border border-[#262626] rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-            Prompt Generator — Angle {account.angle}
+            {t("promptGenerator")} — {t("angle")} {account.angle}
           </h2>
           <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="text-xs text-[#22c55e] hover:underline">
-            Open ChatGPT &rarr;
+            {t("openChatGPT")} &rarr;
           </a>
         </div>
         <PromptGenerator angle={account.angle} />
@@ -113,14 +115,14 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-            Metrics History
+            {t("metricsHistory")}
           </h2>
-          <p className="text-[10px] text-[#525252]">Auto-updated daily at 7:00 AM VN</p>
+          <p className="text-[10px] text-[#525252]">{t("autoUpdated")}</p>
         </div>
 
         {allMetrics.length === 0 ? (
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-6">
-            <p className="text-[#525252] text-sm italic">No metrics recorded yet</p>
+            <p className="text-[#525252] text-sm italic">{t("noMetricsRecorded")}</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
@@ -159,6 +161,7 @@ function PlatformCard({
   followers: number; following: number; likes: number; posts: number;
   prevFollowers: number | null; prevLikes: number | null; prevPosts: number | null;
 }) {
+  const { t } = useLang();
   return (
     <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -166,10 +169,10 @@ function PlatformCard({
         <h3 className="text-sm font-semibold" style={{ color }}>{name}</h3>
       </div>
       <div className="space-y-3">
-        <StatRow label="Followers" value={followers} delta={formatDelta(followers, prevFollowers)} />
-        <StatRow label="Following" value={following} delta="" />
-        <StatRow label="Likes" value={likes} delta={formatDelta(likes, prevLikes)} />
-        <StatRow label="Posts" value={posts} delta={formatDelta(posts, prevPosts)} />
+        <StatRow label={t("followers")} value={followers} delta={formatDelta(followers, prevFollowers)} />
+        <StatRow label={t("following")} value={following} delta="" />
+        <StatRow label={t("likes")} value={likes} delta={formatDelta(likes, prevLikes)} />
+        <StatRow label={t("posts")} value={posts} delta={formatDelta(posts, prevPosts)} />
       </div>
     </div>
   );
@@ -217,7 +220,6 @@ function MetricsChart({
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
-  // Find global min/max
   let allVals: number[] = [];
   for (const line of lines) allVals = allVals.concat(sorted.map(line.getValue));
   const minV = Math.min(0, ...allVals);
@@ -232,7 +234,6 @@ function MetricsChart({
       y: PAD.top + chartH - ((getValue(m) - minV) / range) * chartH,
     }));
 
-  // Smooth curve via catmull-rom to bezier
   const toSmoothPath = (points: { x: number; y: number }[]) => {
     if (points.length < 2) return "";
     if (points.length === 2) return `M${points[0].x},${points[0].y}L${points[1].x},${points[1].y}`;
@@ -258,13 +259,11 @@ function MetricsChart({
     return `${line}L${points[points.length - 1].x},${bottom}L${points[0].x},${bottom}Z`;
   };
 
-  // Y-axis: 4 ticks
   const yTicks = Array.from({ length: 4 }, (_, i) => {
     const v = maxV - (i / 3) * (maxV - minV);
     return { value: Math.round(v), y: PAD.top + (i / 3) * chartH };
   });
 
-  // X-axis labels
   const xLabels: { x: number; label: string }[] = [];
   if (sorted.length >= 1) xLabels.push({ x: PAD.left, label: sorted[0].date.slice(5) });
   if (sorted.length >= 3) {
@@ -273,7 +272,6 @@ function MetricsChart({
   }
   if (sorted.length >= 2) xLabels.push({ x: PAD.left + (sorted.length - 1) * xStep, label: sorted[sorted.length - 1].date.slice(5) });
 
-  // Latest values for display
   const latestValues = lines.map((l) => ({
     label: l.label,
     color: l.color,
@@ -282,13 +280,11 @@ function MetricsChart({
 
   return (
     <div className="bg-[#141414] border border-[#262626] rounded-xl p-5 overflow-hidden">
-      {/* Header */}
       <div className="flex items-center gap-2 mb-1">
         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: accentColor }} />
         <span className="text-sm font-semibold" style={{ color: accentColor }}>{title}</span>
       </div>
 
-      {/* Latest values */}
       <div className="flex gap-4 mb-4">
         {latestValues.map((v) => (
           <div key={v.label}>
@@ -298,7 +294,6 @@ function MetricsChart({
         ))}
       </div>
 
-      {/* Chart */}
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet">
         <defs>
           {lines.map((l, idx) => (
@@ -309,7 +304,6 @@ function MetricsChart({
           ))}
         </defs>
 
-        {/* Grid lines */}
         {yTicks.map((t, i) => (
           <g key={i}>
             <line x1={PAD.left} y1={t.y} x2={W - PAD.right} y2={t.y} stroke="#1f1f1f" strokeWidth={0.5} strokeDasharray="4,4" />
@@ -317,13 +311,11 @@ function MetricsChart({
           </g>
         ))}
 
-        {/* Area fills (first line only for cleanliness) */}
         {lines.slice(0, 1).map((l, idx) => {
           const pts = getXY(l.getValue);
           return <path key={idx} d={toAreaPath(pts)} fill={`url(#grad-${title}-${idx})`} />;
         })}
 
-        {/* Smooth lines */}
         {lines.map((l, idx) => {
           const pts = getXY(l.getValue);
           return (
@@ -340,7 +332,6 @@ function MetricsChart({
           );
         })}
 
-        {/* End dots with glow */}
         {lines.map((l, idx) => {
           const pts = getXY(l.getValue);
           const last = pts[pts.length - 1];
@@ -352,13 +343,11 @@ function MetricsChart({
           );
         })}
 
-        {/* X-axis labels */}
         {xLabels.map((xl, i) => (
           <text key={i} x={xl.x} y={H - 6} textAnchor="middle" fill="#3a3a3a" fontSize={9} fontFamily="system-ui">{xl.label}</text>
         ))}
       </svg>
 
-      {/* Legend */}
       <div className="flex gap-4 mt-2">
         {lines.map((l) => (
           <span key={l.label} className="flex items-center gap-1.5 text-[10px] text-[#525252]">

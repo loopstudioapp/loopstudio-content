@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { LangProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "Loop Studio",
@@ -14,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#0a0a0a] text-[#e5e5e5] antialiased">
-        {children}
+        <LangProvider>{children}</LangProvider>
       </body>
     </html>
   );

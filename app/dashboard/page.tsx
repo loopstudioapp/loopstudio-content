@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, Account, DailyMetric } from "@/lib/supabase";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 import Link from "next/link";
+import Tutorial from "@/components/Tutorial";
 
 function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
@@ -18,7 +20,9 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<Record<string, MetricPair>>({});
   const [employeeName, setEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showTutorial, setShowTutorial] = useState(false);
   const router = useRouter();
+  const { lang, setLang, t } = useLang();
 
   useEffect(() => {
     const eid = getCookie("employee_id");
@@ -34,7 +38,6 @@ export default function Dashboard() {
       .order("username")
       .then(async ({ data: accs }) => {
         setAccounts(accs || []);
-        // Fetch latest 2 metrics for each account
         const metricsMap: Record<string, MetricPair> = {};
         if (accs) {
           await Promise.all(
@@ -65,29 +68,45 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-[#737373]">Loading...</div>
+        <div className="text-[#737373]">{t("loading")}</div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen p-6 max-w-4xl mx-auto">
+      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-bold text-white">Hey, {employeeName}</h1>
-          <p className="text-sm text-[#737373]">{accounts.length} accounts</p>
+          <h1 className="text-xl font-bold text-white">{t("hey")} {employeeName}</h1>
+          <p className="text-sm text-[#737373]">{accounts.length} {t("accounts")}</p>
         </div>
-        <button
-          onClick={() => {
-            document.cookie = "employee_id=; path=/; max-age=0";
-            document.cookie = "employee_name=; path=/; max-age=0";
-            router.push("/");
-          }}
-          className="px-4 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
-        >
-          Logout
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowTutorial(true)}
+            className="px-3 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
+          >
+            {t("tutorial")}
+          </button>
+          <button
+            onClick={() => setLang(lang === "en" ? "vi" : "en")}
+            className="px-3 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
+          >
+            {lang === "en" ? "VN" : "EN"}
+          </button>
+          <button
+            onClick={() => {
+              document.cookie = "employee_id=; path=/; max-age=0";
+              document.cookie = "employee_name=; path=/; max-age=0";
+              router.push("/");
+            }}
+            className="px-3 py-2 bg-[#1a1a1a] text-[#737373] text-sm font-semibold rounded-lg border border-[#333] hover:text-white transition-colors"
+          >
+            {t("logout")}
+          </button>
+        </div>
       </div>
 
       {/* Account groups by angle */}
@@ -99,7 +118,7 @@ export default function Dashboard() {
               style={{ backgroundColor: ANGLE_COLORS[Number(angle)] }}
             />
             <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-              Angle {angle} — {ANGLE_NAMES[Number(angle)]}
+              {t("angle")} {angle} — {ANGLE_NAMES[Number(angle)]}
             </h2>
           </div>
 
@@ -136,13 +155,13 @@ export default function Dashboard() {
 
                   {lat ? (
                     <div className="grid grid-cols-2 gap-2">
-                      <MetricBox label="Followers" value={lat.followers} delta={formatDelta(lat.followers, prev?.followers ?? null)} />
-                      <MetricBox label="Likes" value={lat.total_likes} delta={formatDelta(lat.total_likes, prev?.total_likes ?? null)} />
-                      <MetricBox label="Posts" value={lat.posts} delta={formatDelta(lat.posts, prev?.posts ?? null)} />
-                      <MetricBox label="Following" value={lat.following} delta={formatDelta(lat.following, prev?.following ?? null)} />
+                      <MetricBox label={t("followers")} value={lat.followers} delta={formatDelta(lat.followers, prev?.followers ?? null)} />
+                      <MetricBox label={t("likes")} value={lat.total_likes} delta={formatDelta(lat.total_likes, prev?.total_likes ?? null)} />
+                      <MetricBox label={t("posts")} value={lat.posts} delta={formatDelta(lat.posts, prev?.posts ?? null)} />
+                      <MetricBox label={t("following")} value={lat.following} delta={formatDelta(lat.following, prev?.following ?? null)} />
                     </div>
                   ) : (
-                    <p className="text-[#525252] text-xs italic">No metrics yet</p>
+                    <p className="text-[#525252] text-xs italic">{t("noMetrics")}</p>
                   )}
                 </Link>
               );
@@ -153,7 +172,7 @@ export default function Dashboard() {
 
       {accounts.length === 0 && (
         <div className="text-center py-20 text-[#737373]">
-          No accounts assigned yet. Ask your admin to set up your accounts.
+          {t("noAccounts")}
         </div>
       )}
     </div>
