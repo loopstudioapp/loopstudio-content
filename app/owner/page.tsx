@@ -77,7 +77,7 @@ export default function OwnerDashboard() {
   return (
     <div className="min-h-screen p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="text-xl font-bold text-white">Loop Studio</h1>
           <p className="text-sm text-[#525252]">{t("ownerOverview")}</p>
@@ -99,7 +99,7 @@ export default function OwnerDashboard() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-5 gap-3 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8">
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
           <p className="text-[#525252] text-[10px] uppercase tracking-wider">{t("accountsLink")}</p>
           <p className="text-white text-2xl font-bold mt-1">{activeCount}<span className="text-[#525252] text-sm font-normal">/{filtered.length}</span></p>
@@ -124,7 +124,7 @@ export default function OwnerDashboard() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 mb-4">
+      <div className="flex flex-wrap gap-3 mb-4">
         <select
           value={filterEmployee}
           onChange={(e) => setFilterEmployee(e.target.value)}
@@ -145,8 +145,8 @@ export default function OwnerDashboard() {
       </div>
 
       {/* Table */}
-      <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-[#262626]">
               <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("account")}</th>

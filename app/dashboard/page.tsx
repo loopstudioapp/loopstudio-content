@@ -74,7 +74,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen p-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="text-xl font-bold text-white">{t("hey")} {employeeName}</h1>
           <p className="text-sm text-[#737373]">{accounts.length} {t("accounts")}</p>

@@ -114,7 +114,7 @@ export default function AccountsPage() {
 
   return (
     <div className="min-h-screen p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="text-xl font-bold text-white">{t("accountsLink")}</h1>
           <p className="text-sm text-[#525252]">{t("manageEmployeesAccounts")}</p>

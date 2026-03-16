@@ -85,7 +85,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
 
       {/* Platform stats side by side */}
       {latest && (
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
           <PlatformCard
             name="TikTok"
             color="#ff0050"
@@ -125,7 +125,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
             <p className="text-[#525252] text-sm italic">{t("noMetricsRecorded")}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <MetricsChart
               title="TikTok"
               accentColor="#ff0050"
