@@ -121,11 +121,11 @@ async function sendTelegramReport(date: string, allMetrics: AccountMetrics[]) {
   msg += `\n📋 *Overall*\n\n`;
   msg += `🎵 *TikTok*\n`;
   msg += `Followers: ${fmt(totals.tkFollowers)}${diff(totals.tkFollowers, totals.prevTkFollowers)}\n`;
-  msg += `Total Likes: ${fmt(totals.tkLikes)}${diff(totals.tkLikes, totals.prevTkLikes)}\n`;
-  msg += `Videos: ${fmt(totals.tkPosts)}${diff(totals.tkPosts, totals.prevTkPosts)}\n\n`;
+  msg += `Likes: ${fmt(totals.tkLikes)}${diff(totals.tkLikes, totals.prevTkLikes)}\n`;
+  msg += `Posts: ${fmt(totals.tkPosts)}${diff(totals.tkPosts, totals.prevTkPosts)}\n\n`;
   msg += `🍋 *Lemon8*\n`;
   msg += `Followers: ${fmt(totals.lmFollowers)}${diff(totals.lmFollowers, totals.prevLmFollowers)}\n`;
-  msg += `Total Likes: ${fmt(totals.lmLikes)}${diff(totals.lmLikes, totals.prevLmLikes)}\n`;
+  msg += `Likes: ${fmt(totals.lmLikes)}${diff(totals.lmLikes, totals.prevLmLikes)}\n`;
   msg += `Posts: ${fmt(totals.lmPosts)}${diff(totals.lmPosts, totals.prevLmPosts)}\n`;
 
   for (const m of allMetrics) {
@@ -133,11 +133,11 @@ async function sendTelegramReport(date: string, allMetrics: AccountMetrics[]) {
     msg += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
     msg += `🎵 *TikTok* — [${m.username}](https://www.tiktok.com/@${handle})\n\n`;
     msg += `Followers: ${fmt(m.followers)}${diff(m.followers, m.prev_followers)}\n`;
-    msg += `Total Likes: ${fmt(m.total_likes)}${diff(m.total_likes, m.prev_total_likes)}\n`;
-    msg += `Videos: ${fmt(m.posts)}${diff(m.posts, m.prev_posts)}\n\n`;
+    msg += `Likes: ${fmt(m.total_likes)}${diff(m.total_likes, m.prev_total_likes)}\n`;
+    msg += `Posts: ${fmt(m.posts)}${diff(m.posts, m.prev_posts)}\n\n`;
     msg += `🍋 *Lemon8* — [${m.username}](https://www.lemon8-app.com/@${handle})\n\n`;
     msg += `Followers: ${fmt(m.lm8_followers)}${diff(m.lm8_followers, m.prev_lm8_followers)}\n`;
-    msg += `Total Likes: ${fmt(m.lm8_total_likes)}${diff(m.lm8_total_likes, m.prev_lm8_total_likes)}\n`;
+    msg += `Likes: ${fmt(m.lm8_total_likes)}${diff(m.lm8_total_likes, m.prev_lm8_total_likes)}\n`;
     msg += `Posts: ${fmt(m.lm8_posts)}${diff(m.lm8_posts, m.prev_lm8_posts)}\n`;
   }
 
