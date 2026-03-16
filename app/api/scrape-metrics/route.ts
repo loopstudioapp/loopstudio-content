@@ -33,7 +33,7 @@ async function scrapeLemon8(handle: string) {
   const html = await resp.text();
 
   // Lemon8 embeds URL-encoded JSON in a script with loaderData
-  const scripts = html.match(/<script[^>]*>(.*?)<\/script>/gs) || [];
+  const scripts = html.match(/<script[^>]*>[\s\S]*?<\/script>/g) || [];
   for (const script of scripts) {
     const inner = script.replace(/<\/?script[^>]*>/g, "");
     if (!inner.includes("loaderData")) continue;
