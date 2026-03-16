@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/content/api/cron/pull-metrics",
+      "path": "/api/cron/pull-metrics",
       "schedule": "0 0 * * *"
     }
   ]
