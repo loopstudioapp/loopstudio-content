@@ -15,6 +15,9 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
   const { t } = useLang();
 
   useEffect(() => {
+    const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
+    if (!match) { router.push("/"); return; }
+
     Promise.all([
       supabase.from("accounts").select("*").eq("id", id).single(),
       supabase.from("daily_metrics").select("*").eq("account_id", id).order("date", { ascending: false }),

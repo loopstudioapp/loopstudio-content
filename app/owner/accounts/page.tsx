@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase, Employee, Account } from "@/lib/supabase";
 import { ANGLE_NAMES } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const AVATAR_COLORS = [
@@ -26,6 +27,12 @@ export default function AccountsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAccForm, setShowAccForm] = useState(false);
   const { lang, setLang, t } = useLang();
+  const router = useRouter();
+
+  useEffect(() => {
+    const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
+    if (!match) { router.push("/"); return; }
+  }, [router]);
 
   const load = () => {
     supabase.from("employees").select("*").order("name").then(({ data }) => setEmployees(data || []));

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase, Employee, Account, DailyMetric } from "@/lib/supabase";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type MetricPair = { latest: DailyMetric | null; previous: DailyMetric | null };
@@ -16,6 +17,12 @@ export default function OwnerDashboard() {
   const [filterEmployee, setFilterEmployee] = useState("all");
   const [filterAngle, setFilterAngle] = useState("all");
   const { lang, setLang, t } = useLang();
+  const router = useRouter();
+
+  useEffect(() => {
+    const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
+    if (!match) { router.push("/"); return; }
+  }, [router]);
 
   const load = async () => {
     const [{ data: emps }, { data: accs }] = await Promise.all([

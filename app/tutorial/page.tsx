@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 
 const STEP_KEYS = ["step1", "step2", "step3", "step4", "step5", "step6", "step7", "step8"] as const;
@@ -7,6 +9,12 @@ const STEP_ICONS = ["\uD83C\uDFAF", "\uD83D\uDDBC\uFE0F", "\uD83D\uDD04", "\uD83
 
 export default function TutorialPage() {
   const { t } = useLang();
+  const router = useRouter();
+
+  useEffect(() => {
+    const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
+    if (!match) { router.push("/"); return; }
+  }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
