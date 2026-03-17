@@ -13,7 +13,7 @@ const AVATAR_COLORS = [
 
 const emptyAccForm = {
   employee_id: "", angle: "1", platform: "TikTok / Lemon8", username: "",
-  login_email: "", login_method: "Email", app: "Roomy AI", device: "", status: "Active", notes: "",
+  login_email: "", login_method: "Email", app: "Loop Studio", device: "", status: "Active", notes: "",
 };
 
 export default function AccountsPage() {
