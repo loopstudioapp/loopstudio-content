@@ -1,13 +1,6 @@
 import { pick, pickN } from "@/lib/utils";
 import { SPACE_TYPES, HOME_STYLES as A1_HOME_STYLES, FLOORINGS, LIGHTINGS as A1_LIGHTINGS, VIBES, A1_TITLES, A1_CAPTIONS } from "@/lib/prompts/angle1";
 import { ROOM_TYPES, ROOM_CONDITIONS, ROOM_DETAILS, REMODEL_STYLES, A2_TITLES, A2_CAPTIONS, HOME_STYLES as A2_HOME_STYLES, LIGHTINGS as A2_LIGHTINGS } from "@/lib/prompts/angle2";
-import { HASHTAGS } from "@/lib/prompts/shared";
-
-function addHashtags(caption: string): string {
-  const n = Math.floor(Math.random() * 4);
-  const tags = n > 0 ? " " + pickN(HASHTAGS, n).join(" ") : "";
-  return caption + tags;
-}
 
 export interface GeneratedContent {
   title: string;
@@ -31,7 +24,7 @@ export function generateAngle1Content(): GeneratedContent {
 
   return {
     title: pick(A1_TITLES),
-    caption: addHashtags(pick(A1_CAPTIONS)),
+    caption: pick(A1_CAPTIONS),
     basePrompt,
     transformPrompts,
   };
@@ -53,7 +46,7 @@ export function generateAngle2Content(): GeneratedContent {
 
   return {
     title: pick(A2_TITLES),
-    caption: addHashtags(pick(A2_CAPTIONS)),
+    caption: pick(A2_CAPTIONS),
     basePrompt,
     transformPrompts,
   };
