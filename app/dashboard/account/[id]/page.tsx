@@ -5,18 +5,20 @@ import { supabase, Account, DailyMetric } from "@/lib/supabase";
 import { formatNumber, formatDelta, ANGLE_NAMES } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
-import PromptGenerator from "@/components/PromptGenerator";
+import ContentGenerator from "@/components/ContentGenerator";
 
 export default function AccountDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [account, setAccount] = useState<Account | null>(null);
   const [allMetrics, setAllMetrics] = useState<DailyMetric[]>([]);
+  const [employeeId, setEmployeeId] = useState<string>("");
   const router = useRouter();
   const { t } = useLang();
 
   useEffect(() => {
     const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
     if (!match) { router.push("/"); return; }
+    setEmployeeId(match[2]);
 
     Promise.all([
       supabase.from("accounts").select("*").eq("id", id).single(),
@@ -73,17 +75,14 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
         </div>
       </div>
 
-      {/* Prompt Generator */}
+      {/* Content Generator */}
       <div className="bg-[#141414] border border-[#262626] rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
-            {t("promptGenerator")} — {t("angle")} {account.angle}
+            {t("contentGenerator")} — {t("angle")} {account.angle}
           </h2>
-          <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="text-xs text-[#22c55e] hover:underline">
-            {t("openChatGPT")} &rarr;
-          </a>
         </div>
-        <PromptGenerator angle={account.angle} />
+        <ContentGenerator accountId={id} employeeId={employeeId} angle={account.angle} />
       </div>
 
       {/* Platform stats side by side */}

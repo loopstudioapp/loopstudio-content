@@ -35,6 +35,17 @@ export type Account = {
   device: string;
   status: string;
   notes: string;
+  telegram_chat_id: string | null;
+  created_at: string;
+};
+
+export type ContentGeneration = {
+  id: string;
+  account_id: string;
+  employee_id: string;
+  date: string;
+  title: string;
+  caption: string;
   created_at: string;
 };
 

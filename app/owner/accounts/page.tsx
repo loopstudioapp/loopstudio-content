@@ -15,6 +15,7 @@ const AVATAR_COLORS = [
 const emptyAccForm = {
   employee_id: "", angle: "1", platform: "TikTok / Lemon8", username: "",
   login_email: "", login_method: "Email", app: "Loop Studio", device: "", status: "Active", notes: "",
+  telegram_chat_id: "",
 };
 
 export default function AccountsPage() {
@@ -92,6 +93,7 @@ export default function AccountsPage() {
       device: acc.device,
       status: acc.status,
       notes: acc.notes,
+      telegram_chat_id: acc.telegram_chat_id || "",
     });
     setShowAccForm(true);
   };
@@ -271,6 +273,7 @@ export default function AccountsPage() {
                   <option value="Banned">Banned</option>
                 </select>
               </div>
+              <Input label={t("telegramChatId")} value={accForm.telegram_chat_id} onChange={(v) => setAccForm({ ...accForm, telegram_chat_id: v })} placeholder={t("optionalAutoCreated")} />
               <div className="col-span-2">
                 <Input label={t("notes")} value={accForm.notes} onChange={(v) => setAccForm({ ...accForm, notes: v })} />
               </div>

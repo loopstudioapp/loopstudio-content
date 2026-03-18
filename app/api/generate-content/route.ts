@@ -1,0 +1,202 @@
+import { NextResponse } from "next/server";
+import OpenAI from "openai";
+import { supabase } from "@/lib/supabase";
+import { generateContent } from "@/lib/generate-prompts";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const MAX_DAILY = 3;
+
+async function createTelegramChannel(name: string): Promise<string | null> {
+  if (!TELEGRAM_BOT_TOKEN) return null;
+
+  // Create a new group with the bot — we use createChannel for a public-ish channel
+  // Actually Telegram bots can't create channels/groups directly via API.
+  // Instead we'll just send to the main admin chat and note the account.
+  // The user will need to provide chat IDs or we use the main chat.
+  return null;
+}
+
+async function getOrCreateChatId(account: { id: string; username: string; angle: number; telegram_chat_id: string | null }): Promise<string | null> {
+  if (account.telegram_chat_id) return account.telegram_chat_id;
+
+  // Telegram Bot API cannot create groups/channels programmatically.
+  // Fall back to admin chat ID.
+  const fallbackChatId = process.env.TELEGRAM_CHAT_ID;
+  if (!fallbackChatId) return null;
+
+  // Store the fallback so we don't check again
+  await supabase
+    .from("accounts")
+    .update({ telegram_chat_id: fallbackChatId })
+    .eq("id", account.id);
+
+  return fallbackChatId;
+}
+
+async function sendPhotoToTelegram(chatId: string, imageBase64: string, caption: string) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+
+  const imageBuffer = Buffer.from(imageBase64, "base64");
+  const blob = new Blob([imageBuffer], { type: "image/png" });
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("photo", blob, "image.png");
+  form.append("caption", caption);
+
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+async function sendMessageToTelegram(chatId: string, text: string) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "Markdown",
+    }),
+  });
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const accountId = searchParams.get("account_id");
+  if (!accountId) return NextResponse.json({ error: "Missing account_id" }, { status: 400 });
+
+  const today = new Date().toISOString().split("T")[0];
+  const { count } = await supabase
+    .from("content_generations")
+    .select("*", { count: "exact", head: true })
+    .eq("account_id", accountId)
+    .eq("date", today);
+
+  return NextResponse.json({ used: count ?? 0, max: MAX_DAILY });
+}
+
+export async function POST(req: Request) {
+  try {
+    const { account_id, employee_id } = await req.json();
+
+    if (!account_id || !employee_id) {
+      return NextResponse.json({ error: "Missing account_id or employee_id" }, { status: 400 });
+    }
+
+    // Fetch account
+    const { data: account, error: accError } = await supabase
+      .from("accounts")
+      .select("*")
+      .eq("id", account_id)
+      .single();
+
+    if (accError || !account) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+
+    // Check daily limit
+    const today = new Date().toISOString().split("T")[0];
+    const { count } = await supabase
+      .from("content_generations")
+      .select("*", { count: "exact", head: true })
+      .eq("account_id", account_id)
+      .eq("date", today);
+
+    const used = count ?? 0;
+    if (used >= MAX_DAILY) {
+      return NextResponse.json({
+        error: "Daily limit reached",
+        used,
+        max: MAX_DAILY,
+      }, { status: 429 });
+    }
+
+    // Get Telegram chat ID
+    const chatId = await getOrCreateChatId(account);
+
+    // Generate prompts from existing data
+    const content = generateContent(account.angle);
+
+    // Step 1: Generate base image
+    const baseResult = await openai.images.generate({
+      model: "gpt-image-1.5",
+      prompt: content.basePrompt,
+      quality: "medium",
+      size: "1024x1536",
+      n: 1,
+    });
+
+    const baseImageB64 = baseResult.data?.[0]?.b64_json;
+    if (!baseImageB64) {
+      return NextResponse.json({ error: "Failed to generate base image" }, { status: 500 });
+    }
+
+    // Step 2: Generate 5 transform images in parallel using base image
+    const baseBuffer = Buffer.from(baseImageB64, "base64");
+    const baseFile = new File([baseBuffer], "base.png", { type: "image/png" });
+
+    const transformResults = await Promise.all(
+      content.transformPrompts.map((prompt) =>
+        openai.images.edit({
+          model: "gpt-image-1.5",
+          image: baseFile,
+          prompt,
+          quality: "medium",
+          size: "1024x1536",
+          n: 1,
+        })
+      )
+    );
+
+    const transformImages = transformResults.map((r) => r.data?.[0]?.b64_json).filter(Boolean) as string[];
+
+    // Step 3: Send to Telegram
+    if (chatId) {
+      // Send title + caption first
+      const handle = account.username.replace(/^@/, "");
+      await sendMessageToTelegram(
+        chatId,
+        `📸 *New Content — @${handle}*\n\n📝 *Title:* ${content.title}\n\n📋 *Caption:* ${content.caption}`
+      );
+
+      // Send base image
+      await sendPhotoToTelegram(chatId, baseImageB64, "📷 Base Image (1/6)");
+
+      // Send transform images
+      for (let i = 0; i < transformImages.length; i++) {
+        await sendPhotoToTelegram(chatId, transformImages[i], `🎨 Transform ${i + 1} (${i + 2}/6)`);
+      }
+    }
+
+    // Step 4: Record generation
+    await supabase.from("content_generations").insert({
+      account_id,
+      employee_id,
+      date: today,
+      title: content.title,
+      caption: content.caption,
+    });
+
+    return NextResponse.json({
+      success: true,
+      title: content.title,
+      caption: content.caption,
+      imagesGenerated: 1 + transformImages.length,
+      sentToTelegram: !!chatId,
+      used: used + 1,
+      max: MAX_DAILY,
+      remaining: MAX_DAILY - used - 1,
+    });
+  } catch (error) {
+    console.error("Generate content error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}

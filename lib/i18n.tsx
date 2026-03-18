@@ -105,6 +105,21 @@ const translations = {
   "noDevice": { en: "No device", vi: "Ch\u01b0a c\u00f3 thi\u1ebft b\u1ecb" },
   "deleteEmployeeConfirm": { en: "Delete this employee and all their accounts?", vi: "X\u00f3a nh\u00e2n vi\u00ean v\u00e0 t\u1ea5t c\u1ea3 t\u00e0i kho\u1ea3n?" },
   "deleteAccountConfirm": { en: "Delete this account and all its metrics?", vi: "X\u00f3a t\u00e0i kho\u1ea3n v\u00e0 t\u1ea5t c\u1ea3 s\u1ed1 li\u1ec7u?" },
+
+  // Content Generator
+  "contentGenerator": { en: "Content Generator", vi: "T\u1ea1o N\u1ed9i Dung" },
+  "generateContent": { en: "Generate Content & Send to Telegram", vi: "T\u1ea1o N\u1ed9i Dung & G\u1eedi Telegram" },
+  "generating": { en: "Generating...", vi: "\u0110ang t\u1ea1o..." },
+  "generatingBase": { en: "Generating base image...", vi: "\u0110ang t\u1ea1o \u1ea3nh g\u1ed1c..." },
+  "generatingTransforms": { en: "Generating transform images...", vi: "\u0110ang t\u1ea1o \u1ea3nh bi\u1ebfn \u0111\u1ed5i..." },
+  "sendingToTelegram": { en: "Sending to Telegram...", vi: "\u0110ang g\u1eedi Telegram..." },
+  "generationsToday": { en: "Generations today", vi: "S\u1ed1 l\u1ea7n t\u1ea1o h\u00f4m nay" },
+  "remaining": { en: "remaining", vi: "c\u00f2n l\u1ea1i" },
+  "dailyLimitReached": { en: "Daily limit reached (3/3)", vi: "\u0110\u00e3 \u0111\u1ea1t gi\u1edbi h\u1ea1n h\u00f4m nay (3/3)" },
+  "contentSent": { en: "Content sent to Telegram!", vi: "\u0110\u00e3 g\u1eedi n\u1ed9i dung l\u00ean Telegram!" },
+  "imagesSentToTelegram": { en: "images sent to Telegram", vi: "\u1ea3nh \u0111\u00e3 g\u1eedi l\u00ean Telegram" },
+  "telegramChatId": { en: "Telegram Chat ID", vi: "Telegram Chat ID" },
+  "optionalAutoCreated": { en: "Optional \u2014 auto-assigned if empty", vi: "T\u00f9y ch\u1ecdn \u2014 t\u1ef1 g\u00e1n n\u1ebfu tr\u1ed1ng" },
 } as const;
 
 type Key = keyof typeof translations;
