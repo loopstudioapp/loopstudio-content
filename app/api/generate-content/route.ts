@@ -34,18 +34,25 @@ async function getOrCreateChatId(account: { id: string; username: string; angle:
   return fallbackChatId;
 }
 
-async function sendPhotoToTelegram(chatId: string, imageBase64: string, caption: string) {
-  if (!TELEGRAM_BOT_TOKEN) return;
-
-  const imageBuffer = Buffer.from(imageBase64, "base64");
-  const blob = new Blob([imageBuffer], { type: "image/png" });
+async function sendMediaGroupToTelegram(chatId: string, images: string[]) {
+  if (!TELEGRAM_BOT_TOKEN || images.length === 0) return;
 
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("photo", blob, "image.png");
-  form.append("caption", caption);
 
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+  const media = images.map((_, i) => ({
+    type: "photo",
+    media: `attach://photo${i}`,
+  }));
+  form.append("media", JSON.stringify(media));
+
+  for (let i = 0; i < images.length; i++) {
+    const buf = Buffer.from(images[i], "base64");
+    const blob = new Blob([buf], { type: "image/png" });
+    form.append(`photo${i}`, blob, `photo${i}.png`);
+  }
+
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMediaGroup`, {
     method: "POST",
     body: form,
   });
@@ -60,7 +67,6 @@ async function sendMessageToTelegram(chatId: string, text: string) {
     body: JSON.stringify({
       chat_id: chatId,
       text,
-      parse_mode: "Markdown",
     }),
   });
 }
@@ -155,22 +161,22 @@ export async function POST(req: Request) {
 
     const transformImages = transformResults.map((r) => r.data?.[0]?.b64_json).filter(Boolean) as string[];
 
-    // Step 3: Send to Telegram
+    // Step 3: Send to Telegram (4 messages)
     if (chatId) {
-      // Send title + caption first
       const handle = account.username.replace(/^@/, "");
-      await sendMessageToTelegram(
-        chatId,
-        `📸 *New Content — @${handle}*\n\n📝 *Title:* ${content.title}\n\n📋 *Caption:* ${content.caption}`
-      );
 
-      // Send base image
-      await sendPhotoToTelegram(chatId, baseImageB64, "📷 Base Image (1/6)");
+      // Message 1: Header
+      await sendMessageToTelegram(chatId, `📸 New Content (${used + 1}/${MAX_DAILY}) — @${handle}`);
 
-      // Send transform images
-      for (let i = 0; i < transformImages.length; i++) {
-        await sendPhotoToTelegram(chatId, transformImages[i], `🎨 Transform ${i + 1} (${i + 2}/6)`);
-      }
+      // Message 2: Title only (easy copy-paste)
+      await sendMessageToTelegram(chatId, content.title);
+
+      // Message 3: Caption only (easy copy-paste)
+      await sendMessageToTelegram(chatId, content.caption);
+
+      // Message 4: All 6 images in one media group (compressed)
+      const allImages = [baseImageB64, ...transformImages];
+      await sendMediaGroupToTelegram(chatId, allImages);
     }
 
     // Step 4: Record generation
