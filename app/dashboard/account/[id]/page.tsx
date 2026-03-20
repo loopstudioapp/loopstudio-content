@@ -16,9 +16,10 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
   const { t } = useLang();
 
   useEffect(() => {
+    const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
     const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
-    if (!match) { router.push("/"); return; }
-    setEmployeeId(match[2]);
+    if (!hasAdmin && !match) { router.push("/"); return; }
+    if (match) setEmployeeId(match[2]);
 
     Promise.all([
       supabase.from("accounts").select("*").eq("id", id).single(),

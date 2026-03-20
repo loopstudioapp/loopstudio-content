@@ -12,8 +12,9 @@ export default function TutorialPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
-    if (!match) { router.push("/"); return; }
+    const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
+    const hasEmployee = document.cookie.match(/(^| )employee_id=([^;]+)/);
+    if (!hasAdmin && !hasEmployee) { router.push("/"); return; }
   }, [router]);
 
   return (
