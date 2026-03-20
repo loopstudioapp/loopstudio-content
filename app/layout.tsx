@@ -5,6 +5,7 @@ import { LangProvider } from "@/lib/i18n";
 export const metadata: Metadata = {
   title: "Loop Studio",
   description: "Content creator management platform",
+  icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({
