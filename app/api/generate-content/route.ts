@@ -125,21 +125,34 @@ export async function POST(req: Request) {
     // Get Telegram chat ID
     const chatId = await getOrCreateChatId(account);
 
-    // Generate prompts from existing data
-    const content = generateContent(account.angle);
+    // Generate prompts from existing data — retry if OpenAI safety filter rejects
+    let content = generateContent(account.angle);
+    let baseImageB64: string | undefined;
 
-    // Step 1: Generate base image
-    const baseResult = await openai.images.generate({
-      model: "gpt-image-1.5",
-      prompt: content.basePrompt,
-      quality: "medium",
-      size: "1024x1536",
-      n: 1,
-    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const baseResult = await openai.images.generate({
+          model: "gpt-image-1.5",
+          prompt: content.basePrompt,
+          quality: "medium",
+          size: "1024x1536",
+          n: 1,
+        });
+        baseImageB64 = baseResult.data?.[0]?.b64_json;
+        break;
+      } catch (e: unknown) {
+        const err = e as { status?: number; message?: string };
+        if (err.status === 400 && attempt < 2) {
+          // Safety filter — re-roll prompts
+          content = generateContent(account.angle);
+          continue;
+        }
+        throw e;
+      }
+    }
 
-    const baseImageB64 = baseResult.data?.[0]?.b64_json;
     if (!baseImageB64) {
-      return NextResponse.json({ error: "Failed to generate base image" }, { status: 500 });
+      return NextResponse.json({ error: "Failed to generate base image after retries" }, { status: 500 });
     }
 
     // Step 2: Generate 5 transform images in parallel using base image
@@ -147,16 +160,24 @@ export async function POST(req: Request) {
     const baseFile = new File([baseBuffer], "base.png", { type: "image/png" });
 
     const transformResults = await Promise.all(
-      content.transformPrompts.map((prompt) =>
-        openai.images.edit({
-          model: "gpt-image-1.5",
-          image: baseFile,
-          prompt,
-          quality: "medium",
-          size: "1024x1536",
-          n: 1,
-        })
-      )
+      content.transformPrompts.map(async (prompt) => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            return await openai.images.edit({
+              model: "gpt-image-1.5",
+              image: baseFile,
+              prompt,
+              quality: "medium",
+              size: "1024x1536",
+              n: 1,
+            });
+          } catch (e: unknown) {
+            const err = e as { status?: number };
+            if (err.status === 400 && attempt < 1) continue;
+            throw e;
+          }
+        }
+      })
     );
 
     const transformImages = transformResults.map((r) => r.data?.[0]?.b64_json).filter(Boolean) as string[];

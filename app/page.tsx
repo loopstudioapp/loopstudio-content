@@ -70,6 +70,7 @@ export default function ProfilePicker() {
         setTimeout(() => {
           if (isAdmin) {
             if (next === "8888") {
+              document.cookie = `admin=1; path=/; max-age=86400`;
               router.push("/owner");
             } else {
               setError(t("wrongPin"));
