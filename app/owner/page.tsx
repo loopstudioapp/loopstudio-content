@@ -97,6 +97,9 @@ export default function OwnerDashboard() {
           >
             {lang === "en" ? "VN" : "EN"}
           </button>
+          <Link href="/owner/pinterest" className="px-3 py-1.5 text-xs text-[#e60023] border border-[#e60023]/30 rounded-lg hover:bg-[#e60023]/10 transition-colors">
+            Pinterest
+          </Link>
           <Link href="/owner/accounts" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
             {t("accountsLink")}
           </Link>

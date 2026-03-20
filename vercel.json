@@ -15,6 +15,14 @@
     {
       "path": "/api/cron/post-reminder",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/pinterest-pipeline",
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/pinterest-retry",
+      "schedule": "0 19 * * *"
     }
   ]
 }
