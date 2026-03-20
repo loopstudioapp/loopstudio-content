@@ -117,6 +117,7 @@ export default function AccountsPage() {
 
   const deleteAccount = async (id: string) => {
     if (!confirm(t("deleteAccountConfirm"))) return;
+    await supabase.from("content_generations").delete().eq("account_id", id);
     await supabase.from("daily_metrics").delete().eq("account_id", id);
     await supabase.from("accounts").delete().eq("id", id);
     load();
