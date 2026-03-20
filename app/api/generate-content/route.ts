@@ -203,7 +203,7 @@ export async function POST(req: Request) {
     // Step 4: Record generation
     await supabase.from("content_generations").insert({
       account_id,
-      employee_id,
+      employee_id: employee_id === "admin" ? null : employee_id,
       date: today,
       title: content.title,
       caption: content.caption,

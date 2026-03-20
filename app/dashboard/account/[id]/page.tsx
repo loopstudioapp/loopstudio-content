@@ -19,7 +19,7 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
     const match = document.cookie.match(/(^| )employee_id=([^;]+)/);
     if (!hasAdmin && !match) { router.push("/"); return; }
-    if (match) setEmployeeId(match[2]);
+    setEmployeeId(match ? match[2] : "admin");
 
     Promise.all([
       supabase.from("accounts").select("*").eq("id", id).single(),
