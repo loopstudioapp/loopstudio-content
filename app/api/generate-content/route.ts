@@ -180,7 +180,7 @@ export async function POST(req: Request) {
       })
     );
 
-    const transformImages = transformResults.map((r) => r.data?.[0]?.b64_json).filter(Boolean) as string[];
+    const transformImages = transformResults.map((r) => r?.data?.[0]?.b64_json).filter(Boolean) as string[];
 
     // Step 3: Send to Telegram (4 messages)
     if (chatId) {
