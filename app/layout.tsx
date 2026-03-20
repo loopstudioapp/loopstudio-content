@@ -3,7 +3,7 @@ import "./globals.css";
 import { LangProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: "Loop Studio",
+  title: "Loop Content Generation",
   description: "Content creator management platform",
   icons: { icon: "/icon.svg" },
 };
