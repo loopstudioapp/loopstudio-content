@@ -364,11 +364,7 @@ export default function PinterestPage() {
             <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center">
               <p className="text-[#525252] mb-4">No Pinterest accounts yet</p>
               <button
-                onClick={() => {
-                  setTab("accounts");
-                  setShowForm(true);
-                  setForm(emptyForm);
-                }}
+                onClick={() => setTab("accounts")}
                 className="px-4 py-2 bg-[#e60023] text-white text-sm rounded-lg hover:bg-[#cc001f] transition-colors"
               >
                 + Add Account
@@ -425,21 +421,13 @@ export default function PinterestPage() {
                       {accScheduled + accPosted}/{acc.pins_per_day} pins today
                     </p>
 
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => triggerPipeline(acc.id)}
-                        disabled={running !== null}
-                        className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
-                      >
-                        {running === acc.id ? "Running..." : "▶ Run"}
-                      </button>
-                      <button
-                        onClick={() => openEdit(acc)}
-                        className="px-3 py-1.5 text-xs bg-[#262626] text-[#737373] rounded-lg hover:bg-[#333] hover:text-white transition-colors"
-                      >
-                        Edit
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => triggerPipeline(acc.id)}
+                      disabled={running !== null}
+                      className="w-full px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
+                    >
+                      {running === acc.id ? "Running..." : "▶ Run"}
+                    </button>
                   </div>
                 );
               })}
