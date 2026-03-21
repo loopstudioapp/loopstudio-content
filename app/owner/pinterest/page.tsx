@@ -108,7 +108,6 @@ export default function PinterestPage() {
 
   // Topics filter
   const [filterCat, setFilterCat] = useState("all");
-  const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
@@ -155,15 +154,6 @@ export default function PinterestPage() {
       setRunResult("Pipeline failed");
     }
     setRunning(null);
-  };
-
-  const seedTopics = async () => {
-    setSeeding(true);
-    const res = await fetch("/api/pinterest/topics", { method: "POST" });
-    const data = await res.json();
-    setRunResult(`Seeded ${data.seeded} topics`);
-    setSeeding(false);
-    loadAll();
   };
 
   /* ── Account CRUD ── */
@@ -365,13 +355,6 @@ export default function PinterestPage() {
               className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors"
             >
               {running === "all" ? "Running Pipeline..." : "▶ Run Pipeline Now"}
-            </button>
-            <button
-              onClick={seedTopics}
-              disabled={seeding}
-              className="px-4 py-2 bg-[#262626] text-white text-sm font-medium rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
-            >
-              {seeding ? "Seeding..." : "Seed Topics"}
             </button>
           </div>
 
@@ -719,13 +702,6 @@ export default function PinterestPage() {
               <option value="listicle">Listicle / Tips</option>
               <option value="visual_guide">Visual Guide</option>
             </select>
-            <button
-              onClick={seedTopics}
-              disabled={seeding}
-              className="px-4 py-1.5 bg-[#e60023] text-white text-xs font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors"
-            >
-              {seeding ? "Seeding..." : "Seed Topics from Code"}
-            </button>
             <span className="text-xs text-[#525252] self-center">{filteredTopics.length} topics</span>
           </div>
 
@@ -763,7 +739,7 @@ export default function PinterestPage() {
             </table>
           </div>
 
-          {topics.length === 0 && <p className="text-center text-[#525252] py-8">No topics seeded yet. Click &quot;Seed Topics from Code&quot; to populate.</p>}
+          {topics.length === 0 && <p className="text-center text-[#525252] py-8">No topics found.</p>}
         </>
       )}
     </div>
