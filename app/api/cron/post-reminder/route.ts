@@ -63,6 +63,9 @@ export async function GET(req: Request) {
     lines.push(`@${handle} — ${status}`);
   }
 
+  lines.push("");
+  lines.push("🔗 Check image API: https://wavespeed.ai/dashboard");
+
   const message = lines.join("\n");
 
   // Send to admin chat
