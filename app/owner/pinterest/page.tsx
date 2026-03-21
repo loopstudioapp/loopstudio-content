@@ -45,7 +45,7 @@ type PTopic = {
   last_used_at: string | null;
 };
 
-type Tab = "dashboard" | "pins" | "topics";
+type Tab = "dashboard" | "topics";
 
 /* ── Constants ── */
 const CONTENT_TYPE_LABELS: Record<string, string> = {
@@ -294,9 +294,6 @@ export default function PinterestPage() {
       <div className="flex flex-wrap gap-2 mb-6">
         <button className={tabCls("dashboard")} onClick={() => setTab("dashboard")}>
           Dashboard
-        </button>
-        <button className={tabCls("pins")} onClick={() => setTab("pins")}>
-          Pins ({pins.length})
         </button>
         <button className={tabCls("topics")} onClick={() => setTab("topics")}>
           Topics ({topics.length})
@@ -547,14 +544,10 @@ export default function PinterestPage() {
               })}
             </div>
           )}
-        </>
-      )}
 
-      {/* ═══════════════ PINS TAB ═══════════════ */}
-      {tab === "pins" && (
-        <>
-          {/* Filters */}
-          <div className="flex flex-wrap gap-3 mb-6">
+          {/* ── Pin History ── */}
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mt-8 mb-4">Pin History</h2>
+          <div className="flex flex-wrap gap-3 mb-4">
             <select
               className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
               value={filterAccount}
@@ -583,7 +576,6 @@ export default function PinterestPage() {
             <span className="text-xs text-[#525252] self-center">{filteredPins.length} pins</span>
           </div>
 
-          {/* Table */}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[700px]">
               <thead>
@@ -596,7 +588,7 @@ export default function PinterestPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredPins.slice(0, 100).map((pin) => (
+                {filteredPins.slice(0, 50).map((pin) => (
                   <tr key={pin.id} className="border-b border-[#262626]/50 hover:bg-[#141414]">
                     <td className="py-2 px-3 text-xs text-[#a3a3a3]">{accountMap[pin.account_id] || "—"}</td>
                     <td className="py-2 px-3">
@@ -622,9 +614,9 @@ export default function PinterestPage() {
             </table>
           </div>
 
-          {filteredPins.length === 0 && <p className="text-center text-[#525252] py-8">No pins found</p>}
-          {filteredPins.length > 100 && (
-            <p className="text-center text-[#525252] text-xs py-4">Showing first 100 of {filteredPins.length} pins</p>
+          {filteredPins.length === 0 && <p className="text-center text-[#525252] py-8">No pins yet</p>}
+          {filteredPins.length > 50 && (
+            <p className="text-center text-[#525252] text-xs py-4">Showing latest 50 of {filteredPins.length} pins</p>
           )}
         </>
       )}
