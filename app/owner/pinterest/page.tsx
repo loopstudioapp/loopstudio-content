@@ -45,7 +45,7 @@ type PTopic = {
   last_used_at: string | null;
 };
 
-type Tab = "dashboard" | "accounts" | "pins" | "topics";
+type Tab = "dashboard" | "pins" | "topics";
 
 /* ── Constants ── */
 const CONTENT_TYPE_LABELS: Record<string, string> = {
@@ -220,7 +220,6 @@ export default function PinterestPage() {
       app_store_url: acc.app_store_url || "https://apps.apple.com/app/roomy-ai",
     });
     setShowForm(true);
-    setTab("accounts");
   };
 
   const deleteAccount = async (id: string) => {
@@ -296,9 +295,6 @@ export default function PinterestPage() {
         <button className={tabCls("dashboard")} onClick={() => setTab("dashboard")}>
           Dashboard
         </button>
-        <button className={tabCls("accounts")} onClick={() => setTab("accounts")}>
-          Accounts ({accounts.length})
-        </button>
         <button className={tabCls("pins")} onClick={() => setTab("pins")}>
           Pins ({pins.length})
         </button>
@@ -317,7 +313,7 @@ export default function PinterestPage() {
         </div>
       )}
 
-      {/* ═══════════════ DASHBOARD TAB ═══════════════ */}
+      {/* ═══════════════ DASHBOARD TAB (merged with accounts) ═══════════════ */}
       {tab === "dashboard" && (
         <>
           {/* Stats Row */}
@@ -354,92 +350,8 @@ export default function PinterestPage() {
               disabled={running !== null}
               className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors"
             >
-              {running === "all" ? "Running Pipeline..." : "▶ Run Pipeline Now"}
+              {running === "all" ? "Running Pipeline..." : "▶ Run All"}
             </button>
-          </div>
-
-          {/* Account Cards */}
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">Accounts</h2>
-          {accounts.length === 0 ? (
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center">
-              <p className="text-[#525252] mb-4">No Pinterest accounts yet</p>
-              <button
-                onClick={() => setTab("accounts")}
-                className="px-4 py-2 bg-[#e60023] text-white text-sm rounded-lg hover:bg-[#cc001f] transition-colors"
-              >
-                + Add Account
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {accounts.map((acc) => {
-                const accPins = todayPins.filter((p) => p.account_id === acc.id);
-                const accScheduled = accPins.filter((p) => p.status === "scheduled").length;
-                const accFailed = accPins.filter((p) => p.status === "failed").length;
-                const accPosted = accPins.filter((p) => p.status === "posted").length;
-
-                return (
-                  <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h3 className="text-white font-semibold">{acc.name}</h3>
-                        {acc.pinterest_username && <p className="text-[#525252] text-xs">@{acc.pinterest_username}</p>}
-                      </div>
-                      <span
-                        className="text-[10px] px-2 py-0.5 rounded-full border"
-                        style={{
-                          color: CONTENT_TYPE_COLORS[acc.content_type],
-                          borderColor: CONTENT_TYPE_COLORS[acc.content_type] + "40",
-                        }}
-                      >
-                        {CONTENT_TYPE_LABELS[acc.content_type]}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 mb-4">
-                      <div className="text-center">
-                        <p className="text-white text-lg font-bold">{accScheduled}</p>
-                        <p className="text-[#525252] text-[10px]">Scheduled</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-white text-lg font-bold">{accPosted}</p>
-                        <p className="text-[#525252] text-[10px]">Posted</p>
-                      </div>
-                      <div className="text-center">
-                        <p className={`text-lg font-bold ${accFailed > 0 ? "text-[#ef4444]" : "text-white"}`}>{accFailed}</p>
-                        <p className="text-[#525252] text-[10px]">Failed</p>
-                      </div>
-                    </div>
-
-                    <div className="h-1.5 bg-[#262626] rounded-full overflow-hidden mb-3">
-                      <div
-                        className="h-full bg-[#22c55e] rounded-full transition-all"
-                        style={{ width: `${Math.min(100, ((accScheduled + accPosted) / acc.pins_per_day) * 100)}%` }}
-                      />
-                    </div>
-                    <p className="text-[#525252] text-[10px] mb-3">
-                      {accScheduled + accPosted}/{acc.pins_per_day} pins today
-                    </p>
-
-                    <button
-                      onClick={() => triggerPipeline(acc.id)}
-                      disabled={running !== null}
-                      className="w-full px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
-                    >
-                      {running === acc.id ? "Running..." : "▶ Run"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ═══════════════ ACCOUNTS TAB ═══════════════ */}
-      {tab === "accounts" && (
-        <>
-          <div className="flex flex-wrap gap-3 mb-6">
             <button
               onClick={() => {
                 setEditingId(null);
@@ -448,13 +360,13 @@ export default function PinterestPage() {
                 setIntegrations([]);
                 setTestResult(null);
               }}
-              className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] transition-colors"
+              className="px-4 py-2 bg-[#262626] text-white text-sm font-medium rounded-lg hover:bg-[#333] transition-colors"
             >
               + Add Account
             </button>
           </div>
 
-          {/* Form */}
+          {/* Account Form (inline) */}
           {showForm && (
             <div className="mb-6 bg-[#141414] border border-[#262626] rounded-xl p-5">
               <h3 className="text-white font-semibold mb-4">{editingId ? "Edit Account" : "New Account"}</h3>
@@ -549,38 +461,92 @@ export default function PinterestPage() {
             </div>
           )}
 
-          {/* Account List */}
-          <div className="space-y-3">
-            {accounts.map((acc) => (
-              <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-white font-semibold">{acc.name}</h3>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-                    {acc.pinterest_username && <span className="text-[#525252] text-xs">@{acc.pinterest_username}</span>}
-                    <span
-                      className="text-xs"
-                      style={{ color: CONTENT_TYPE_COLORS[acc.content_type] }}
-                    >
-                      {CONTENT_TYPE_LABELS[acc.content_type]}
-                    </span>
-                    <span className="text-[#525252] text-xs">{acc.pins_per_day} pins/day</span>
-                    <span className={`text-xs ${acc.status === "active" ? "text-[#22c55e]" : "text-[#f59e0b]"}`}>{acc.status}</span>
+          {/* Account Cards */}
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">Accounts</h2>
+          {accounts.length === 0 && !showForm ? (
+            <p className="text-center text-[#525252] py-8">No Pinterest accounts yet. Click &quot;+ Add Account&quot; to get started.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {accounts.map((acc) => {
+                const accPins = todayPins.filter((p) => p.account_id === acc.id);
+                const accScheduled = accPins.filter((p) => p.status === "scheduled").length;
+                const accFailed = accPins.filter((p) => p.status === "failed").length;
+                const accPosted = accPins.filter((p) => p.status === "posted").length;
+
+                return (
+                  <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-white font-semibold">{acc.name}</h3>
+                        {acc.pinterest_username && <p className="text-[#525252] text-xs">@{acc.pinterest_username}</p>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] px-2 py-0.5 rounded-full border"
+                          style={{
+                            color: CONTENT_TYPE_COLORS[acc.content_type],
+                            borderColor: CONTENT_TYPE_COLORS[acc.content_type] + "40",
+                          }}
+                        >
+                          {CONTENT_TYPE_LABELS[acc.content_type]}
+                        </span>
+                        <span className={`text-[10px] ${acc.status === "active" ? "text-[#22c55e]" : "text-[#f59e0b]"}`}>
+                          {acc.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 mb-4">
+                      <div className="text-center">
+                        <p className="text-white text-lg font-bold">{accScheduled}</p>
+                        <p className="text-[#525252] text-[10px]">Scheduled</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-white text-lg font-bold">{accPosted}</p>
+                        <p className="text-[#525252] text-[10px]">Posted</p>
+                      </div>
+                      <div className="text-center">
+                        <p className={`text-lg font-bold ${accFailed > 0 ? "text-[#ef4444]" : "text-white"}`}>{accFailed}</p>
+                        <p className="text-[#525252] text-[10px]">Failed</p>
+                      </div>
+                    </div>
+
+                    <div className="h-1.5 bg-[#262626] rounded-full overflow-hidden mb-3">
+                      <div
+                        className="h-full bg-[#22c55e] rounded-full transition-all"
+                        style={{ width: `${Math.min(100, ((accScheduled + accPosted) / acc.pins_per_day) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[#525252] text-[10px] mb-3">
+                      {accScheduled + accPosted}/{acc.pins_per_day} pins today · {acc.pins_per_day} pins/day
+                    </p>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => triggerPipeline(acc.id)}
+                        disabled={running !== null}
+                        className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
+                      >
+                        {running === acc.id ? "Running..." : "▶ Run"}
+                      </button>
+                      <button
+                        onClick={() => openEdit(acc)}
+                        className="px-3 py-1.5 text-xs bg-[#262626] text-[#737373] rounded-lg hover:bg-[#333] hover:text-white transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteAccount(acc.id)}
+                        className="px-3 py-1.5 text-xs bg-[#262626] text-[#ef4444] rounded-lg hover:bg-[#333] transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => openEdit(acc)} className="px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] transition-colors">
-                    Edit
-                  </button>
-                  <button onClick={() => deleteAccount(acc.id)} className="px-3 py-1.5 text-xs bg-[#262626] text-[#ef4444] rounded-lg hover:bg-[#333] transition-colors">
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-            {accounts.length === 0 && !showForm && (
-              <p className="text-center text-[#525252] py-8">No Pinterest accounts yet. Click &quot;+ Add Account&quot; to get started.</p>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -678,7 +644,7 @@ export default function PinterestPage() {
             ))}
           </div>
 
-          {/* Actions */}
+          {/* Filter */}
           <div className="flex flex-wrap gap-3 mb-6">
             <select
               className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
