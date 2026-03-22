@@ -127,7 +127,7 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
   const subscribers: SubInfo[] = [];
   let cursor: string | undefined;
   let totalChecked = 0;
-  const MAX_CUSTOMERS = 200;
+  const MAX_CUSTOMERS = 1000;
 
   try {
     while (totalChecked < MAX_CUSTOMERS) {
