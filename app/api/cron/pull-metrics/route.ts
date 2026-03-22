@@ -74,72 +74,26 @@ interface RCReportData {
   yesterdayRevenue: number;
 }
 
-async function fetchRevenueCatReport(): Promise<RCReportData | null> {
-  if (!RC_API_KEY || !RC_PROJECT_ID) return null;
+async function fetchRevenueCatReport(baseUrl: string): Promise<RCReportData | null> {
   try {
-    // Fetch overview metrics
-    const res = await fetch(
-      `https://api.revenuecat.com/v2/projects/${RC_PROJECT_ID}/metrics/overview`,
-      { headers: { Authorization: `Bearer ${RC_API_KEY}`, "Content-Type": "application/json" } }
-    );
-    if (!res.ok) return null;
-    const json = await res.json();
-    const metricsArr: { id: string; value: number }[] = json.metrics || [];
-    const m = Object.fromEntries(metricsArr.map((x) => [x.id, x.value]));
+    // Use the same /api/revenuecat endpoint as the web dashboard
+    const [overviewRes, trialsRes, activeRes] = await Promise.all([
+      fetch(`${baseUrl}/api/revenuecat?type=overview`),
+      fetch(`${baseUrl}/api/revenuecat?type=subscribers&filter=trial`),
+      fetch(`${baseUrl}/api/revenuecat?type=subscribers&filter=active`),
+    ]);
 
-    const currentRevenue = m.revenue ?? 0; // 28-day cumulative
+    const overview = await overviewRes.json();
+    const trialsData = await trialsRes.json();
+    const activeData = await activeRes.json();
 
-    // Count non-cancelled trials/subs by iterating customers (production only)
-    let activeTrials = 0;
-    let activeSubs = 0;
-    let cursor: string | undefined;
-    let hasMore = true;
+    if (overview.error) return null;
 
-    while (hasMore) {
-      const url = new URL(`https://api.revenuecat.com/v2/projects/${RC_PROJECT_ID}/customers`);
-      url.searchParams.set("limit", "50");
-      if (cursor) url.searchParams.set("starting_after", cursor);
-
-      const custRes = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${RC_API_KEY}`, "Content-Type": "application/json" },
-      });
-      if (!custRes.ok) break;
-
-      const custJson = await custRes.json();
-      const items = custJson.items || [];
-      if (items.length === 0) break;
-
-      const subResults = await Promise.all(
-        items.map(async (c: { id: string }) => {
-          const encoded = encodeURIComponent(c.id);
-          const subRes = await fetch(
-            `https://api.revenuecat.com/v2/projects/${RC_PROJECT_ID}/customers/${encoded}/subscriptions`,
-            { headers: { Authorization: `Bearer ${RC_API_KEY}`, "Content-Type": "application/json" } }
-          );
-          if (!subRes.ok) return [];
-          const subJson = await subRes.json();
-          return subJson.items || [];
-        })
-      );
-
-      for (const subs of subResults) {
-        for (const sub of subs) {
-          const status = (sub.status || "").toLowerCase();
-          const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
-          const givesAccess = sub.gives_access === true;
-          const env = (sub.environment || "").toLowerCase();
-          if (env === "sandbox") continue;
-          if (status === "trialing" && autoRenewal === "will_renew" && givesAccess) activeTrials++;
-          if (status === "active" && autoRenewal === "will_renew" && givesAccess) activeSubs++;
-        }
-      }
-
-      cursor = items[items.length - 1]?.id;
-      hasMore = !!custJson.next_page;
-    }
+    const currentRevenue = overview.revenue_30d ?? 0;
+    const activeTrials = trialsData.subscribers?.length ?? overview.active_trials ?? 0;
+    const activeSubs = activeData.subscribers?.length ?? overview.active_subs ?? 0;
 
     // Calculate yesterday's revenue from stored value
-    // We store the 28-day cumulative in pinterest_topics as a hack (reuse existing table)
     const { data: prevRow } = await supabase
       .from("pinterest_topics")
       .select("times_used")
@@ -344,10 +298,13 @@ export async function GET(req: Request) {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Fetch RevenueCat data
+  // Fetch RevenueCat data (use same API as web dashboard)
+  const host = req.headers.get("host") || "content.loopstudio.tech";
+  const protocol = host.includes("localhost") ? "http" : "https";
+  const baseUrl = `${protocol}://${host}`;
   let rcData: RCReportData | null = null;
   try {
-    rcData = await fetchRevenueCatReport();
+    rcData = await fetchRevenueCatReport(baseUrl);
   } catch (e) {
     console.error("RevenueCat fetch failed:", e);
   }
