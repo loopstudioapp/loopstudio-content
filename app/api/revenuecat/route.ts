@@ -65,6 +65,8 @@ async function fetchOverview(apiKey: string, projectId: string) {
         const status = (sub.status || "").toLowerCase();
         const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
         const givesAccess = sub.gives_access === true;
+        const env = (sub.environment || "").toLowerCase();
+        if (env === "sandbox") continue; // skip test data
         if (status === "trialing" && autoRenewal === "will_renew" && givesAccess) activeTrials++;
         if (status === "active" && autoRenewal === "will_renew" && givesAccess) activeSubs++;
       }
@@ -165,6 +167,8 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
           const status = (sub.status || "").toLowerCase();
           const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
           const givesAccess = sub.gives_access === true;
+          const env = (sub.environment || "").toLowerCase();
+          if (env === "sandbox") continue; // skip test data
 
           // Filter logic
           let matches = false;
