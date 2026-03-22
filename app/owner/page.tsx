@@ -115,12 +115,15 @@ export default function OwnerDashboard() {
   const router = useRouter();
 
   const [rc, setRc] = useState<RCOverview | null>(null);
-  const [rcLoading, setRcLoading] = useState(true);
+  const [rcLoading, setRcLoading] = useState(false);
+  const [rcLoaded, setRcLoaded] = useState(false);
   const [rcError, setRcError] = useState<string | null>(null);
-  const [subPanel, setSubPanel] = useState<"trial" | "active" | null>(null);
-  const [subs, setSubs] = useState<Subscriber[]>([]);
-  const [subsLoading, setSubsLoading] = useState(false);
-  const [subsError, setSubsError] = useState<string | null>(null);
+  const [trialSubs, setTrialSubs] = useState<Subscriber[]>([]);
+  const [activeSubs, setActiveSubs] = useState<Subscriber[]>([]);
+  const [trialsLoading, setTrialsLoading] = useState(false);
+  const [activeLoading, setActiveLoading] = useState(false);
+  const [trialsError, setTrialsError] = useState<string | null>(null);
+  const [activeError, setActiveError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [pinterestMetrics, setPinterestMetrics] = useState<AnalyticsMetric[]>([]);
@@ -132,13 +135,35 @@ export default function OwnerDashboard() {
     if (!hasAdmin && !hasEmployee) { router.push("/"); return; }
   }, [router]);
 
-  useEffect(() => {
-    setRcLoading(true);
-    fetch("/api/revenuecat?type=overview")
-      .then((r) => r.json())
-      .then((d) => { if (d.error) throw new Error(d.error); setRc(d); })
-      .catch((e) => setRcError(e.message))
-      .finally(() => setRcLoading(false));
+  const loadRevenueCat = useCallback(async () => {
+    setRcLoading(true); setRcError(null);
+    setTrialsLoading(true); setActiveLoading(true);
+    setTrialsError(null); setActiveError(null);
+    try {
+      const r = await fetch("/api/revenuecat?type=overview");
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      setRc(d);
+      setRcLoaded(true);
+    } catch (e: unknown) { setRcError(e instanceof Error ? e.message : "Failed"); }
+    finally { setRcLoading(false); }
+
+    // Load both trial and active subscriber lists
+    try {
+      const r = await fetch("/api/revenuecat?type=subscribers&filter=trial");
+      const d = await r.json();
+      if (!d.error) setTrialSubs(d.subscribers || []);
+      else setTrialsError(d.error);
+    } catch { setTrialsError("Failed to load"); }
+    finally { setTrialsLoading(false); }
+
+    try {
+      const r = await fetch("/api/revenuecat?type=subscribers&filter=active");
+      const d = await r.json();
+      if (!d.error) setActiveSubs(d.subscribers || []);
+      else setActiveError(d.error);
+    } catch { setActiveError("Failed to load"); }
+    finally { setActiveLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -175,21 +200,47 @@ export default function OwnerDashboard() {
       .finally(() => setPinterestLoading(false));
   }, []);
 
-  const fetchSubs = useCallback(async (filter: "trial" | "active") => {
-    setSubsLoading(true); setSubsError(null);
-    try {
-      const r = await fetch(`/api/revenuecat?type=subscribers&filter=${filter}`);
-      const d = await r.json();
-      if (d.error) throw new Error(d.error);
-      setSubs(d.subscribers || []);
-    } catch (e: unknown) { setSubsError(e instanceof Error ? e.message : "Failed"); }
-    finally { setSubsLoading(false); }
-  }, []);
-
-  const togglePanel = (p: "trial" | "active") => {
-    if (subPanel === p) { setSubPanel(null); return; }
-    setSubPanel(p); fetchSubs(p);
-  };
+  // Subscriber table renderer
+  const SubTable = ({ items, loading, error, label, color }: { items: Subscriber[]; loading: boolean; error: string | null; label: string; color: string }) => (
+    <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-[#262626]">
+        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+        <h3 className="text-white text-sm font-semibold">{label}</h3>
+        {!loading && !error && <span className="text-[#525252] text-xs">({items.length})</span>}
+      </div>
+      {loading ? (
+        <div className="p-6 text-center text-[#525252] text-sm">Loading...</div>
+      ) : error ? (
+        <div className="p-6 text-center text-[#ef4444] text-sm">{error}</div>
+      ) : items.length === 0 ? (
+        <div className="p-6 text-center text-[#525252] text-sm">None</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[650px]">
+            <thead>
+              <tr className="border-b border-[#262626]">
+                {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
+                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((s, i) => (
+                <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
+                  <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{s.country?.toUpperCase() || "—"}</span></td>
+                  <td className="px-5 py-2.5 text-sm text-white">{s.app || "—"}</td>
+                  <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
+                  <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
+                  <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
+                  <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(s.revenue || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 
   // TikTok / Lemon8 computed
   const latestByAccount = new Map<string, MetricsRow>();
@@ -241,76 +292,65 @@ export default function OwnerDashboard() {
 
       {/* ═══ ROOMY AI REVENUE ═══ */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-5">Roomy AI — Revenue</h2>
-        {rcLoading ? skeleton(4, "grid-cols-2 sm:grid-cols-4") : rcError ? (
-          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm">{rcError}</div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <button onClick={() => togglePanel("trial")} className={`bg-[#141414] border rounded-xl p-5 text-left transition-all hover:bg-[#1a1a1a] ${subPanel === "trial" ? "border-[#22c55e]/40 ring-1 ring-[#22c55e]/20" : "border-[#262626]"}`}>
-              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Trials</p>
-              <p className="text-white text-3xl font-bold">{rc?.active_trials ?? 0}</p>
-              <p className="text-[#525252] text-[10px] mt-1">non-cancelled only</p>
-            </button>
-            <button onClick={() => togglePanel("active")} className={`bg-[#141414] border rounded-xl p-5 text-left transition-all hover:bg-[#1a1a1a] ${subPanel === "active" ? "border-[#3b82f6]/40 ring-1 ring-[#3b82f6]/20" : "border-[#262626]"}`}>
-              <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
-              <p className="text-white text-3xl font-bold">{rc?.active_subs ?? 0}</p>
-              <p className="text-[#525252] text-[10px] mt-1">non-cancelled only</p>
-            </button>
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">28-Day Revenue</p>
-              <p className="text-white text-3xl font-bold">{fmtCur(rc?.revenue_30d ?? 0)}</p>
-              <p className="text-[#525252] text-[10px] mt-1">last 28 days</p>
-            </div>
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Current MRR</p>
-              <p className="text-white text-3xl font-bold">{fmtCur(rc?.mrr ?? 0)}</p>
-              <p className="text-[#525252] text-[10px] mt-1">monthly recurring</p>
-            </div>
+        <div className="flex items-center gap-3 mb-5">
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Roomy AI — Revenue</h2>
+          <button
+            onClick={loadRevenueCat}
+            disabled={rcLoading}
+            className="px-3 py-1 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50"
+          >
+            {rcLoading ? "Loading..." : rcLoaded ? "↻ Refresh" : "Load Data"}
+          </button>
+        </div>
+
+        {!rcLoaded && !rcLoading && !rcError && (
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
+            Click &quot;Load Data&quot; to fetch RevenueCat metrics
           </div>
         )}
 
-        {subPanel && (
-          <div className="mt-4 bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[#262626]">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${subPanel === "trial" ? "bg-[#22c55e]" : "bg-[#3b82f6]"}`} />
-                <h3 className="text-white text-sm font-semibold">{subPanel === "trial" ? "Active Trials" : "Active Subscriptions"}</h3>
-                {!subsLoading && !subsError && <span className="text-[#525252] text-xs">({subs.length})</span>}
-              </div>
-              <button onClick={() => setSubPanel(null)} className="text-[#525252] hover:text-white text-sm">✕</button>
-            </div>
-            {subsLoading ? (
-              <div className="p-8 text-center text-[#525252] text-sm">Loading...</div>
-            ) : subsError ? (
-              <div className="p-8 text-center text-[#ef4444] text-sm">{subsError}</div>
-            ) : subs.length === 0 ? (
-              <div className="p-8 text-center text-[#525252] text-sm">No subscribers found</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[650px]">
-                  <thead>
-                    <tr className="border-b border-[#262626]">
-                      {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
-                        <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subs.map((s, i) => (
-                      <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
-                        <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{s.country?.toUpperCase() || "—"}</span></td>
-                        <td className="px-5 py-2.5 text-sm text-white">{s.app || "—"}</td>
-                        <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
-                        <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
-                        <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
-                        <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(s.revenue || 0)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {rcError && (
+          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{rcError}</div>
+        )}
+
+        {(rcLoaded || rcLoading) && (
+          <>
+            {/* Stat Cards */}
+            {rcLoading && !rc ? skeleton(4, "grid-cols-2 sm:grid-cols-4") : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+                  <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Trials</p>
+                  <p className="text-white text-3xl font-bold">{rc?.active_trials ?? 0}</p>
+                  <p className="text-[#525252] text-[10px] mt-1">non-cancelled</p>
+                </div>
+                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+                  <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
+                  <p className="text-white text-3xl font-bold">{rc?.active_subs ?? 0}</p>
+                  <p className="text-[#525252] text-[10px] mt-1">non-cancelled</p>
+                </div>
+                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+                  <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">28-Day Revenue</p>
+                  <p className="text-white text-3xl font-bold">{fmtCur(rc?.revenue_30d ?? 0)}</p>
+                  <p className="text-[#525252] text-[10px] mt-1">last 28 days</p>
+                </div>
+                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+                  <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Current MRR</p>
+                  <p className="text-white text-3xl font-bold">{fmtCur(rc?.mrr ?? 0)}</p>
+                  <p className="text-[#525252] text-[10px] mt-1">monthly recurring</p>
+                </div>
               </div>
             )}
-          </div>
+
+            {/* Always-visible Active Trials table */}
+            <div className="mb-4">
+              <SubTable items={trialSubs} loading={trialsLoading} error={trialsError} label="Active Trials" color="#22c55e" />
+            </div>
+
+            {/* Always-visible Active Subscriptions table */}
+            <div>
+              <SubTable items={activeSubs} loading={activeLoading} error={activeError} label="Active Subscriptions" color="#3b82f6" />
+            </div>
+          </>
         )}
       </section>
 
