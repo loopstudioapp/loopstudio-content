@@ -169,7 +169,7 @@ async function uploadAndPost(
 
   const postId = await schedulePin(apiKey, {
     integrationId: account.postiz_integration_id,
-    boardId: account.board_id || "Interior Design",
+    boardId: account.board_id || "1086352810055811153",
     imageUrl: uploaded.path,
     imageId: uploaded.id,
     title: seo.pin_title,
