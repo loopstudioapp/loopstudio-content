@@ -80,7 +80,7 @@ export async function schedulePin(
     type: "schedule",
     date: params.scheduledAt,
     shortLink: false,
-    tags: [],
+    tags: params.tags || [],
     posts: [
       {
         integration: { id: params.integrationId },

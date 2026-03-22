@@ -52,4 +52,5 @@ export interface SchedulePinParams {
   description: string;
   scheduledAt: string;
   appStoreUrl: string;
+  tags?: string[];
 }
