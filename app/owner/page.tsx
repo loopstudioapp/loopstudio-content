@@ -130,17 +130,18 @@ export default function OwnerDashboard() {
   const [trialsError, setTrialsError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
 
-  // Load saved RevenueCat data from localStorage on mount
+  // Load saved RevenueCat data from DB on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("rc_data");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.overview) { setRc(parsed.overview); setRcLoaded(true); }
-        if (parsed.trials) setTrialSubs(parsed.trials);
-        if (parsed.active) setActiveSubs(parsed.active);
-      }
-    } catch { /* ignore */ }
+    fetch("/api/revenuecat/cache")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.cached) {
+          if (d.overview) { setRc(d.overview); setRcLoaded(true); }
+          if (d.trials) setTrialSubs(d.trials);
+          if (d.active) setActiveSubs(d.active);
+        }
+      })
+      .catch(() => {});
   }, []);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
@@ -188,9 +189,13 @@ export default function OwnerDashboard() {
     } catch { setActiveError("Failed to load"); }
     finally { setActiveLoading(false); }
 
-    // Save to localStorage
+    // Save to DB (accessible across all devices)
     try {
-      localStorage.setItem("rc_data", JSON.stringify({ overview, trials, active, ts: Date.now() }));
+      await fetch("/api/revenuecat/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overview, trials, active }),
+      });
     } catch { /* ignore */ }
   }, []);
 
