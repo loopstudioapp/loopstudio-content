@@ -6,15 +6,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 /* ── Types ── */
-type PostizIntegration = {
-  id: string;
-  name: string;
-  identifier: string;
-  picture?: string;
-  disabled: boolean;
-  profile?: string;
-};
-
 type PAccount = {
   id: string;
   name: string;
@@ -51,6 +42,44 @@ type AnalyticsMetric = {
   percentageChange?: number;
 };
 
+/* ── SVG Line Chart ── */
+function LineChart({ data, color, height = 60 }: { data: number[]; color: string; height?: number }) {
+  if (data.length < 2) return null;
+  const w = 200;
+  const h = height;
+  const pad = 4;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+
+  const points = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return { x, y };
+  });
+
+  const line = points.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(" ");
+  const area = `${line} L${points[points.length - 1].x},${h} L${points[0].x},${h} Z`;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
+      <defs>
+        <linearGradient id={`grad-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#grad-${color.replace("#", "")})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {points.map((p, i) =>
+        i === points.length - 1 ? (
+          <circle key={i} cx={p.x} cy={p.y} r="3" fill={color} />
+        ) : null
+      )}
+    </svg>
+  );
+}
+
 /* ── Constants ── */
 const STATUS_COLORS: Record<string, string> = {
   pending: "#f59e0b",
@@ -69,10 +98,46 @@ const METRIC_COLORS: Record<string, string> = {
   Saves: "#f59e0b",
 };
 
+/* ── Metric Card ── */
+function MetricCard({ metric }: { metric: AnalyticsMetric }) {
+  const color = METRIC_COLORS[metric.label] || "#737373";
+  const values = metric.data.map((d) => d.total);
+  const total = values.reduce((s, v) => s + v, 0);
+  const latest = values[values.length - 1] ?? 0;
+  const isRate = metric.label.toLowerCase().includes("rate");
+
+  return (
+    <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-medium" style={{ color }}>
+          {metric.label}
+        </p>
+        {metric.percentageChange !== undefined && (
+          <span className={`text-[10px] font-medium ${metric.percentageChange >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+            {metric.percentageChange >= 0 ? "+" : ""}
+            {metric.percentageChange.toFixed(1)}%
+          </span>
+        )}
+      </div>
+      <p className="text-white text-2xl font-bold mb-2">
+        {isRate ? latest.toFixed(2) + "%" : Math.round(total).toLocaleString()}
+      </p>
+      <LineChart data={values} color={color} height={50} />
+      <div className="flex justify-between mt-1">
+        <span className="text-[10px] text-[#525252]">
+          {metric.data[0]?.date?.slice(5) || ""}
+        </span>
+        <span className="text-[10px] text-[#525252]">
+          {metric.data[metric.data.length - 1]?.date?.slice(5) || ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ── Page ── */
 export default function PinterestPage() {
   const [accounts, setAccounts] = useState<PAccount[]>([]);
-  const [integrations, setIntegrations] = useState<PostizIntegration[]>([]);
   const [pins, setPins] = useState<PPin[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
@@ -81,7 +146,12 @@ export default function PinterestPage() {
   const { lang, setLang, t } = useLang();
   const router = useRouter();
 
-  // Analytics
+  // Overall analytics
+  const [overallAnalytics, setOverallAnalytics] = useState<AnalyticsMetric[]>([]);
+  const [overallDays, setOverallDays] = useState("7");
+  const [loadingOverall, setLoadingOverall] = useState(false);
+
+  // Per-account analytics
   const [selectedAccount, setSelectedAccount] = useState<PAccount | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsMetric[]>([]);
   const [analyticsDays, setAnalyticsDays] = useState("7");
@@ -117,21 +187,70 @@ export default function PinterestPage() {
     syncFromPostiz();
   }, [loadAll]);
 
+  // Load overall analytics when accounts are available
+  useEffect(() => {
+    if (accounts.length > 0) loadOverallAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts.length]);
+
   /* ── Sync from Postiz ── */
   const syncFromPostiz = async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/pinterest/sync", { method: "POST" });
-      const data = await res.json();
-      if (data.integrations) setIntegrations(data.integrations);
+      await fetch("/api/pinterest/sync", { method: "POST" });
       await loadAll();
-    } catch {
-      // silent fail
-    }
+    } catch { /* silent */ }
     setSyncing(false);
   };
 
-  /* ── Load Analytics ── */
+  /* ── Load Overall Analytics (aggregate all accounts) ── */
+  const loadOverallAnalytics = async (days?: string) => {
+    if (accounts.length === 0) return;
+    setLoadingOverall(true);
+    const d = days || overallDays;
+    try {
+      // Fetch analytics for all accounts in parallel
+      const results = await Promise.all(
+        accounts.map(async (acc) => {
+          const res = await fetch(
+            `/api/pinterest/analytics?integration_id=${acc.postiz_integration_id}&days=${d}`
+          );
+          const data = await res.json();
+          return Array.isArray(data) ? data as AnalyticsMetric[] : [];
+        })
+      );
+
+      // Merge: aggregate by label
+      const merged: Record<string, AnalyticsMetric> = {};
+      for (const accountMetrics of results) {
+        for (const metric of accountMetrics) {
+          if (!merged[metric.label]) {
+            merged[metric.label] = {
+              label: metric.label,
+              data: metric.data.map((d) => ({ ...d })),
+              percentageChange: metric.percentageChange,
+            };
+          } else {
+            // Sum totals by date
+            const existing = merged[metric.label];
+            for (let i = 0; i < metric.data.length; i++) {
+              if (existing.data[i]) {
+                existing.data[i].total += metric.data[i].total;
+              } else {
+                existing.data.push({ ...metric.data[i] });
+              }
+            }
+          }
+        }
+      }
+      setOverallAnalytics(Object.values(merged));
+    } catch {
+      setOverallAnalytics([]);
+    }
+    setLoadingOverall(false);
+  };
+
+  /* ── Load Per-Account Analytics ── */
   const loadAnalytics = async (account: PAccount, days?: string) => {
     setSelectedAccount(account);
     setLoadingAnalytics(true);
@@ -182,10 +301,7 @@ export default function PinterestPage() {
   const scheduled = todayPins.filter((p) => p.status === "scheduled").length;
   const failed = todayPins.filter((p) => p.status === "failed").length;
   const posted = todayPins.filter((p) => p.status === "posted").length;
-  const generating = todayPins.filter((p) =>
-    ["pending", "generating", "uploading"].includes(p.status)
-  ).length;
-
+  const generating = todayPins.filter((p) => ["pending", "generating", "uploading"].includes(p.status)).length;
   const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a.name]));
 
   const filteredPins = pins.filter((p) => {
@@ -203,23 +319,13 @@ export default function PinterestPage() {
           <p className="text-sm text-[#525252]">Auto-synced from Postiz</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={syncFromPostiz}
-            disabled={syncing}
-            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors disabled:opacity-50"
-          >
+          <button onClick={syncFromPostiz} disabled={syncing} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors disabled:opacity-50">
             {syncing ? "Syncing..." : "Sync"}
           </button>
-          <button
-            onClick={() => setLang(lang === "en" ? "vi" : "en")}
-            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
-          >
+          <button onClick={() => setLang(lang === "en" ? "vi" : "en")} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
             {lang === "en" ? "VN" : "EN"}
           </button>
-          <Link
-            href="/owner"
-            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
-          >
+          <Link href="/owner" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
             ← {t("home")}
           </Link>
         </div>
@@ -229,12 +335,7 @@ export default function PinterestPage() {
       {runResult && (
         <div className="mb-6 p-3 bg-[#141414] border border-[#262626] rounded-xl flex items-center justify-between">
           <pre className="text-sm text-[#a3a3a3] whitespace-pre-wrap">{runResult}</pre>
-          <button
-            onClick={() => setRunResult(null)}
-            className="text-[#525252] hover:text-white text-xs ml-3"
-          >
-            ✕
-          </button>
+          <button onClick={() => setRunResult(null)} className="text-[#525252] hover:text-white text-xs ml-3">✕</button>
         </div>
       )}
 
@@ -242,9 +343,7 @@ export default function PinterestPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
           <p className="text-[#e60023] text-[10px] uppercase tracking-wider">Accounts</p>
-          <p className="text-white text-2xl font-bold mt-1">
-            {accounts.filter((a) => a.status === "active").length}
-          </p>
+          <p className="text-white text-2xl font-bold mt-1">{accounts.filter((a) => a.status === "active").length}</p>
           <p className="text-[#525252] text-[10px]">{t("active")}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
@@ -268,24 +367,44 @@ export default function PinterestPage() {
       </div>
 
       {/* Run All */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <button
-          onClick={() => triggerPipeline()}
-          disabled={running !== null}
-          className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors"
-        >
+      <div className="flex flex-wrap gap-3 mb-8">
+        <button onClick={() => triggerPipeline()} disabled={running !== null} className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors">
           {running === "all" ? "Running Pipeline..." : "Run All"}
         </button>
       </div>
 
-      {/* Account Cards */}
-      <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">
-        Accounts
-      </h2>
+      {/* ═══════════════ OVERALL ANALYTICS ═══════════════ */}
+      <div className="mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Overall Analytics</h2>
+          <select
+            className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
+            value={overallDays}
+            onChange={(e) => { setOverallDays(e.target.value); loadOverallAnalytics(e.target.value); }}
+          >
+            <option value="7">7 Days</option>
+            <option value="30">30 Days</option>
+            <option value="90">90 Days</option>
+          </select>
+        </div>
+
+        {loadingOverall ? (
+          <p className="text-[#525252] text-sm py-4">Loading analytics...</p>
+        ) : overallAnalytics.length === 0 ? (
+          <p className="text-[#525252] text-sm py-4">No analytics data yet</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {overallAnalytics.map((metric) => (
+              <MetricCard key={metric.label} metric={metric} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════════ ACCOUNTS ═══════════════ */}
+      <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">Accounts</h2>
       {accounts.length === 0 ? (
-        <p className="text-center text-[#525252] py-8">
-          No Pinterest accounts synced. Connect Pinterest in Postiz, then click Sync.
-        </p>
+        <p className="text-center text-[#525252] py-8">No Pinterest accounts synced. Connect Pinterest in Postiz, then click Sync.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {accounts.map((acc) => {
@@ -297,17 +416,11 @@ export default function PinterestPage() {
             return (
               <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <h3 className="text-white font-semibold">{acc.name}</h3>
-                      {acc.pinterest_username && (
-                        <p className="text-[#525252] text-xs">@{acc.pinterest_username}</p>
-                      )}
-                    </div>
+                  <div>
+                    <h3 className="text-white font-semibold">{acc.name}</h3>
+                    {acc.pinterest_username && <p className="text-[#525252] text-xs">@{acc.pinterest_username}</p>}
                   </div>
-                  <span
-                    className={`text-[10px] ${acc.status === "active" ? "text-[#22c55e]" : "text-[#f59e0b]"}`}
-                  >
+                  <span className={`text-[10px] ${acc.status === "active" ? "text-[#22c55e]" : "text-[#f59e0b]"}`}>
                     {acc.status}
                   </span>
                 </div>
@@ -322,39 +435,21 @@ export default function PinterestPage() {
                     <p className="text-[#525252] text-[10px]">Posted</p>
                   </div>
                   <div className="text-center">
-                    <p
-                      className={`text-lg font-bold ${accFailed > 0 ? "text-[#ef4444]" : "text-white"}`}
-                    >
-                      {accFailed}
-                    </p>
+                    <p className={`text-lg font-bold ${accFailed > 0 ? "text-[#ef4444]" : "text-white"}`}>{accFailed}</p>
                     <p className="text-[#525252] text-[10px]">Failed</p>
                   </div>
                 </div>
 
                 <div className="h-1.5 bg-[#262626] rounded-full overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-[#22c55e] rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(100, ((accScheduled + accPosted) / acc.pins_per_day) * 100)}%`,
-                    }}
-                  />
+                  <div className="h-full bg-[#22c55e] rounded-full transition-all" style={{ width: `${Math.min(100, ((accScheduled + accPosted) / acc.pins_per_day) * 100)}%` }} />
                 </div>
-                <p className="text-[#525252] text-[10px] mb-3">
-                  {accScheduled + accPosted}/{acc.pins_per_day} pins today
-                </p>
+                <p className="text-[#525252] text-[10px] mb-3">{accScheduled + accPosted}/{acc.pins_per_day} pins today</p>
 
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => triggerPipeline(acc.id)}
-                    disabled={running !== null}
-                    className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors"
-                  >
+                  <button onClick={() => triggerPipeline(acc.id)} disabled={running !== null} className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors">
                     {running === acc.id ? "Running..." : "Run"}
                   </button>
-                  <button
-                    onClick={() => loadAnalytics(acc)}
-                    className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-[#3b82f6] rounded-lg hover:bg-[#333] transition-colors"
-                  >
+                  <button onClick={() => loadAnalytics(acc)} className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-[#3b82f6] rounded-lg hover:bg-[#333] transition-colors">
                     Analytics
                   </button>
                 </div>
@@ -364,32 +459,24 @@ export default function PinterestPage() {
         </div>
       )}
 
-      {/* ═══════════════ ANALYTICS PANEL ═══════════════ */}
+      {/* ═══════════════ PER-ACCOUNT ANALYTICS ═══════════════ */}
       {selectedAccount && (
         <div className="mt-8">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">
-              Analytics — {selectedAccount.name}
+              {selectedAccount.name} — Analytics
             </h2>
             <div className="flex gap-2 items-center">
               <select
                 className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
                 value={analyticsDays}
-                onChange={(e) => {
-                  setAnalyticsDays(e.target.value);
-                  loadAnalytics(selectedAccount, e.target.value);
-                }}
+                onChange={(e) => { setAnalyticsDays(e.target.value); loadAnalytics(selectedAccount, e.target.value); }}
               >
                 <option value="7">7 Days</option>
                 <option value="30">30 Days</option>
                 <option value="90">90 Days</option>
               </select>
-              <button
-                onClick={() => setSelectedAccount(null)}
-                className="text-[#525252] hover:text-white text-xs"
-              >
-                ✕ Close
-              </button>
+              <button onClick={() => setSelectedAccount(null)} className="text-[#525252] hover:text-white text-xs">✕ Close</button>
             </div>
           </div>
 
@@ -398,87 +485,23 @@ export default function PinterestPage() {
           ) : analytics.length === 0 ? (
             <p className="text-[#525252] text-sm py-4">No analytics data available</p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {analytics.map((metric) => {
-                const latest = metric.data[metric.data.length - 1]?.total ?? 0;
-                const total = metric.data.reduce((sum, d) => sum + d.total, 0);
-                const max = Math.max(...metric.data.map((d) => d.total), 1);
-                const color = METRIC_COLORS[metric.label] || "#737373";
-
-                return (
-                  <div
-                    key={metric.label}
-                    className="bg-[#141414] border border-[#262626] rounded-xl p-4"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-medium" style={{ color }}>
-                        {metric.label}
-                      </p>
-                      {metric.percentageChange !== undefined && (
-                        <span
-                          className={`text-[10px] ${metric.percentageChange >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}
-                        >
-                          {metric.percentageChange >= 0 ? "+" : ""}
-                          {metric.percentageChange.toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Mini bar chart */}
-                    <div className="flex items-end gap-[2px] h-12 mb-2">
-                      {metric.data.map((d, i) => (
-                        <div
-                          key={i}
-                          className="flex-1 rounded-sm transition-all"
-                          style={{
-                            height: `${Math.max(2, (d.total / max) * 100)}%`,
-                            backgroundColor: color + "80",
-                          }}
-                          title={`${d.date}: ${typeof d.total === "number" ? d.total.toFixed(2) : d.total}`}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="flex justify-between">
-                      <p className="text-white text-lg font-bold">
-                        {metric.label === "Pin click rate"
-                          ? latest.toFixed(2) + "%"
-                          : Math.round(total).toLocaleString()}
-                      </p>
-                      <p className="text-[#525252] text-[10px] self-end">
-                        {metric.label === "Pin click rate" ? "latest" : "total"}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              {analytics.map((metric) => (
+                <MetricCard key={metric.label} metric={metric} />
+              ))}
             </div>
           )}
         </div>
       )}
 
       {/* ═══════════════ PIN HISTORY ═══════════════ */}
-      <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mt-8 mb-4">
-        Pin History
-      </h2>
+      <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mt-8 mb-4">Pin History</h2>
       <div className="flex flex-wrap gap-3 mb-4">
-        <select
-          className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
-          value={filterAccount}
-          onChange={(e) => setFilterAccount(e.target.value)}
-        >
+        <select className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none" value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
           <option value="all">All Accounts</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
+          {accounts.map((a) => (<option key={a.id} value={a.id}>{a.name}</option>))}
         </select>
-        <select
-          className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-        >
+        <select className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="generating">Generating</option>
@@ -497,57 +520,33 @@ export default function PinterestPage() {
               <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">Account</th>
               <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">Title</th>
               <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">Status</th>
-              <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">
-                Scheduled
-              </th>
+              <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">Scheduled</th>
               <th className="text-left text-[10px] text-[#525252] uppercase py-2 px-3">Created</th>
             </tr>
           </thead>
           <tbody>
             {filteredPins.slice(0, 50).map((pin) => (
               <tr key={pin.id} className="border-b border-[#262626]/50 hover:bg-[#141414]">
-                <td className="py-2 px-3 text-xs text-[#a3a3a3]">
-                  {accountMap[pin.account_id] || "—"}
-                </td>
+                <td className="py-2 px-3 text-xs text-[#a3a3a3]">{accountMap[pin.account_id] || "—"}</td>
                 <td className="py-2 px-3">
                   <p className="text-xs text-white truncate max-w-[250px]">{pin.title}</p>
-                  {pin.error_message && (
-                    <p className="text-[10px] text-[#ef4444] truncate max-w-[250px]">
-                      {pin.error_message}
-                    </p>
-                  )}
+                  {pin.error_message && <p className="text-[10px] text-[#ef4444] truncate max-w-[250px]">{pin.error_message}</p>}
                 </td>
                 <td className="py-2 px-3">
-                  <span
-                    className="text-[10px] px-2 py-0.5 rounded-full"
-                    style={{
-                      color: STATUS_COLORS[pin.status],
-                      backgroundColor: (STATUS_COLORS[pin.status] || "#525252") + "15",
-                    }}
-                  >
+                  <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ color: STATUS_COLORS[pin.status], backgroundColor: (STATUS_COLORS[pin.status] || "#525252") + "15" }}>
                     {pin.status}
                   </span>
                 </td>
-                <td className="py-2 px-3 text-xs text-[#525252]">
-                  {pin.scheduled_at ? new Date(pin.scheduled_at).toLocaleString() : "—"}
-                </td>
-                <td className="py-2 px-3 text-xs text-[#525252]">
-                  {new Date(pin.created_at).toLocaleDateString()}
-                </td>
+                <td className="py-2 px-3 text-xs text-[#525252]">{pin.scheduled_at ? new Date(pin.scheduled_at).toLocaleString() : "—"}</td>
+                <td className="py-2 px-3 text-xs text-[#525252]">{new Date(pin.created_at).toLocaleDateString()}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {filteredPins.length === 0 && (
-        <p className="text-center text-[#525252] py-8">No pins yet</p>
-      )}
-      {filteredPins.length > 50 && (
-        <p className="text-center text-[#525252] text-xs py-4">
-          Showing latest 50 of {filteredPins.length} pins
-        </p>
-      )}
+      {filteredPins.length === 0 && <p className="text-center text-[#525252] py-8">No pins yet</p>}
+      {filteredPins.length > 50 && <p className="text-center text-[#525252] text-xs py-4">Showing latest 50 of {filteredPins.length} pins</p>}
     </div>
   );
 }
