@@ -21,6 +21,7 @@ function rcHeaders(apiKey: string) {
 async function fetchOverview(apiKey: string, projectId: string) {
   if (overviewCache && Date.now() - overviewCache.timestamp < CACHE_TTL) return overviewCache.data;
 
+  // Get RevenueCat aggregate metrics for revenue/MRR
   const res = await fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, { headers: rcHeaders(apiKey) });
   if (!res.ok) throw new Error(`RevenueCat API error ${res.status}: ${await res.text()}`);
 
@@ -28,9 +29,54 @@ async function fetchOverview(apiKey: string, projectId: string) {
   const metricsArr: { id: string; value: number }[] = json.metrics || [];
   const m = Object.fromEntries(metricsArr.map((x) => [x.id, x.value]));
 
+  // Count non-cancelled trials and subs ourselves by iterating all customers
+  let activeTrials = 0;
+  let activeSubs = 0;
+  let cursor: string | undefined;
+  let hasMore = true;
+
+  while (hasMore) {
+    const url = new URL(`${RC_BASE}/projects/${projectId}/customers`);
+    url.searchParams.set("limit", "50");
+    if (cursor) url.searchParams.set("starting_after", cursor);
+
+    const custRes = await fetch(url.toString(), { headers: rcHeaders(apiKey) });
+    if (!custRes.ok) break;
+
+    const custJson = await custRes.json();
+    const items = custJson.items || [];
+    if (items.length === 0) break;
+
+    const subResults = await Promise.all(
+      items.map(async (c: { id: string }) => {
+        const encoded = encodeURIComponent(c.id);
+        const subRes = await fetch(
+          `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
+          { headers: rcHeaders(apiKey) }
+        );
+        if (!subRes.ok) return [];
+        const subJson = await subRes.json();
+        return subJson.items || [];
+      })
+    );
+
+    for (const subs of subResults) {
+      for (const sub of subs) {
+        const status = (sub.status || "").toLowerCase();
+        const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
+        const givesAccess = sub.gives_access === true;
+        if (status === "trialing" && autoRenewal === "will_renew" && givesAccess) activeTrials++;
+        if (status === "active" && autoRenewal === "will_renew" && givesAccess) activeSubs++;
+      }
+    }
+
+    cursor = items[items.length - 1]?.id;
+    hasMore = !!custJson.next_page;
+  }
+
   const data = {
-    active_trials: m.active_trials ?? 0,
-    active_subs: m.active_subscriptions ?? 0,
+    active_trials: activeTrials,
+    active_subs: activeSubs,
     revenue_30d: m.revenue ?? 0,
     mrr: m.mrr ?? 0,
     new_customers: m.new_customers ?? 0,
