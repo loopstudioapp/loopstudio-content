@@ -53,15 +53,16 @@ async function fetchOverview(apiKey: string, projectId: string) {
   }
 
   const json = await res.json();
-  const metrics = json.metrics || json;
+  const metricsArr: { id: string; value: number }[] = json.metrics || [];
+  const m = Object.fromEntries(metricsArr.map((x) => [x.id, x.value]));
 
   const data = {
-    active_trials: metrics.active_trials ?? 0,
-    active_subs: metrics.active_subscriptions ?? metrics.active_subs ?? 0,
-    revenue_30d: metrics.revenue_last_28_days ?? metrics.revenue_30d ?? 0,
-    mrr: metrics.mrr ?? 0,
-    new_customers: metrics.new_customers ?? 0,
-    active_users: metrics.active_users ?? metrics.active_subscribers ?? 0,
+    active_trials: m.active_trials ?? 0,
+    active_subs: m.active_subscriptions ?? 0,
+    revenue_30d: m.revenue ?? 0,
+    mrr: m.mrr ?? 0,
+    new_customers: m.new_customers ?? 0,
+    active_users: m.active_users ?? 0,
   };
 
   overviewCache = { data, timestamp: Date.now() };

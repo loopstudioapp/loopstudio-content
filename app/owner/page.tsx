@@ -2,30 +2,32 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useLang } from "@/lib/i18n";
-import { formatNumber } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 /* ── Types ── */
-
-type RevenueCatOverview = {
+type RCOverview = {
   active_trials: number;
-  active_subscriptions: number;
+  active_subs: number;
   revenue_30d: number;
   mrr: number;
+  new_customers: number;
+  active_users: number;
 };
 
-type RevenueCatSubscriber = {
+type Subscriber = {
+  id: string;
   country: string;
   app: string;
   plan: string;
-  purchased: string;
-  expires: string;
+  purchase_date: string;
+  expiry_date: string;
   revenue: number;
 };
 
 type MetricsRow = {
   account_id: string;
+  date: string;
   total_likes: number;
   posts: number;
   followers: number;
@@ -34,393 +36,290 @@ type MetricsRow = {
   lm8_followers: number;
 };
 
-type PinterestAccount = {
-  id: string;
-  name: string;
-  postiz_integration_id: string;
+type AnalyticsMetric = {
+  label: string;
+  data: { date: string; total: number }[];
 };
 
-type PinterestAnalytics = {
-  impressions: number;
-  pin_clicks: number;
-  saves: number;
-};
-
-/* ── Helpers ── */
-
-function countryFlag(code: string): string {
-  if (!code || code.length !== 2) return "\u{1F30D}";
-  const codePoints = code.toUpperCase().split("").map((c) => 127397 + c.charCodeAt(0));
-  return String.fromCodePoint(...codePoints);
+/* ── SVG Line Chart ── */
+function MiniChart({ data, color, h = 48 }: { data: number[]; color: string; h?: number }) {
+  if (data.length < 2) return <div style={{ height: h }} />;
+  const w = 200;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const pad = 4;
+  const pts = data.map((v, i) => ({
+    x: pad + (i / (data.length - 1)) * (w - pad * 2),
+    y: h - pad - ((v - min) / range) * (h - pad * 2),
+  }));
+  const line = pts.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(" ");
+  const area = `${line} L${pts[pts.length - 1].x},${h} L${pts[0].x},${h} Z`;
+  const gid = `g-${color.replace("#", "")}`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3" fill={color} />
+    </svg>
+  );
 }
 
-function formatCurrency(n: number): string {
+/* ── Helpers ── */
+function countryFlag(code: string): string {
+  if (!code || code.length !== 2) return "🌍";
+  return String.fromCodePoint(...code.toUpperCase().split("").map((c) => 127397 + c.charCodeAt(0)));
+}
+
+function fmtCur(n: number): string {
   return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return n.toString();
 }
 
-/* ── Main Component ── */
+function fmtDate(iso: string): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
+/* ── Main ── */
 export default function OwnerDashboard() {
   const { lang, setLang, t } = useLang();
   const router = useRouter();
 
-  // RevenueCat state
   const [rcTab, setRcTab] = useState<"overall" | "roomy">("overall");
-  const [rcOverview, setRcOverview] = useState<RevenueCatOverview | null>(null);
+  const [rc, setRc] = useState<RCOverview | null>(null);
   const [rcLoading, setRcLoading] = useState(true);
   const [rcError, setRcError] = useState<string | null>(null);
-  const [subscriberPanel, setSubscriberPanel] = useState<"trial" | "active" | null>(null);
-  const [subscribers, setSubscribers] = useState<RevenueCatSubscriber[]>([]);
-  const [subscribersLoading, setSubscribersLoading] = useState(false);
-  const [subscribersError, setSubscribersError] = useState<string | null>(null);
+  const [subPanel, setSubPanel] = useState<"trial" | "active" | null>(null);
+  const [subs, setSubs] = useState<Subscriber[]>([]);
+  const [subsLoading, setSubsLoading] = useState(false);
+  const [subsError, setSubsError] = useState<string | null>(null);
 
-  // Platform metrics state
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
 
-  // Pinterest state
-  const [pinterestAnalytics, setPinterestAnalytics] = useState<PinterestAnalytics | null>(null);
+  const [pinterestMetrics, setPinterestMetrics] = useState<AnalyticsMetric[]>([]);
   const [pinterestLoading, setPinterestLoading] = useState(true);
 
-  // Auth check
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
     const hasEmployee = document.cookie.match(/(^| )employee_id=([^;]+)/);
-    if (!hasAdmin && !hasEmployee) {
-      router.push("/");
-      return;
-    }
+    if (!hasAdmin && !hasEmployee) { router.push("/"); return; }
   }, [router]);
 
-  // Fetch RevenueCat overview
+  // RevenueCat overview
   useEffect(() => {
     setRcLoading(true);
-    setRcError(null);
     fetch("/api/revenuecat?type=overview")
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to fetch");
-        return r.json();
-      })
-      .then((data) => {
-        setRcOverview(data);
-        setRcLoading(false);
-      })
-      .catch((err) => {
-        setRcError(err.message);
-        setRcLoading(false);
-      });
+      .then((r) => r.json())
+      .then((d) => { if (d.error) throw new Error(d.error); setRc(d); })
+      .catch((e) => setRcError(e.message))
+      .finally(() => setRcLoading(false));
   }, []);
 
-  // Fetch platform metrics
+  // TikTok/Lemon8 metrics
   useEffect(() => {
-    setMetricsLoading(true);
     fetch("/api/metrics")
       .then((r) => r.json())
-      .then((data: MetricsRow[]) => {
-        // Group by account_id and keep only the latest per account
-        const latestMap = new Map<string, MetricsRow>();
-        for (const row of data) {
-          if (!latestMap.has(row.account_id)) {
-            latestMap.set(row.account_id, row);
-          }
-        }
-        setMetrics(Array.from(latestMap.values()));
-        setMetricsLoading(false);
-      })
-      .catch(() => setMetricsLoading(false));
+      .then((data: MetricsRow[]) => setMetrics(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setMetricsLoading(false));
   }, []);
 
-  // Fetch Pinterest analytics
+  // Pinterest analytics
   useEffect(() => {
-    setPinterestLoading(true);
     fetch("/api/pinterest/accounts")
       .then((r) => r.json())
-      .then(async (accounts: PinterestAccount[]) => {
-        if (!accounts || accounts.length === 0) {
-          setPinterestLoading(false);
-          return;
-        }
-        let totalImpressions = 0;
-        let totalClicks = 0;
-        let totalSaves = 0;
-        await Promise.all(
-          accounts.map(async (acc) => {
+      .then(async (accounts: { postiz_integration_id: string }[]) => {
+        if (!accounts?.length) { setPinterestLoading(false); return; }
+        const results = await Promise.all(
+          accounts.map(async (a) => {
             try {
-              const res = await fetch(
-                `/api/pinterest/analytics?integration_id=${acc.postiz_integration_id}&days=30`
-              );
-              if (!res.ok) return;
-              const data = await res.json();
-              if (Array.isArray(data)) {
-                for (const metric of data) {
-                  if (!metric.data) continue;
-                  const sum = metric.data.reduce(
-                    (s: number, d: { total: number }) => s + (d.total || 0),
-                    0
-                  );
-                  const label = (metric.label || "").toLowerCase();
-                  if (label.includes("impression")) totalImpressions += sum;
-                  else if (label.includes("click")) totalClicks += sum;
-                  else if (label.includes("save")) totalSaves += sum;
-                }
-              }
-            } catch {
-              // skip failed account
-            }
+              const r = await fetch(`/api/pinterest/analytics?integration_id=${a.postiz_integration_id}&days=7`);
+              return r.ok ? ((await r.json()) as AnalyticsMetric[]) : [];
+            } catch { return []; }
           })
         );
-        setPinterestAnalytics({
-          impressions: totalImpressions,
-          pin_clicks: totalClicks,
-          saves: totalSaves,
-        });
-        setPinterestLoading(false);
+        // Merge metrics across accounts
+        const merged: Record<string, AnalyticsMetric> = {};
+        for (const arr of results) {
+          for (const m of arr) {
+            if (!merged[m.label]) { merged[m.label] = { ...m, data: m.data.map((d) => ({ ...d })) }; }
+            else { m.data.forEach((d, i) => { if (merged[m.label].data[i]) merged[m.label].data[i].total += d.total; }); }
+          }
+        }
+        setPinterestMetrics(Object.values(merged));
       })
-      .catch(() => setPinterestLoading(false));
+      .catch(() => {})
+      .finally(() => setPinterestLoading(false));
   }, []);
 
-  // Fetch subscribers list
-  const fetchSubscribers = useCallback(async (filter: "trial" | "active") => {
-    setSubscribersLoading(true);
-    setSubscribersError(null);
+  const fetchSubs = useCallback(async (filter: "trial" | "active") => {
+    setSubsLoading(true); setSubsError(null);
     try {
-      const res = await fetch(`/api/revenuecat?type=subscribers&filter=${filter}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(
-          data?.error ||
-            "Add customer_information:customers:read permission to your RevenueCat API key"
-        );
-      }
-      const data = await res.json();
-      setSubscribers(Array.isArray(data) ? data : []);
-    } catch (err: unknown) {
-      setSubscribersError(err instanceof Error ? err.message : "Failed to load subscribers");
-    } finally {
-      setSubscribersLoading(false);
-    }
+      const r = await fetch(`/api/revenuecat?type=subscribers&filter=${filter}`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      setSubs(d.subscribers || []);
+    } catch (e: unknown) { setSubsError(e instanceof Error ? e.message : "Failed"); }
+    finally { setSubsLoading(false); }
   }, []);
 
-  const handleStatClick = (panel: "trial" | "active") => {
-    if (subscriberPanel === panel) {
-      setSubscriberPanel(null);
-      return;
-    }
-    setSubscriberPanel(panel);
-    fetchSubscribers(panel);
+  const togglePanel = (p: "trial" | "active") => {
+    if (subPanel === p) { setSubPanel(null); return; }
+    setSubPanel(p); fetchSubs(p);
   };
 
-  // Computed totals for TikTok / Lemon8
-  const tkFollowers = metrics.reduce((s, m) => s + (m.followers || 0), 0);
-  const tkLikes = metrics.reduce((s, m) => s + (m.total_likes || 0), 0);
-  const tkPosts = metrics.reduce((s, m) => s + (m.posts || 0), 0);
-  const lmFollowers = metrics.reduce((s, m) => s + (m.lm8_followers || 0), 0);
-  const lmLikes = metrics.reduce((s, m) => s + (m.lm8_total_likes || 0), 0);
-  const lmPosts = metrics.reduce((s, m) => s + (m.lm8_posts || 0), 0);
+  // Computed TikTok / Lemon8 stats
+  // Get latest metrics per account
+  const latestByAccount = new Map<string, MetricsRow>();
+  for (const m of metrics) {
+    const existing = latestByAccount.get(m.account_id);
+    if (!existing || m.date > existing.date) latestByAccount.set(m.account_id, m);
+  }
+  const latest = Array.from(latestByAccount.values());
+  const tkFollowers = latest.reduce((s, m) => s + (m.followers || 0), 0);
+  const tkLikes = latest.reduce((s, m) => s + (m.total_likes || 0), 0);
+  const tkPosts = latest.reduce((s, m) => s + (m.posts || 0), 0);
+  const lmFollowers = latest.reduce((s, m) => s + (m.lm8_followers || 0), 0);
+  const lmLikes = latest.reduce((s, m) => s + (m.lm8_total_likes || 0), 0);
+  const lmPosts = latest.reduce((s, m) => s + (m.lm8_posts || 0), 0);
+
+  // Get last 7 days of metrics for charts
+  const last7 = metrics
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-21); // 3 accounts × 7 days
+  const dateSet = [...new Set(last7.map((m) => m.date))].sort();
+  const tkFollowersByDay = dateSet.map((d) => last7.filter((m) => m.date === d).reduce((s, m) => s + (m.followers || 0), 0));
+  const lmFollowersByDay = dateSet.map((d) => last7.filter((m) => m.date === d).reduce((s, m) => s + (m.lm8_followers || 0), 0));
+
+  const METRIC_COLORS: Record<string, string> = {
+    "Pin click rate": "#8b5cf6",
+    Impressions: "#22c55e",
+    "Pin Clicks": "#3b82f6",
+    Saves: "#f59e0b",
+  };
+
+  const btnCls = "px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors";
+  const tabCls = (active: boolean) => `px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${active ? "bg-white/10 text-white" : "text-[#525252] hover:text-white"}`;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-6 max-w-6xl mx-auto">
-      {/* ── Header ── */}
+    <div className="min-h-screen bg-[#0a0a0a] p-4 sm:p-6 max-w-6xl mx-auto">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="text-xl font-bold text-white">Loop Content Generation</h1>
-          <p className="text-sm text-[#525252]">Dashboard</p>
+          <p className="text-xs text-[#525252]">Dashboard Overview</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setLang(lang === "en" ? "vi" : "en")}
-            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
-          >
+          <Link href="/owner/tiktok" className={btnCls}>TikTok</Link>
+          <Link href="/owner/pinterest" className={btnCls}>Pinterest</Link>
+          <button onClick={() => setLang(lang === "en" ? "vi" : "en")} className={btnCls}>
             {lang === "en" ? "VN" : "EN"}
           </button>
-          <Link
-            href="/"
-            className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
-          >
-            {t("logout")}
-          </Link>
+          <Link href="/" className={btnCls}>{t("logout")}</Link>
         </div>
       </div>
 
-      {/* ── Navigation Row ── */}
-      <div className="flex flex-wrap gap-2 mb-8">
-        <Link
-          href="/owner/tiktok"
-          className="px-4 py-2 text-sm text-[#737373] bg-[#141414] border border-[#262626] rounded-full hover:text-white hover:border-[#404040] transition-colors"
-        >
-          TikTok
-        </Link>
-        <Link
-          href="/owner/pinterest"
-          className="px-4 py-2 text-sm text-[#737373] bg-[#141414] border border-[#262626] rounded-full hover:text-white hover:border-[#404040] transition-colors"
-        >
-          Pinterest
-        </Link>
-      </div>
-
-      {/* ── RevenueCat Section ── */}
-      <div className="mb-8">
-        {/* Tab Buttons */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setRcTab("overall")}
-            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              rcTab === "overall"
-                ? "bg-[#e60023] text-white"
-                : "bg-[#141414] text-[#737373] border border-[#262626] hover:text-white"
-            }`}
-          >
-            Overall
-          </button>
-          <button
-            onClick={() => setRcTab("roomy")}
-            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              rcTab === "roomy"
-                ? "bg-[#e60023] text-white"
-                : "bg-[#141414] text-[#737373] border border-[#262626] hover:text-white"
-            }`}
-          >
-            Roomy AI
-          </button>
+      {/* ═══ REVENUE ═══ */}
+      <section className="mb-10">
+        <div className="flex items-center gap-3 mb-5">
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Revenue</h2>
+          <div className="flex bg-[#141414] rounded-lg p-0.5 border border-[#262626]">
+            <button onClick={() => setRcTab("overall")} className={tabCls(rcTab === "overall")}>Overall</button>
+            <button onClick={() => setRcTab("roomy")} className={tabCls(rcTab === "roomy")}>Roomy AI</button>
+          </div>
         </div>
 
-        {/* Stat Cards */}
         {rcLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="bg-[#141414] border border-[#262626] rounded-xl p-4 animate-pulse h-24"
-              />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl p-5 h-28 animate-pulse" />
             ))}
           </div>
         ) : rcError ? (
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-4 text-[#737373] text-sm">
-            Failed to load RevenueCat data
-          </div>
+          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm">{rcError}</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <button
-              onClick={() => handleStatClick("trial")}
-              className={`bg-[#141414] border rounded-xl p-4 text-left cursor-pointer hover:bg-[#1a1a1a] transition-colors ${
-                subscriberPanel === "trial" ? "border-[#22c55e]/50" : "border-[#262626]"
-              }`}
-            >
-              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">
-                Active Trials
-              </p>
-              <p className="text-white text-2xl font-bold mt-1">
-                {rcOverview?.active_trials ?? 0}
-              </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {/* Active Trials */}
+            <button onClick={() => togglePanel("trial")} className={`bg-[#141414] border rounded-xl p-5 text-left transition-all hover:bg-[#1a1a1a] ${subPanel === "trial" ? "border-[#22c55e]/40 ring-1 ring-[#22c55e]/20" : "border-[#262626]"}`}>
+              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Trials</p>
+              <p className="text-white text-3xl font-bold">{rc?.active_trials ?? 0}</p>
+              <p className="text-[#525252] text-[10px] mt-1">click to view</p>
             </button>
-            <button
-              onClick={() => handleStatClick("active")}
-              className={`bg-[#141414] border rounded-xl p-4 text-left cursor-pointer hover:bg-[#1a1a1a] transition-colors ${
-                subscriberPanel === "active" ? "border-[#3b82f6]/50" : "border-[#262626]"
-              }`}
-            >
-              <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold">
-                Active Subs
-              </p>
-              <p className="text-white text-2xl font-bold mt-1">
-                {rcOverview?.active_subscriptions ?? 0}
-              </p>
+
+            {/* Active Subs */}
+            <button onClick={() => togglePanel("active")} className={`bg-[#141414] border rounded-xl p-5 text-left transition-all hover:bg-[#1a1a1a] ${subPanel === "active" ? "border-[#3b82f6]/40 ring-1 ring-[#3b82f6]/20" : "border-[#262626]"}`}>
+              <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
+              <p className="text-white text-3xl font-bold">{rc?.active_subs ?? 0}</p>
+              <p className="text-[#525252] text-[10px] mt-1">click to view</p>
             </button>
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-              <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold">
-                30-Day Revenue
-              </p>
-              <p className="text-white text-2xl font-bold mt-1">
-                {formatCurrency(rcOverview?.revenue_30d ?? 0)}
-              </p>
+
+            {/* 30-Day Revenue */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">28-Day Revenue</p>
+              <p className="text-white text-3xl font-bold">{fmtCur(rc?.revenue_30d ?? 0)}</p>
+              <p className="text-[#525252] text-[10px] mt-1">last 28 days</p>
             </div>
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-              <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">
-                Current MRR
-              </p>
-              <p className="text-white text-2xl font-bold mt-1">
-                {formatCurrency(rcOverview?.mrr ?? 0)}
-              </p>
+
+            {/* MRR */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Current MRR</p>
+              <p className="text-white text-3xl font-bold">{fmtCur(rc?.mrr ?? 0)}</p>
+              <p className="text-[#525252] text-[10px] mt-1">monthly recurring</p>
             </div>
           </div>
         )}
 
-        {/* ── Customer List Panel ── */}
-        {subscriberPanel && (
-          <div className="mt-4 bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[#262626]">
+        {/* Subscriber Panel */}
+        {subPanel && (
+          <div className="mt-4 bg-[#141414] border border-[#262626] rounded-xl overflow-hidden animate-in fade-in duration-200">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#262626]">
               <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${subPanel === "trial" ? "bg-[#22c55e]" : "bg-[#3b82f6]"}`} />
                 <h3 className="text-white text-sm font-semibold">
-                  {subscriberPanel === "trial" ? "Active Trials" : "Active Subscriptions"}
+                  {subPanel === "trial" ? "Active Trials" : "Active Subscriptions"}
                 </h3>
-                {!subscribersLoading && !subscribersError && (
-                  <span className="text-[#737373] text-xs">({subscribers.length})</span>
-                )}
+                {!subsLoading && !subsError && <span className="text-[#525252] text-xs">({subs.length})</span>}
               </div>
-              <button
-                onClick={() => setSubscriberPanel(null)}
-                className="text-[#737373] hover:text-white text-lg leading-none transition-colors"
-              >
-                &#x2715;
-              </button>
+              <button onClick={() => setSubPanel(null)} className="text-[#525252] hover:text-white text-sm">✕</button>
             </div>
-
-            {subscribersLoading ? (
-              <div className="p-6 text-center text-[#737373] text-sm">Loading...</div>
-            ) : subscribersError ? (
-              <div className="p-6 text-center text-[#ef4444] text-sm">{subscribersError}</div>
-            ) : subscribers.length === 0 ? (
-              <div className="p-6 text-center text-[#737373] text-sm">No subscribers found</div>
+            {subsLoading ? (
+              <div className="p-8 text-center text-[#525252] text-sm">Loading subscribers...</div>
+            ) : subsError ? (
+              <div className="p-8 text-center text-[#ef4444] text-sm">{subsError}</div>
+            ) : subs.length === 0 ? (
+              <div className="p-8 text-center text-[#525252] text-sm">No subscribers found</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
+                <table className="w-full min-w-[650px]">
                   <thead>
                     <tr className="border-b border-[#262626]">
-                      <th className="text-left px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        Country
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        App
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        Plan
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        Purchased
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        Expires
-                      </th>
-                      <th className="text-right px-4 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">
-                        Revenue
-                      </th>
+                      {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
+                        <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {subscribers.map((sub, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors"
-                      >
-                        <td className="px-4 py-2.5 text-white">
-                          {countryFlag(sub.country)}{" "}
-                          <span className="text-[#737373] text-xs ml-1">
-                            {sub.country?.toUpperCase() || "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-white">{sub.app || "—"}</td>
-                        <td className="px-4 py-2.5 text-white">{sub.plan || "—"}</td>
-                        <td className="px-4 py-2.5 text-[#737373]">{formatDate(sub.purchased)}</td>
-                        <td className="px-4 py-2.5 text-[#737373]">{formatDate(sub.expires)}</td>
-                        <td className="px-4 py-2.5 text-right text-white">
-                          {formatCurrency(sub.revenue || 0)}
-                        </td>
+                    {subs.map((s, i) => (
+                      <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
+                        <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{s.country?.toUpperCase() || "—"}</span></td>
+                        <td className="px-5 py-2.5 text-sm text-white">{s.app || "—"}</td>
+                        <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
+                        <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
+                        <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
+                        <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(s.revenue || 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -429,119 +328,125 @@ export default function OwnerDashboard() {
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* ── Platform Overview Section ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* TikTok Overview */}
-        <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-          <div className="h-1 bg-[#ff0050]" />
-          <div className="p-5">
-            <h3 className="text-white text-sm font-semibold mb-4">TikTok Overview</h3>
-            {metricsLoading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-[#1a1a1a] rounded animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Followers</span>
-                  <span className="text-white font-semibold">{formatNumber(tkFollowers)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Likes</span>
-                  <span className="text-white font-semibold">{formatNumber(tkLikes)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Posts</span>
-                  <span className="text-white font-semibold">{formatNumber(tkPosts)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* ═══ PLATFORM ANALYTICS ═══ */}
+      <section>
+        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-5">Platform Analytics</h2>
 
-        {/* Lemon8 Overview */}
-        <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-          <div className="h-1 bg-[#22c55e]" />
-          <div className="p-5">
-            <h3 className="text-white text-sm font-semibold mb-4">Lemon8 Overview</h3>
-            {metricsLoading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-[#1a1a1a] rounded animate-pulse" />
-                ))}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* TikTok */}
+          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#ff0050]" />
+                <h3 className="text-white text-sm font-semibold">TikTok</h3>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Followers</span>
-                  <span className="text-white font-semibold">{formatNumber(lmFollowers)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Likes</span>
-                  <span className="text-white font-semibold">{formatNumber(lmLikes)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#737373] text-xs">Total Posts</span>
-                  <span className="text-white font-semibold">{formatNumber(lmPosts)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Pinterest Overview */}
-        <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-          <div className="h-1 bg-[#e60023]" />
-          <div className="p-5">
-            <h3 className="text-white text-sm font-semibold mb-4">Pinterest Overview</h3>
-            {pinterestLoading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-[#1a1a1a] rounded animate-pulse" />
-                ))}
-              </div>
-            ) : pinterestAnalytics ? (
-              <div className="space-y-3">
-                {pinterestAnalytics.impressions > 0 && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#737373] text-xs">Impressions</span>
-                    <span className="text-white font-semibold">
-                      {formatNumber(pinterestAnalytics.impressions)}
-                    </span>
+            </div>
+            <div className="p-5">
+              {metricsLoading ? (
+                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Followers</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(tkFollowers)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Likes</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(tkLikes)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Posts</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(tkPosts)}</p>
+                    </div>
                   </div>
-                )}
-                {pinterestAnalytics.pin_clicks > 0 && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#737373] text-xs">Pin Clicks</span>
-                    <span className="text-white font-semibold">
-                      {formatNumber(pinterestAnalytics.pin_clicks)}
-                    </span>
-                  </div>
-                )}
-                {pinterestAnalytics.saves > 0 && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#737373] text-xs">Saves</span>
-                    <span className="text-white font-semibold">
-                      {formatNumber(pinterestAnalytics.saves)}
-                    </span>
-                  </div>
-                )}
-                {pinterestAnalytics.impressions === 0 &&
-                  pinterestAnalytics.pin_clicks === 0 &&
-                  pinterestAnalytics.saves === 0 && (
-                    <p className="text-[#525252] text-xs">No data yet</p>
+                  {tkFollowersByDay.length >= 2 && (
+                    <div>
+                      <p className="text-[#525252] text-[10px] mb-1">Followers Trend</p>
+                      <MiniChart data={tkFollowersByDay} color="#ff0050" />
+                    </div>
                   )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Lemon8 */}
+          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+                <h3 className="text-white text-sm font-semibold">Lemon8</h3>
               </div>
-            ) : (
-              <p className="text-[#525252] text-xs">No Pinterest accounts configured</p>
-            )}
+            </div>
+            <div className="p-5">
+              {metricsLoading ? (
+                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Followers</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(lmFollowers)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Likes</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(lmLikes)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#525252] text-[10px] uppercase">Posts</p>
+                      <p className="text-white text-lg font-bold">{fmtNum(lmPosts)}</p>
+                    </div>
+                  </div>
+                  {lmFollowersByDay.length >= 2 && (
+                    <div>
+                      <p className="text-[#525252] text-[10px] mb-1">Followers Trend</p>
+                      <MiniChart data={lmFollowersByDay} color="#22c55e" />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Pinterest */}
+          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#e60023]" />
+                <h3 className="text-white text-sm font-semibold">Pinterest</h3>
+              </div>
+            </div>
+            <div className="p-5">
+              {pinterestLoading ? (
+                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
+              ) : pinterestMetrics.length === 0 ? (
+                <p className="text-[#525252] text-xs">No analytics data yet</p>
+              ) : (
+                <div className="space-y-4">
+                  {pinterestMetrics.map((m) => {
+                    const values = m.data.map((d) => d.total);
+                    const total = values.reduce((s, v) => s + v, 0);
+                    if (total === 0) return null;
+                    const color = METRIC_COLORS[m.label] || "#737373";
+                    return (
+                      <div key={m.label}>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-[10px] uppercase" style={{ color }}>{m.label}</p>
+                          <p className="text-white text-sm font-bold">{fmtNum(total)}</p>
+                        </div>
+                        <MiniChart data={values} color={color} h={36} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
