@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60; // allow up to 60s for iterating all customers
+
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 let overviewCache: { data: unknown; timestamp: number } | null = null;
 let subsCache: { data: unknown; filter: string; timestamp: number } | null = null;
@@ -130,7 +132,7 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
   try {
     while (totalChecked < MAX_CUSTOMERS) {
       const url = new URL(`${RC_BASE}/projects/${projectId}/customers`);
-      url.searchParams.set("limit", "20");
+      url.searchParams.set("limit", "50");
       if (cursor) url.searchParams.set("starting_after", cursor);
 
       const res = await fetch(url.toString(), { headers: rcHeaders(apiKey) });
