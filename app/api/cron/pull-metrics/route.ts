@@ -169,6 +169,15 @@ async function sendTelegramReport(date: string, allMetrics: AccountMetrics[], rc
   let msg = `📊 *Daily Content Report*\n🗓 ${date}\n`;
   msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `\n📋 *Overall*\n\n`;
+
+  if (rcData) {
+    msg += `💰 *Roomy AI*\n`;
+    msg += `Yesterday Revenue: $${rcData.yesterdayRevenue.toFixed(2)}\n`;
+    msg += `Active Trials: ${rcData.activeTrials}\n`;
+    msg += `Active Subs: ${rcData.activeSubs}\n`;
+    msg += `Month Revenue: $${rcData.monthRevenue.toFixed(2)}\n\n`;
+  }
+
   msg += `🎵 *TikTok*\n`;
   msg += `Followers: ${fmt(totals.tkFollowers)}${diff(totals.tkFollowers, totals.prevTkFollowers)}\n`;
   msg += `Likes: ${fmt(totals.tkLikes)}${diff(totals.tkLikes, totals.prevTkLikes)}\n`;
@@ -177,14 +186,6 @@ async function sendTelegramReport(date: string, allMetrics: AccountMetrics[], rc
   msg += `Followers: ${fmt(totals.lmFollowers)}${diff(totals.lmFollowers, totals.prevLmFollowers)}\n`;
   msg += `Likes: ${fmt(totals.lmLikes)}${diff(totals.lmLikes, totals.prevLmLikes)}\n`;
   msg += `Posts: ${fmt(totals.lmPosts)}${diff(totals.lmPosts, totals.prevLmPosts)}\n`;
-
-  if (rcData) {
-    msg += `\n📱 *Roomy AI*\n`;
-    msg += `Yesterday Revenue: $${rcData.yesterdayRevenue.toFixed(2)}\n`;
-    msg += `Active Trials: ${rcData.activeTrials}\n`;
-    msg += `Active Subs: ${rcData.activeSubs}\n`;
-    msg += `Month Revenue: $${rcData.monthRevenue.toFixed(2)}\n`;
-  }
 
   for (const m of allMetrics) {
     const handle = m.username.replace(/^@/, "");
