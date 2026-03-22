@@ -178,7 +178,7 @@ async function uploadAndPost(
     title: seo.pin_title,
     description: seo.description,
     scheduledAt: scheduledAt.toISOString(),
-    appStoreUrl: account.app_store_url || "https://apps.apple.com/app/roomy-ai",
+    appStoreUrl: account.app_store_url || "https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8",
   } as SchedulePinParams);
 
   return { imageUrl: uploaded.path, postId };

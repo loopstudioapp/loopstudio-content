@@ -11,7 +11,7 @@ create table pinterest_accounts (
   status text not null default 'active' check (status in ('active', 'paused')),
   pins_per_day int not null default 10,
   telegram_chat_id text,
-  app_store_url text default 'https://apps.apple.com/app/roomy-ai',
+  app_store_url text default 'https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8',
   created_at timestamptz default now()
 );
 

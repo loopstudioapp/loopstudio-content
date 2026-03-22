@@ -82,7 +82,7 @@ export async function GET(req: Request) {
         title: pin.title,
         description: pin.description,
         scheduledAt: pin.scheduled_at || new Date().toISOString(),
-        appStoreUrl: account.app_store_url || "https://apps.apple.com/app/roomy-ai",
+        appStoreUrl: account.app_store_url || "https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8",
       });
 
       await supabase.from("pinterest_pins").update({

@@ -57,7 +57,7 @@ export async function POST() {
           content_type: "visual_guide",
           status: integration.disabled ? "paused" : "active",
           pins_per_day: 5,
-          app_store_url: "https://apps.apple.com/app/roomy-ai",
+          app_store_url: "https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8",
         });
       } else {
         // Update existing — sync status
