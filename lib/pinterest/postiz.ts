@@ -16,7 +16,7 @@ interface UploadResult {
 
 function headers(apiKey: string, extra?: Record<string, string>) {
   return {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: apiKey,
     ...extra,
   };
 }
@@ -113,7 +113,9 @@ export async function schedulePin(
   }
 
   const data = await res.json();
-  return data.id;
+  // Postiz returns an array: [{ postId, integration }]
+  if (Array.isArray(data)) return data[0]?.postId || data[0]?.id;
+  return data.postId || data.id;
 }
 
 /**
