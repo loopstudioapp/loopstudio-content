@@ -252,8 +252,8 @@ export default function OwnerDashboard() {
           <table className="w-full min-w-[650px]">
             <thead>
               <tr className="border-b border-[#262626]">
-                {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
-                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
+                {["Country", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
+                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 4 ? "text-right" : "text-left"}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -261,7 +261,6 @@ export default function OwnerDashboard() {
               {items.map((s, i) => (
                 <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
                   <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{countryName(s.country)}</span></td>
-                  <td className="px-5 py-2.5 text-sm text-white">{s.app || "—"}</td>
                   <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
