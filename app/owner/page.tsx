@@ -175,7 +175,7 @@ export default function OwnerDashboard() {
     try {
       const r = await fetch("/api/revenuecat?type=subscribers&filter=trial");
       const d = await r.json();
-      if (!d.error) { trials = d.subscribers || []; setTrialSubs(trials); }
+      if (!d.error) { trials = (d.subscribers || []).sort((a: Subscriber, b: Subscriber) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()); setTrialSubs(trials); }
       else setTrialsError(d.error);
     } catch { setTrialsError("Failed to load"); }
     finally { setTrialsLoading(false); }
@@ -183,7 +183,7 @@ export default function OwnerDashboard() {
     try {
       const r = await fetch("/api/revenuecat?type=subscribers&filter=active");
       const d = await r.json();
-      if (!d.error) { active = d.subscribers || []; setActiveSubs(active); }
+      if (!d.error) { active = (d.subscribers || []).sort((a: Subscriber, b: Subscriber) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()); setActiveSubs(active); }
       else setActiveError(d.error);
     } catch { setActiveError("Failed to load"); }
     finally { setActiveLoading(false); }
