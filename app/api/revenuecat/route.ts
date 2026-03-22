@@ -144,26 +144,40 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
       const items = json.items || [];
       if (items.length === 0) break;
 
-      // Check subscriptions for each customer in parallel (batch of 20)
-      const subResults = await Promise.all(
-        items.map(async (c: { id: string; last_seen_country?: string }) => {
-          const encoded = encodeURIComponent(c.id);
-          const subRes = await fetch(
-            `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
-            { headers: rcHeaders(apiKey) }
-          );
-          if (!subRes.ok) return [];
-          const subJson = await subRes.json();
-          return (subJson.items || []).map((s: Record<string, unknown>) => ({
-            customerId: c.id,
-            customerCountry: c.last_seen_country || "",
-            ...s,
-          }));
-        })
-      );
-
+      // Check subscriptions in small batches to avoid rate limits
+      const subResults: Record<string, unknown>[][] = [];
+      for (let bi = 0; bi < items.length; bi += 5) {
+        const batch = items.slice(bi, bi + 5);
+        const batchResults = await Promise.all(
+          batch.map(async (c: { id: string; last_seen_country?: string }) => {
+            const encoded = encodeURIComponent(c.id);
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const subRes = await fetch(
+                `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
+                { headers: rcHeaders(apiKey) }
+              );
+              if (subRes.status === 429) {
+                await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                continue;
+              }
+              if (!subRes.ok) return [];
+              const subJson = await subRes.json();
+              return (subJson.items || []).map((s: Record<string, unknown>) => ({
+                customerId: c.id,
+                customerCountry: c.last_seen_country || "",
+                ...s,
+              }));
+            }
+            return [];
+          })
+        );
+        subResults.push(...batchResults);
+        if (bi + 5 < items.length) await new Promise(r => setTimeout(r, 200));
+      }
       for (const subs of subResults) {
-        for (const sub of subs) {
+        for (const rawSub of subs) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sub = rawSub as any;
           const status = (sub.status || "").toLowerCase();
           const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
           const givesAccess = sub.gives_access === true;
@@ -173,22 +187,20 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
           // Filter logic
           let matches = false;
           if (filter === "trial") {
-            // Active trials that are NOT cancelled (auto_renewal = will_renew)
             matches = status === "trialing" && autoRenewal === "will_renew" && givesAccess;
           } else if (filter === "active") {
-            // Active paid subs that are NOT cancelled
             matches = status === "active" && autoRenewal === "will_renew" && givesAccess;
           }
 
           if (matches) {
             const rev = sub.total_revenue_in_usd as { proceeds?: number; gross?: number } | undefined;
             subscribers.push({
-              id: sub.customerId,
+              id: sub.customerId || "",
               country: (sub.country || sub.customerCountry || "").toUpperCase(),
               app: sub.store || "app_store",
               plan: planName(sub.product_id || ""),
-              purchase_date: msToISO(sub.starts_at),
-              expiry_date: msToISO(sub.current_period_ends_at),
+              purchase_date: msToISO(sub.starts_at ?? null),
+              expiry_date: msToISO(sub.current_period_ends_at ?? null),
               revenue: rev?.gross ?? rev?.proceeds ?? 0,
               auto_renewal: sub.auto_renewal_status || "",
               status: sub.status || "",
