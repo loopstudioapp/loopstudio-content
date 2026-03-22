@@ -208,10 +208,13 @@ export default function OwnerDashboard() {
   const lmPostsByDay = byDate("lm8_posts");
 
   // Pinterest metric helpers
-  const pinMetric = (label: string) => pinterestMetrics.find((m) => m.label.toLowerCase().includes(label));
-  const pinValues = (label: string) => pinMetric(label)?.data.map((d) => d.total) || [];
-  const pinTotal = (label: string) => pinValues(label).reduce((s, v) => s + v, 0);
-  const pinDates = (label: string) => pinMetric(label)?.data.map((d) => d.date) || [];
+  const pinMetric = (key: string) => {
+    const exact: Record<string, string> = { impression: "Impressions", click: "Pin Clicks", save: "Saves" };
+    return pinterestMetrics.find((m) => m.label === exact[key]);
+  };
+  const pinValues = (key: string) => pinMetric(key)?.data.map((d) => d.total) || [];
+  const pinTotal = (key: string) => pinValues(key).reduce((s, v) => s + v, 0);
+  const pinDates = (key: string) => pinMetric(key)?.data.map((d) => d.date) || [];
 
   const btnCls = "px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors";
   const tabCls = (active: boolean) => `px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${active ? "bg-white/10 text-white" : "text-[#525252] hover:text-white"}`;
