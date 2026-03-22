@@ -85,22 +85,9 @@ Return ONLY valid JSON:
    STEP 2: Generate Infographic Image
    ═══════════════════════════════════════════════════════════════ */
 
-/** Step 2a: GPT-4o crafts the image generation prompt */
-async function craftImagePrompt(idea: InfographicIdea): Promise<string> {
-  const res = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `Write a detailed image generation prompt for:
-Make a pinterest infographics "${idea.title}" with a plain light beige/cream background (#F5F0E8). At the very bottom, add a simple clean banner with just the text "${APP_NAME}", the CTA "Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge.
-Return ONLY the prompt text, nothing else.`,
-      },
-    ],
-  });
-
-  return res.choices[0]?.message?.content?.trim() || "";
+/** Build image prompt directly (no GPT-4o middleman) */
+function buildImagePrompt(idea: InfographicIdea): string {
+  return `Create a Pinterest infographic titled "${idea.title}" on a plain light beige/cream background with the hex color code #F5F0E8. The design should be informative, featuring step-by-step text instructions or tips on the topic. Use elegant and modern typography with a well-organized layout to enhance readability. At the very bottom, add a simple clean banner with just the text CTA "${APP_NAME}: Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge. Ensure that all text and elements are easily legible against the background.`;
 }
 
 /** Step 2b: Generate the image with gpt-image-1.5 */
@@ -185,7 +172,7 @@ async function uploadAndPost(
 
   const postId = await schedulePin(apiKey, {
     integrationId: account.postiz_integration_id,
-    boardId: account.board_id,
+    boardId: seo.board_name,
     imageUrl: uploaded.path,
     imageId: uploaded.id,
     title: seo.pin_title,
@@ -217,8 +204,8 @@ async function processPin(
       topic_id: idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60),
     }).eq("id", pinId);
 
-    // Step 2: Generate image
-    const imagePrompt = await craftImagePrompt(idea);
+    // Step 2: Generate image (direct prompt, no GPT-4o middleman)
+    const imagePrompt = buildImagePrompt(idea);
     const imageB64 = await generateImage(imagePrompt);
     if (!imageB64) throw new Error("Image generation failed after 3 attempts");
 
