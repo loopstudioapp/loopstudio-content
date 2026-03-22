@@ -189,7 +189,7 @@ async function fetchSubscribers(apiKey: string, projectId: string, filter: strin
               plan: planName(sub.product_id || ""),
               purchase_date: msToISO(sub.starts_at),
               expiry_date: msToISO(sub.current_period_ends_at),
-              revenue: rev?.proceeds ?? rev?.gross ?? 0,
+              revenue: rev?.gross ?? rev?.proceeds ?? 0,
               auto_renewal: sub.auto_renewal_status || "",
               status: sub.status || "",
             });
