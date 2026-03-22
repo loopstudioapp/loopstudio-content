@@ -392,7 +392,7 @@ export default function PinterestPage() {
         ) : overallAnalytics.length === 0 ? (
           <p className="text-[#525252] text-sm py-4">No analytics data yet</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {overallAnalytics.map((metric) => (
               <MetricCard key={metric.label} metric={metric} />
             ))}
@@ -484,7 +484,7 @@ export default function PinterestPage() {
           ) : analytics.length === 0 ? (
             <p className="text-[#525252] text-sm py-4">No analytics data available</p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {analytics.map((metric) => (
                 <MetricCard key={metric.label} metric={metric} />
               ))}
