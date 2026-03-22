@@ -85,6 +85,11 @@ function countryFlag(code: string): string {
   if (!code || code.length !== 2) return "🌍";
   return String.fromCodePoint(...code.toUpperCase().split("").map((c) => 127397 + c.charCodeAt(0)));
 }
+function countryName(code: string): string {
+  if (!code) return "—";
+  try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) || code.toUpperCase(); }
+  catch { return code.toUpperCase(); }
+}
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -250,7 +255,7 @@ export default function OwnerDashboard() {
             <tbody>
               {items.map((s, i) => (
                 <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
-                  <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{s.country?.toUpperCase() || "—"}</span></td>
+                  <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{countryName(s.country)}</span></td>
                   <td className="px-5 py-2.5 text-sm text-white">{s.app || "—"}</td>
                   <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
