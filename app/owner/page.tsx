@@ -343,12 +343,12 @@ export default function OwnerDashboard() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                   <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Trials</p>
-                  <p className="text-white text-3xl font-bold">{rc?.active_trials ?? 0}</p>
+                  <p className="text-white text-3xl font-bold">{trialSubs.length || rc?.active_trials || 0}</p>
                   <p className="text-[#525252] text-[10px] mt-1">non-cancelled</p>
                 </div>
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                   <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
-                  <p className="text-white text-3xl font-bold">{rc?.active_subs ?? 0}</p>
+                  <p className="text-white text-3xl font-bold">{activeSubs.length || rc?.active_subs || 0}</p>
                   <p className="text-[#525252] text-[10px] mt-1">non-cancelled</p>
                 </div>
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
