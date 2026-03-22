@@ -33,7 +33,8 @@ export async function GET(req: Request) {
     }
 
     const data = await res.json();
-    return NextResponse.json(data);
+    const filtered = Array.isArray(data) ? data.filter((m: { label: string }) => m.label !== "Engagement") : data;
+    return NextResponse.json(filtered);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Failed to fetch analytics";
     return NextResponse.json({ error: msg }, { status: 500 });

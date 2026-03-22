@@ -94,7 +94,6 @@ const METRIC_COLORS: Record<string, string> = {
   "Pin click rate": "#8b5cf6",
   Impressions: "#22c55e",
   "Pin Clicks": "#3b82f6",
-  Engagement: "#e60023",
   Saves: "#f59e0b",
 };
 
