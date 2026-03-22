@@ -124,6 +124,19 @@ export default function OwnerDashboard() {
   const [activeLoading, setActiveLoading] = useState(false);
   const [trialsError, setTrialsError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
+
+  // Load saved RevenueCat data from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("rc_data");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.overview) { setRc(parsed.overview); setRcLoaded(true); }
+        if (parsed.trials) setTrialSubs(parsed.trials);
+        if (parsed.active) setActiveSubs(parsed.active);
+      }
+    } catch { /* ignore */ }
+  }, []);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [pinterestMetrics, setPinterestMetrics] = useState<AnalyticsMetric[]>([]);
@@ -139,20 +152,25 @@ export default function OwnerDashboard() {
     setRcLoading(true); setRcError(null);
     setTrialsLoading(true); setActiveLoading(true);
     setTrialsError(null); setActiveError(null);
+
+    let overview: RCOverview | null = null;
+    let trials: Subscriber[] = [];
+    let active: Subscriber[] = [];
+
     try {
       const r = await fetch("/api/revenuecat?type=overview");
       const d = await r.json();
       if (d.error) throw new Error(d.error);
+      overview = d;
       setRc(d);
       setRcLoaded(true);
     } catch (e: unknown) { setRcError(e instanceof Error ? e.message : "Failed"); }
     finally { setRcLoading(false); }
 
-    // Load both trial and active subscriber lists
     try {
       const r = await fetch("/api/revenuecat?type=subscribers&filter=trial");
       const d = await r.json();
-      if (!d.error) setTrialSubs(d.subscribers || []);
+      if (!d.error) { trials = d.subscribers || []; setTrialSubs(trials); }
       else setTrialsError(d.error);
     } catch { setTrialsError("Failed to load"); }
     finally { setTrialsLoading(false); }
@@ -160,10 +178,15 @@ export default function OwnerDashboard() {
     try {
       const r = await fetch("/api/revenuecat?type=subscribers&filter=active");
       const d = await r.json();
-      if (!d.error) setActiveSubs(d.subscribers || []);
+      if (!d.error) { active = d.subscribers || []; setActiveSubs(active); }
       else setActiveError(d.error);
     } catch { setActiveError("Failed to load"); }
     finally { setActiveLoading(false); }
+
+    // Save to localStorage
+    try {
+      localStorage.setItem("rc_data", JSON.stringify({ overview, trials, active, ts: Date.now() }));
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -293,7 +316,7 @@ export default function OwnerDashboard() {
       {/* ═══ ROOMY AI REVENUE ═══ */}
       <section className="mb-10">
         <div className="flex items-center gap-3 mb-5">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Roomy AI — Revenue</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Roomy AI</h2>
           <button
             onClick={loadRevenueCat}
             disabled={rcLoading}
