@@ -21,8 +21,8 @@ function rcHeaders(apiKey: string) {
 
 function planName(productId: string): string {
   if (!productId) return "—";
-  if (productId.includes("weekly") || productId === "prod64a4d6b792") return "Weekly";
-  if (productId.includes("yearly") || productId.includes("annual") || productId === "prodb2f4f71b2d") return "Yearly";
+  if (productId.includes("weekly") || productId === "prodb2f4f71b2d") return "Weekly";
+  if (productId.includes("yearly") || productId.includes("annual") || productId === "prod64a4d6b792") return "Yearly";
   if (productId.includes("monthly")) return "Monthly";
   return productId;
 }
