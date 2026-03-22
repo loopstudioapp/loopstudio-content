@@ -87,7 +87,7 @@ export async function schedulePin(
         value: [
           {
             content: params.description,
-            image: [{ id: params.imageUrl, path: params.imageUrl }],
+            image: [{ id: params.imageId || params.imageUrl, path: params.imageUrl }],
           },
         ],
         settings: {

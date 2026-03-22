@@ -1,13 +1,13 @@
 import OpenAI from "openai";
 import { supabase } from "@/lib/supabase";
-import { buildPinPrompt } from "./prompts";
-import { createPostizClient } from "./postiz";
+import { uploadImage, schedulePin } from "./postiz";
 import { generateRandomTimes } from "./scheduler";
-import type { PinterestAccount, ContentType, SchedulePinParams } from "./types";
+import type { PinterestAccount, SchedulePinParams } from "./types";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const APP_NAME = "Roomy AI";
 
 async function sendTelegram(chatId: string, text: string) {
   if (!TELEGRAM_BOT_TOKEN) return;
@@ -18,101 +18,244 @@ async function sendTelegram(chatId: string, text: string) {
   });
 }
 
-/** Pick N least-recently-used topics for a given content type */
-async function pickTopics(category: ContentType, count: number) {
-  const { data: topics } = await supabase
-    .from("pinterest_topics")
-    .select("*")
-    .eq("category", category)
-    .order("times_used", { ascending: true })
-    .order("last_used_at", { ascending: true, nullsFirst: true })
-    .limit(count);
-
-  return topics || [];
+/** Strip markdown code fences and parse JSON */
+function parseJSON<T>(raw: string): T {
+  const cleaned = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+  return JSON.parse(cleaned);
 }
 
-/** Generate a single pin image via GPT-image-1.5 */
+/** Get last 20 pin titles for dedup */
+async function getRecentTitles(accountId: string): Promise<string[]> {
+  const { data } = await supabase
+    .from("pinterest_pins")
+    .select("title")
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  return (data || []).map((r) => r.title);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP 1: Generate Infographic Idea via GPT-4o
+   ═══════════════════════════════════════════════════════════════ */
+interface InfographicIdea {
+  title: string;
+  steps: { step_title: string; description: string }[];
+}
+
+async function generateIdea(recentTitles: string[]): Promise<InfographicIdea> {
+  const recentList = recentTitles.length > 0
+    ? recentTitles.map((t) => `- ${t}`).join("\n")
+    : "(none)";
+
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: `Generate a step-by-step infographic idea for a Pinterest pin about home design, interior styling, or room organization.
+
+Requirements:
+- Can be any number of steps (3-7), whatever fits the topic best
+- Title should be catchy, viral on pinterest and SEO-friendly
+- Focus on topics that interior designers, homeowners, renters, and design enthusiasts search for
+- Topics: bedroom, living room, kitchen, bathroom, closet, small spaces, apartments, color schemes, furniture arrangement, lighting, cozy vibes, minimalist, modern, boho, scandinavian, etc.
+
+Do NOT repeat these recent topics:
+${recentList}
+
+Return ONLY valid JSON:
+{
+    "title": "...",
+    "steps": [
+        {"step_title": "...", "description": "..."},
+        ...
+    ]
+}`,
+      },
+    ],
+  });
+
+  const raw = res.choices[0]?.message?.content || "";
+  return parseJSON<InfographicIdea>(raw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP 2: Generate Infographic Image
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Step 2a: GPT-4o crafts the image generation prompt */
+async function craftImagePrompt(idea: InfographicIdea): Promise<string> {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: `Write a detailed image generation prompt for:
+Make a pinterest infographics "${idea.title}" with a plain light beige/cream background (#F5F0E8). At the very bottom, add a simple clean banner with just the text "${APP_NAME}", the CTA "Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge.
+Return ONLY the prompt text, nothing else.`,
+      },
+    ],
+  });
+
+  return res.choices[0]?.message?.content?.trim() || "";
+}
+
+/** Step 2b: Generate the image with gpt-image-1.5 */
 async function generateImage(prompt: string): Promise<string | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const result = await openai.images.generate({
         model: "gpt-image-1.5",
         prompt,
-        quality: "medium",
+        quality: "low",
         size: "1024x1536",
         n: 1,
       });
       return result.data?.[0]?.b64_json ?? null;
     } catch (e: unknown) {
       const err = e as { status?: number };
-      if (err.status === 400 && attempt < 2) continue; // safety filter — retry
+      if (err.status === 400 && attempt < 2) continue;
       throw e;
     }
   }
   return null;
 }
 
-/** Process a single pin: generate image → upload to Postiz → schedule */
+/* ═══════════════════════════════════════════════════════════════
+   STEP 3: Generate SEO Metadata via GPT-4o
+   ═══════════════════════════════════════════════════════════════ */
+interface SEOMetadata {
+  pin_title: string;
+  description: string;
+  tags: string[];
+  board_name: string;
+}
+
+async function generateSEO(idea: InfographicIdea): Promise<SEOMetadata> {
+  const stepTitles = idea.steps.map((s) => s.step_title);
+
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 512,
+    messages: [
+      {
+        role: "user",
+        content: `You are a Pinterest SEO expert. Generate optimized metadata for a pin about:
+
+Title: ${idea.title}
+Steps: ${JSON.stringify(stepTitles)}
+
+Generate:
+1. **pin_title**: Catchy, keyword-rich title (max 100 chars). Use power words (Easy, Ultimate, Best, Simple). Include the room/design topic.
+2. **description**: SEO-optimized description (150-300 chars). Include relevant keywords naturally. End with a CTA mentioning ${APP_NAME} for AI room design.
+3. **tags**: 8-12 relevant Pinterest tags/keywords. Mix broad ("home decor") and specific ("small bedroom ideas"). Include trending terms.
+4. **board_name**: Best board name for this pin (e.g., "Bedroom Design Ideas", "Small Space Solutions")
+
+Return ONLY valid JSON:
+{
+    "pin_title": "...",
+    "description": "...",
+    "tags": ["...", "..."],
+    "board_name": "..."
+}`,
+      },
+    ],
+  });
+
+  const raw = res.choices[0]?.message?.content || "";
+  return parseJSON<SEOMetadata>(raw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP 4: Upload & Post via Postiz
+   ═══════════════════════════════════════════════════════════════ */
+async function uploadAndPost(
+  apiKey: string,
+  imageB64: string,
+  pinId: string,
+  account: PinterestAccount,
+  seo: SEOMetadata,
+  scheduledAt: Date
+): Promise<{ imageUrl: string; postId: string }> {
+  const imageBuffer = Buffer.from(imageB64, "base64");
+  const uploaded = await uploadImage(apiKey, imageBuffer, `pin-${pinId}.png`);
+
+  const postId = await schedulePin(apiKey, {
+    integrationId: account.postiz_integration_id,
+    boardId: account.board_id,
+    imageUrl: uploaded.path,
+    imageId: uploaded.id,
+    title: seo.pin_title,
+    description: seo.description,
+    scheduledAt: scheduledAt.toISOString(),
+    appStoreUrl: account.app_store_url || "https://apps.apple.com/app/roomy-ai",
+  } as SchedulePinParams);
+
+  return { imageUrl: uploaded.path, postId };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN PIPELINE — Process one pin end-to-end
+   ═══════════════════════════════════════════════════════════════ */
 async function processPin(
   pinId: string,
   account: PinterestAccount,
-  topic: { id: string; title_template: string; description_template: string; prompt_seed: string },
+  recentTitles: string[],
   scheduledAt: Date
-): Promise<{ success: boolean; error?: string }> {
-  const postiz = createPostizClient(account.postiz_api_key);
-
+): Promise<{ success: boolean; title?: string; error?: string }> {
   try {
-    // Update status to generating
+    // Step 1: Generate idea
     await supabase.from("pinterest_pins").update({ status: "generating" }).eq("id", pinId);
+    const idea = await generateIdea(recentTitles);
 
-    // Build prompt and generate image
-    const prompt = buildPinPrompt(account.content_type, {
-      titleTemplate: topic.title_template,
-      promptSeed: topic.prompt_seed,
-    });
-    const imageB64 = await generateImage(prompt);
-    if (!imageB64) throw new Error("Failed to generate image after 3 attempts");
+    // Update pin with generated title
+    await supabase.from("pinterest_pins").update({
+      title: idea.title,
+      topic_id: idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60),
+    }).eq("id", pinId);
 
-    // Update status to uploading
-    await supabase.from("pinterest_pins").update({ status: "uploading" }).eq("id", pinId);
+    // Step 2: Generate image
+    const imagePrompt = await craftImagePrompt(idea);
+    const imageB64 = await generateImage(imagePrompt);
+    if (!imageB64) throw new Error("Image generation failed after 3 attempts");
 
-    // Upload to Postiz
-    const imageBuffer = Buffer.from(imageB64, "base64");
-    const uploaded = await postiz.uploadImage(imageBuffer, `pin-${pinId}.png`);
+    // Step 3: Generate SEO metadata
+    const seo = await generateSEO(idea);
 
-    // Schedule on Pinterest via Postiz
-    const postId = await postiz.schedulePin({
-      integrationId: account.postiz_integration_id,
-      boardId: account.board_id,
-      imageUrl: uploaded.path,
-      imageId: uploaded.id,
-      title: topic.title_template,
-      description: topic.description_template,
-      scheduledAt: scheduledAt.toISOString(),
-      appStoreUrl: account.app_store_url || "https://apps.apple.com/app/roomy-ai",
-    } as SchedulePinParams);
+    // Update pin with SEO data
+    await supabase.from("pinterest_pins").update({
+      title: seo.pin_title,
+      description: seo.description,
+      status: "uploading",
+    }).eq("id", pinId);
 
-    // Update pin as scheduled
+    // Step 4: Upload & schedule via Postiz
+    const { imageUrl, postId } = await uploadAndPost(
+      account.postiz_api_key,
+      imageB64,
+      pinId,
+      account,
+      seo,
+      scheduledAt
+    );
+
+    // Mark as scheduled
     await supabase.from("pinterest_pins").update({
       status: "scheduled",
-      image_url: uploaded.path,
+      image_url: imageUrl,
       postiz_post_id: postId,
       scheduled_at: scheduledAt.toISOString(),
     }).eq("id", pinId);
 
-    // Mark topic as used
-    await supabase.from("pinterest_topics").update({
-      times_used: (topic as { times_used?: number }).times_used ? (topic as { times_used?: number }).times_used! + 1 : 1,
-      last_used_at: new Date().toISOString(),
-    }).eq("id", topic.id);
-
-    return { success: true };
+    return { success: true, title: seo.pin_title };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     await supabase.from("pinterest_pins").update({
       status: "failed",
       error_message: msg,
-      retry_count: 1,
     }).eq("id", pinId);
     return { success: false, error: msg };
   }
@@ -125,23 +268,19 @@ export async function runPipelineForAccount(account: PinterestAccount): Promise<
   errors: string[];
 }> {
   const count = account.pins_per_day || 10;
-  const topics = await pickTopics(account.content_type, count);
+  const recentTitles = await getRecentTitles(account.id);
 
-  if (topics.length === 0) {
-    return { scheduled: 0, failed: 0, errors: ["No topics found for " + account.content_type] };
-  }
-
-  // Generate random schedule times for tomorrow (or today if triggered manually)
+  // Generate random schedule times for tomorrow
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const times = generateRandomTimes(topics.length, tomorrow);
+  const times = generateRandomTimes(count, tomorrow);
 
-  // Insert pending pins
-  const pinInserts = topics.map((topic, i) => ({
+  // Insert placeholder pins
+  const pinInserts = Array.from({ length: count }, (_, i) => ({
     account_id: account.id,
-    topic_id: topic.id,
-    title: topic.title_template,
-    description: topic.description_template,
+    topic_id: "generating",
+    title: "Generating...",
+    description: "",
     scheduled_at: times[i].toISOString(),
     status: "pending" as const,
   }));
@@ -155,23 +294,26 @@ export async function runPipelineForAccount(account: PinterestAccount): Promise<
     return { scheduled: 0, failed: 0, errors: ["Failed to insert pins"] };
   }
 
-  // Process each pin sequentially (rate limit friendly)
   let scheduled = 0;
   let failed = 0;
   const errors: string[] = [];
+  const usedTitles = [...recentTitles];
 
   for (let i = 0; i < pins.length; i++) {
-    const result = await processPin(pins[i].id, account, topics[i], times[i]);
+    const result = await processPin(pins[i].id, account, usedTitles, times[i]);
+
     if (result.success) {
       scheduled++;
+      if (result.title) usedTitles.push(result.title);
     } else {
       failed++;
-      if (result.error) errors.push(`${topics[i].id}: ${result.error}`);
+      if (result.error) errors.push(result.error);
     }
 
-    // Rate limit: wait 4s between pins (Postiz: 30 req/hour = 1 every 2 min, but we make 2 calls per pin)
+    // Random delay 2-5 min between pins (anti-spam + rate limit)
     if (i < pins.length - 1) {
-      await new Promise((r) => setTimeout(r, 4000));
+      const delay = (120 + Math.random() * 180) * 1000;
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
 
@@ -208,10 +350,8 @@ export async function runFullPipeline(): Promise<string> {
 
   const summary = results.join("\n");
 
-  // Send Telegram summary
-  const chatId = ADMIN_CHAT_ID;
-  if (chatId) {
-    await sendTelegram(chatId, summary);
+  if (ADMIN_CHAT_ID) {
+    await sendTelegram(ADMIN_CHAT_ID, summary);
   }
 
   return summary;
