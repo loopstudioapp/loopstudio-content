@@ -196,20 +196,22 @@ export default function OwnerDashboard() {
   const lmLikes = latest.reduce((s, m) => s + (m.lm8_total_likes || 0), 0);
   const lmPosts = latest.reduce((s, m) => s + (m.lm8_posts || 0), 0);
 
-  // Get last 7 days of metrics for charts
-  const last7 = metrics
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-21); // 3 accounts × 7 days
-  const dateSet = [...new Set(last7.map((m) => m.date))].sort();
-  const tkFollowersByDay = dateSet.map((d) => last7.filter((m) => m.date === d).reduce((s, m) => s + (m.followers || 0), 0));
-  const lmFollowersByDay = dateSet.map((d) => last7.filter((m) => m.date === d).reduce((s, m) => s + (m.lm8_followers || 0), 0));
+  // Build time-series data for charts (aggregate by date across accounts)
+  const sorted = [...metrics].sort((a, b) => a.date.localeCompare(b.date));
+  const dateSet = [...new Set(sorted.map((m) => m.date))].sort();
+  const byDate = (field: keyof MetricsRow) =>
+    dateSet.map((d) => sorted.filter((m) => m.date === d).reduce((s, m) => s + (Number(m[field]) || 0), 0));
 
-  const METRIC_COLORS: Record<string, string> = {
-    "Pin click rate": "#8b5cf6",
-    Impressions: "#22c55e",
-    "Pin Clicks": "#3b82f6",
-    Saves: "#f59e0b",
-  };
+  const tkLikesByDay = byDate("total_likes");
+  const tkPostsByDay = byDate("posts");
+  const lmLikesByDay = byDate("lm8_total_likes");
+  const lmPostsByDay = byDate("lm8_posts");
+
+  // Pinterest metric helpers
+  const pinMetric = (label: string) => pinterestMetrics.find((m) => m.label.toLowerCase().includes(label));
+  const pinValues = (label: string) => pinMetric(label)?.data.map((d) => d.total) || [];
+  const pinTotal = (label: string) => pinValues(label).reduce((s, v) => s + v, 0);
+  const pinDates = (label: string) => pinMetric(label)?.data.map((d) => d.date) || [];
 
   const btnCls = "px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors";
   const tabCls = (active: boolean) => `px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${active ? "bg-white/10 text-white" : "text-[#525252] hover:text-white"}`;
@@ -330,122 +332,170 @@ export default function OwnerDashboard() {
         )}
       </section>
 
-      {/* ═══ PLATFORM ANALYTICS ═══ */}
-      <section>
-        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-5">Platform Analytics</h2>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* TikTok */}
-          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ff0050]" />
-                <h3 className="text-white text-sm font-semibold">TikTok</h3>
-              </div>
-            </div>
-            <div className="p-5">
-              {metricsLoading ? (
-                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Followers</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(tkFollowers)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Likes</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(tkLikes)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Posts</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(tkPosts)}</p>
-                    </div>
-                  </div>
-                  {tkFollowersByDay.length >= 2 && (
-                    <div>
-                      <p className="text-[#525252] text-[10px] mb-1">Followers Trend</p>
-                      <MiniChart data={tkFollowersByDay} color="#ff0050" />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Lemon8 */}
-          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-                <h3 className="text-white text-sm font-semibold">Lemon8</h3>
-              </div>
-            </div>
-            <div className="p-5">
-              {metricsLoading ? (
-                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Followers</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(lmFollowers)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Likes</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(lmLikes)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#525252] text-[10px] uppercase">Posts</p>
-                      <p className="text-white text-lg font-bold">{fmtNum(lmPosts)}</p>
-                    </div>
-                  </div>
-                  {lmFollowersByDay.length >= 2 && (
-                    <div>
-                      <p className="text-[#525252] text-[10px] mb-1">Followers Trend</p>
-                      <MiniChart data={lmFollowersByDay} color="#22c55e" />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Pinterest */}
-          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-            <div className="px-5 pt-5 pb-3 border-b border-[#262626]">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#e60023]" />
-                <h3 className="text-white text-sm font-semibold">Pinterest</h3>
-              </div>
-            </div>
-            <div className="p-5">
-              {pinterestLoading ? (
-                <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-10 bg-[#1a1a1a] rounded animate-pulse" />)}</div>
-              ) : pinterestMetrics.length === 0 ? (
-                <p className="text-[#525252] text-xs">No analytics data yet</p>
-              ) : (
-                <div className="space-y-4">
-                  {pinterestMetrics.map((m) => {
-                    const values = m.data.map((d) => d.total);
-                    const total = values.reduce((s, v) => s + v, 0);
-                    if (total === 0) return null;
-                    const color = METRIC_COLORS[m.label] || "#737373";
-                    return (
-                      <div key={m.label}>
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-[10px] uppercase" style={{ color }}>{m.label}</p>
-                          <p className="text-white text-sm font-bold">{fmtNum(total)}</p>
-                        </div>
-                        <MiniChart data={values} color={color} h={36} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+      {/* ═══ TIKTOK ═══ */}
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#ff0050]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">TikTok</h2>
         </div>
+        {metricsLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[0, 1].map((i) => <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-40 animate-pulse" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* TikTok Likes */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#ff0050] text-xs font-semibold uppercase tracking-wider">Total Likes</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(tkLikes)}</p>
+              </div>
+              {tkLikesByDay.length >= 2 && (
+                <>
+                  <MiniChart data={tkLikesByDay} color="#ff0050" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{dateSet[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{dateSet[dateSet.length - 1]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* TikTok Posts */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#f472b6] text-xs font-semibold uppercase tracking-wider">Total Posts</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(tkPosts)}</p>
+              </div>
+              {tkPostsByDay.length >= 2 && (
+                <>
+                  <MiniChart data={tkPostsByDay} color="#f472b6" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{dateSet[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{dateSet[dateSet.length - 1]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ═══ LEMON8 ═══ */}
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Lemon8</h2>
+        </div>
+        {metricsLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[0, 1].map((i) => <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-40 animate-pulse" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Lemon8 Likes */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#22c55e] text-xs font-semibold uppercase tracking-wider">Total Likes</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(lmLikes)}</p>
+              </div>
+              {lmLikesByDay.length >= 2 && (
+                <>
+                  <MiniChart data={lmLikesByDay} color="#22c55e" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{dateSet[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{dateSet[dateSet.length - 1]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Lemon8 Posts */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-wider">Total Posts</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(lmPosts)}</p>
+              </div>
+              {lmPostsByDay.length >= 2 && (
+                <>
+                  <MiniChart data={lmPostsByDay} color="#4ade80" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{dateSet[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{dateSet[dateSet.length - 1]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ═══ PINTEREST ═══ */}
+      <section>
+        <div className="flex items-center gap-2 mb-5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#e60023]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Pinterest</h2>
+        </div>
+        {pinterestLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[0, 1, 2].map((i) => <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-40 animate-pulse" />)}
+          </div>
+        ) : pinterestMetrics.length === 0 ? (
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">No Pinterest analytics data yet</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Impressions */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#22c55e] text-xs font-semibold uppercase tracking-wider">Impressions</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(pinTotal("impression"))}</p>
+              </div>
+              {pinValues("impression").length >= 2 && (
+                <>
+                  <MiniChart data={pinValues("impression")} color="#22c55e" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{pinDates("impression")[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{pinDates("impression").slice(-1)[0]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Pin Clicks */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#3b82f6] text-xs font-semibold uppercase tracking-wider">Pin Clicks</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(pinTotal("click"))}</p>
+              </div>
+              {pinValues("click").length >= 2 && (
+                <>
+                  <MiniChart data={pinValues("click")} color="#3b82f6" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{pinDates("click")[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{pinDates("click").slice(-1)[0]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Saves */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[#f59e0b] text-xs font-semibold uppercase tracking-wider">Saves</p>
+                <p className="text-white text-2xl font-bold">{fmtNum(pinTotal("save"))}</p>
+              </div>
+              {pinValues("save").length >= 2 && (
+                <>
+                  <MiniChart data={pinValues("save")} color="#f59e0b" h={64} />
+                  <div className="flex justify-between mt-2">
+                    <span className="text-[10px] text-[#525252]">{pinDates("save")[0]?.slice(5)}</span>
+                    <span className="text-[10px] text-[#525252]">{pinDates("save").slice(-1)[0]?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
