@@ -118,7 +118,6 @@ interface SEOMetadata {
   pin_title: string;
   description: string;
   tags: string[];
-  board_name: string;
 }
 
 async function generateSEO(idea: InfographicIdea): Promise<SEOMetadata> {
@@ -139,14 +138,12 @@ Generate:
 1. **pin_title**: Catchy, keyword-rich title (max 100 chars). Use power words (Easy, Ultimate, Best, Simple). Include the room/design topic.
 2. **description**: SEO-optimized description (150-300 chars). Include relevant keywords naturally. End with a CTA mentioning ${APP_NAME} for AI room design.
 3. **tags**: 8-12 relevant Pinterest tags/keywords. Mix broad ("home decor") and specific ("small bedroom ideas"). Include trending terms.
-4. **board_name**: Best board name for this pin (e.g., "Bedroom Design Ideas", "Small Space Solutions")
 
 Return ONLY valid JSON:
 {
     "pin_title": "...",
     "description": "...",
-    "tags": ["...", "..."],
-    "board_name": "..."
+    "tags": ["...", "..."]
 }`,
       },
     ],
@@ -172,7 +169,7 @@ async function uploadAndPost(
 
   const postId = await schedulePin(apiKey, {
     integrationId: account.postiz_integration_id,
-    boardId: seo.board_name,
+    boardId: account.board_id || "Interior Design",
     imageUrl: uploaded.path,
     imageId: uploaded.id,
     title: seo.pin_title,
