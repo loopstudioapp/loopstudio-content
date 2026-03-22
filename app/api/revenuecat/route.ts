@@ -1,56 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
 let overviewCache: { data: unknown; timestamp: number } | null = null;
+let subsCache: { data: unknown; filter: string; timestamp: number } | null = null;
 
-interface RevenueCatCustomer {
-  id: string;
-  attributes?: Record<string, { value: string }>;
-}
-
-interface RevenueCatSubscription {
-  id: string;
-  status: string;
-  country?: string;
-  product_id?: string;
-  store?: string;
-  purchase_date?: string;
-  expiration_date?: string;
-  revenue?: number;
-  total_revenue_in_usd?: { amount: number };
-}
+const RC_BASE = "https://api.revenuecat.com/v2";
 
 function getEnv() {
   const apiKey = process.env.REVENUECAT_API_KEY;
   const projectId = process.env.REVENUECAT_PROJECT_ID;
-  if (!apiKey || !projectId) {
-    return null;
-  }
+  if (!apiKey || !projectId) return null;
   return { apiKey, projectId };
 }
 
-function headers(apiKey: string) {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  };
+function rcHeaders(apiKey: string) {
+  return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
 }
 
+/* ── Overview Metrics ── */
 async function fetchOverview(apiKey: string, projectId: string) {
-  if (overviewCache && Date.now() - overviewCache.timestamp < CACHE_TTL) {
-    return overviewCache.data;
-  }
+  if (overviewCache && Date.now() - overviewCache.timestamp < CACHE_TTL) return overviewCache.data;
 
-  const res = await fetch(
-    `https://api.revenuecat.com/v2/projects/${projectId}/metrics/overview`,
-    { headers: headers(apiKey) }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`RevenueCat API error ${res.status}: ${text}`);
-  }
+  const res = await fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, { headers: rcHeaders(apiKey) });
+  if (!res.ok) throw new Error(`RevenueCat API error ${res.status}: ${await res.text()}`);
 
   const json = await res.json();
   const metricsArr: { id: string; value: number }[] = json.metrics || [];
@@ -69,128 +41,132 @@ async function fetchOverview(apiKey: string, projectId: string) {
   return data;
 }
 
-async function fetchSubscribers(
-  apiKey: string,
-  projectId: string,
-  filter: string
-) {
-  const subscribers: {
-    id: string;
-    country: string;
-    app: string;
-    plan: string;
-    purchase_date: string;
-    expiry_date: string;
-    revenue: number;
-  }[] = [];
+/* ── Subscribers List ── */
+interface SubInfo {
+  id: string;
+  country: string;
+  app: string;
+  plan: string;
+  purchase_date: string;
+  expiry_date: string;
+  revenue: number;
+  auto_renewal: string;
+  status: string;
+}
 
-  let startingAfter: string | undefined;
-  let fetched = 0;
-  const limit = 100;
+function msToISO(ms: number | null): string {
+  if (!ms) return "";
+  return new Date(ms).toISOString();
+}
+
+function planName(productId: string): string {
+  // Map product IDs to human-readable names
+  if (!productId) return "—";
+  if (productId.includes("weekly") || productId === "prod64a4d6b792") return "Weekly";
+  if (productId.includes("yearly") || productId.includes("annual") || productId === "prodb2f4f71b2d") return "Yearly";
+  if (productId.includes("monthly")) return "Monthly";
+  return productId;
+}
+
+async function fetchSubscribers(apiKey: string, projectId: string, filter: string) {
+  // Check cache
+  if (subsCache && subsCache.filter === filter && Date.now() - subsCache.timestamp < CACHE_TTL) {
+    return subsCache.data;
+  }
+
+  const subscribers: SubInfo[] = [];
+  let cursor: string | undefined;
+  let totalChecked = 0;
+  const MAX_CUSTOMERS = 200;
 
   try {
-    while (fetched < limit) {
-      const url = new URL(
-        `https://api.revenuecat.com/v2/projects/${projectId}/customers`
-      );
-      url.searchParams.set("limit", String(Math.min(20, limit - fetched)));
-      if (startingAfter) {
-        url.searchParams.set("starting_after", startingAfter);
-      }
+    while (totalChecked < MAX_CUSTOMERS) {
+      const url = new URL(`${RC_BASE}/projects/${projectId}/customers`);
+      url.searchParams.set("limit", "20");
+      if (cursor) url.searchParams.set("starting_after", cursor);
 
-      const res = await fetch(url.toString(), { headers: headers(apiKey) });
+      const res = await fetch(url.toString(), { headers: rcHeaders(apiKey) });
 
       if (res.status === 401 || res.status === 403) {
-        return {
-          error:
-            "API key needs customer_information:customers:read permission",
-          subscribers: [],
-        };
+        return { error: "API key needs customer_information:customers:read permission", subscribers: [] };
       }
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`RevenueCat customers API error ${res.status}: ${text}`);
-      }
+      if (!res.ok) throw new Error(`Customers API error ${res.status}`);
 
       const json = await res.json();
-      const items: RevenueCatCustomer[] = json.items || json.customers || [];
-
+      const items = json.items || [];
       if (items.length === 0) break;
 
-      for (const customer of items) {
-        const subRes = await fetch(
-          `https://api.revenuecat.com/v2/projects/${projectId}/customers/${customer.id}/subscriptions`,
-          { headers: headers(apiKey) }
-        );
+      // Check subscriptions for each customer in parallel (batch of 20)
+      const subResults = await Promise.all(
+        items.map(async (c: { id: string; last_seen_country?: string }) => {
+          const encoded = encodeURIComponent(c.id);
+          const subRes = await fetch(
+            `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
+            { headers: rcHeaders(apiKey) }
+          );
+          if (!subRes.ok) return [];
+          const subJson = await subRes.json();
+          return (subJson.items || []).map((s: Record<string, unknown>) => ({
+            customerId: c.id,
+            customerCountry: c.last_seen_country || "",
+            ...s,
+          }));
+        })
+      );
 
-        if (subRes.status === 401 || subRes.status === 403) {
-          return {
-            error:
-              "API key needs customer_information:customers:read permission",
-            subscribers: [],
-          };
-        }
-
-        if (!subRes.ok) continue;
-
-        const subJson = await subRes.json();
-        const subs: RevenueCatSubscription[] =
-          subJson.items || subJson.subscriptions || [];
-
+      for (const subs of subResults) {
         for (const sub of subs) {
           const status = (sub.status || "").toLowerCase();
-          const matchesTrial = filter === "trial" && status === "trial";
-          const matchesActive =
-            filter === "active" && (status === "active" || status === "in_trial");
+          const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
+          const givesAccess = sub.gives_access === true;
 
-          if (matchesTrial || matchesActive) {
+          // Filter logic
+          let matches = false;
+          if (filter === "trial") {
+            // Active trials that are NOT cancelled (auto_renewal = will_renew)
+            matches = status === "trialing" && autoRenewal === "will_renew" && givesAccess;
+          } else if (filter === "active") {
+            // Active paid subs that are NOT cancelled
+            matches = status === "active" && autoRenewal === "will_renew" && givesAccess;
+          }
+
+          if (matches) {
+            const rev = sub.total_revenue_in_usd as { proceeds?: number; gross?: number } | undefined;
             subscribers.push({
-              id: customer.id,
-              country: sub.country || "",
-              app: sub.store || "",
-              plan: sub.product_id || "",
-              purchase_date: sub.purchase_date || "",
-              expiry_date: sub.expiration_date || "",
-              revenue: sub.total_revenue_in_usd?.amount ?? sub.revenue ?? 0,
+              id: sub.customerId,
+              country: (sub.country || sub.customerCountry || "").toUpperCase(),
+              app: sub.store || "app_store",
+              plan: planName(sub.product_id || ""),
+              purchase_date: msToISO(sub.starts_at),
+              expiry_date: msToISO(sub.current_period_ends_at),
+              revenue: rev?.proceeds ?? rev?.gross ?? 0,
+              auto_renewal: sub.auto_renewal_status || "",
+              status: sub.status || "",
             });
           }
         }
-
-        fetched++;
-        if (fetched >= limit) break;
       }
 
-      const nextCursor =
-        json.next_page_url || json.next_page || json.has_more;
-      if (!nextCursor || items.length === 0) break;
-
-      startingAfter = items[items.length - 1].id;
+      totalChecked += items.length;
+      cursor = items[items.length - 1]?.id;
+      if (!json.next_page) break;
     }
   } catch (err) {
-    if (
-      err instanceof Error &&
-      (err.message.includes("401") || err.message.includes("403"))
-    ) {
-      return {
-        error:
-          "API key needs customer_information:customers:read permission",
-        subscribers: [],
-      };
+    if (err instanceof Error && (err.message.includes("401") || err.message.includes("403"))) {
+      return { error: "API key needs customer_information:customers:read permission", subscribers: [] };
     }
     throw err;
   }
 
-  return { subscribers };
+  const result = { subscribers, total: subscribers.length };
+  subsCache = { data: result, filter, timestamp: Date.now() };
+  return result;
 }
 
 export async function GET(request: NextRequest) {
   const env = getEnv();
   if (!env) {
-    return NextResponse.json(
-      { error: "REVENUECAT_API_KEY and REVENUECAT_PROJECT_ID must be set" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "REVENUECAT_API_KEY and REVENUECAT_PROJECT_ID must be set" }, { status: 500 });
   }
 
   const { searchParams } = request.nextUrl;
@@ -205,19 +181,13 @@ export async function GET(request: NextRequest) {
     if (type === "subscribers") {
       const filter = searchParams.get("filter") || "active";
       if (filter !== "trial" && filter !== "active") {
-        return NextResponse.json(
-          { error: "filter must be 'trial' or 'active'" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "filter must be 'trial' or 'active'" }, { status: 400 });
       }
       const data = await fetchSubscribers(env.apiKey, env.projectId, filter);
       return NextResponse.json(data);
     }
 
-    return NextResponse.json(
-      { error: "type must be 'overview' or 'subscribers'" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "type must be 'overview' or 'subscribers'" }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
