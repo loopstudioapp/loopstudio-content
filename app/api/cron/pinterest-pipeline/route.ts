@@ -26,131 +26,16 @@ async function sendTelegram(text: string) {
 }
 
 /**
- * Process a single scheduled slot: run the full pin pipeline.
- * Returns { success, title?, error? }
+ * Daily cron (midnight VN / 0 0 UTC):
+ * For each running account, generate 5 pins and SCHEDULE them via Postiz
+ * at random times throughout the day (2hr+ apart, 8AM-10PM EST).
+ * Postiz handles posting at the scheduled times.
  */
-async function processScheduleSlot(
-  slotId: string,
-  account: PinterestAccount,
-  recentTitles: string[]
-): Promise<{ success: boolean; title?: string; error?: string }> {
-  // Mark slot as processing
-  await supabase
-    .from("pinterest_schedule")
-    .update({ status: "processing" })
-    .eq("id", slotId);
-
-  try {
-    // Step 1: Generate idea
-    const idea = await generateIdea(recentTitles);
-
-    // Step 2: Generate image
-    const imagePrompt = buildImagePrompt(idea);
-    const imageB64 = await generateImage(imagePrompt);
-    if (!imageB64) throw new Error("Image generation failed after 3 attempts");
-
-    // Step 3: Generate SEO
-    const seo = await generateSEO(idea);
-
-    // Step 4: Create a pin record
-    const { data: pin } = await supabase
-      .from("pinterest_pins")
-      .insert({
-        account_id: account.id,
-        topic_id: idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60),
-        title: seo.pin_title,
-        description: seo.description,
-        status: "uploading",
-      })
-      .select("id")
-      .single();
-
-    if (!pin) throw new Error("Failed to insert pin record");
-
-    // Step 5: Upload & post immediately (scheduled_at = now)
-    const scheduledAt = new Date();
-    const { imageUrl, postId } = await uploadAndPost(
-      account.postiz_api_key,
-      imageB64,
-      pin.id,
-      account,
-      seo,
-      scheduledAt
-    );
-
-    // Update pin as scheduled
-    await supabase
-      .from("pinterest_pins")
-      .update({
-        status: "scheduled",
-        image_url: imageUrl,
-        postiz_post_id: postId,
-        scheduled_at: scheduledAt.toISOString(),
-      })
-      .eq("id", pin.id);
-
-    // Mark schedule slot as done
-    await supabase
-      .from("pinterest_schedule")
-      .update({ status: "done", pin_id: pin.id })
-      .eq("id", slotId);
-
-    return { success: true, title: seo.pin_title };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-
-    // Mark schedule slot as failed
-    await supabase
-      .from("pinterest_schedule")
-      .update({ status: "failed" })
-      .eq("id", slotId);
-
-    return { success: false, error: msg };
-  }
-}
-
-/**
- * Ensure an account has schedule entries for tomorrow.
- * Only generates if no pending entries exist for tomorrow.
- */
-async function ensureTomorrowSchedule(accountId: string) {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStart = new Date(tomorrow);
-  tomorrowStart.setUTCHours(0, 0, 0, 0);
-  const tomorrowEnd = new Date(tomorrow);
-  tomorrowEnd.setUTCHours(23, 59, 59, 999);
-
-  // Check if tomorrow already has pending entries
-  const { count } = await supabase
-    .from("pinterest_schedule")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", accountId)
-    .gte("scheduled_at", tomorrowStart.toISOString())
-    .lte("scheduled_at", tomorrowEnd.toISOString())
-    .eq("status", "pending");
-
-  if ((count ?? 0) > 0) return; // Already has entries
-
-  // Generate 5 random times for tomorrow (2hr+ apart)
-  const times = generateRandomTimes(5, tomorrow, 120);
-
-  const inserts = times.map((t) => ({
-    account_id: accountId,
-    scheduled_at: t.toISOString(),
-    status: "pending" as const,
-  }));
-
-  await supabase.from("pinterest_schedule").insert(inserts);
-}
-
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const now = new Date().toISOString();
 
   // Get all running accounts
   const { data: accounts } = await supabase
@@ -164,54 +49,95 @@ export async function GET(req: Request) {
   }
 
   const results: string[] = [];
-  let totalProcessed = 0;
+  let totalScheduled = 0;
   let totalFailed = 0;
 
   for (const account of accounts as PinterestAccount[]) {
-    // Find pending schedule slots where time has passed
-    const { data: dueSlots } = await supabase
-      .from("pinterest_schedule")
-      .select("*")
-      .eq("account_id", account.id)
-      .eq("status", "pending")
-      .lte("scheduled_at", now)
-      .order("scheduled_at", { ascending: true });
+    const pinsPerDay = account.pins_per_day || 5;
 
-    if (!dueSlots || dueSlots.length === 0) {
-      // No due slots — ensure tomorrow's schedule exists
-      await ensureTomorrowSchedule(account.id);
-      continue;
-    }
+    // Generate random times for today (2hr+ apart)
+    const today = new Date();
+    const scheduleTimes = generateRandomTimes(pinsPerDay, today, 120);
 
     const recentTitles = await getRecentTitles(account.id);
 
-    for (const slot of dueSlots) {
-      const result = await processScheduleSlot(slot.id, account, recentTitles);
+    for (let i = 0; i < pinsPerDay; i++) {
+      const scheduledAt = scheduleTimes[i];
 
-      if (result.success) {
-        totalProcessed++;
-        if (result.title) recentTitles.push(result.title);
-        results.push(`${account.name}: posted "${result.title}"`);
-      } else {
+      try {
+        // Step 1: Generate idea
+        const idea = await generateIdea(recentTitles);
+
+        // Step 2: Generate image
+        const imagePrompt = buildImagePrompt(idea);
+        const imageB64 = await generateImage(imagePrompt);
+        if (!imageB64) throw new Error("Image generation failed");
+
+        // Step 3: Generate SEO
+        const seo = await generateSEO(idea);
+
+        // Step 4: Create pin record
+        const { data: pin } = await supabase
+          .from("pinterest_pins")
+          .insert({
+            account_id: account.id,
+            topic_id: idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60),
+            title: seo.pin_title,
+            description: seo.description,
+            status: "uploading",
+            scheduled_at: scheduledAt.toISOString(),
+          })
+          .select("id")
+          .single();
+
+        if (!pin) throw new Error("Failed to insert pin record");
+
+        // Step 5: Upload & SCHEDULE via Postiz at the random time
+        const { imageUrl, postId } = await uploadAndPost(
+          account.postiz_api_key,
+          imageB64,
+          pin.id,
+          account,
+          seo,
+          scheduledAt
+        );
+
+        // Update pin as scheduled
+        await supabase.from("pinterest_pins").update({
+          status: "scheduled",
+          image_url: imageUrl,
+          postiz_post_id: postId,
+        }).eq("id", pin.id);
+
+        // Also track in pinterest_schedule
+        await supabase.from("pinterest_schedule").insert({
+          account_id: account.id,
+          scheduled_at: scheduledAt.toISOString(),
+          pin_id: pin.id,
+          status: "done",
+        });
+
+        totalScheduled++;
+        recentTitles.push(seo.pin_title);
+        results.push(`${account.name}: scheduled "${seo.pin_title}" at ${scheduledAt.toLocaleTimeString()}`);
+      } catch (e: unknown) {
         totalFailed++;
-        results.push(`${account.name}: FAILED — ${result.error}`);
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        results.push(`${account.name}: FAILED pin ${i + 1} — ${msg}`);
       }
 
-      // Delay between pins for rate limiting
-      if (dueSlots.indexOf(slot) < dueSlots.length - 1) {
+      // Delay between pins for rate limiting (5s)
+      if (i < pinsPerDay - 1) {
         await new Promise((r) => setTimeout(r, 5000));
       }
     }
-
-    // Ensure tomorrow's schedule exists
-    await ensureTomorrowSchedule(account.id);
   }
 
-  // Send Telegram notification if any pins were processed
-  if (totalProcessed > 0 || totalFailed > 0) {
+  // Telegram notification
+  if (totalScheduled > 0 || totalFailed > 0) {
     const summary = [
-      `📌 Pinterest Scheduler — ${new Date().toISOString().split("T")[0]}`,
-      `✅ ${totalProcessed} posted, ❌ ${totalFailed} failed`,
+      `📌 Pinterest Daily — ${new Date().toISOString().split("T")[0]}`,
+      `✅ ${totalScheduled} scheduled, ❌ ${totalFailed} failed`,
       "",
       ...results,
     ].join("\n");
@@ -220,7 +146,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    processed: totalProcessed,
+    scheduled: totalScheduled,
     failed: totalFailed,
     details: results,
   });
