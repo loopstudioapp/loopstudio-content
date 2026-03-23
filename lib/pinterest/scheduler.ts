@@ -2,36 +2,38 @@
  * Pinterest peak-hours scheduler.
  *
  * Generates random posting times spread across 8 AM – 10 PM EST
- * with a minimum 30-minute gap between consecutive posts.
+ * with a configurable minimum gap between consecutive posts.
  */
 
 /** Pinterest peak window: 8 AM to 10 PM EST (14-hour window). */
 const PEAK_START_HOUR = 8; // 8 AM EST
 const PEAK_END_HOUR = 22; // 10 PM EST
-const MIN_GAP_MINUTES = 30;
+const DEFAULT_MIN_GAP_MINUTES = 30;
 
 /**
  * Generate `count` random posting times on `targetDate`, spread
  * across Pinterest peak hours (8 AM – 10 PM EST) with at least
- * 30 minutes between each post.
+ * `minGapMinutes` between each post.
  *
  * @param count   Number of time slots to generate.
  * @param targetDate  The calendar date to schedule on (time portion is ignored).
+ * @param minGapMinutes  Minimum minutes between consecutive times (default: 30).
  * @returns Sorted array of Date objects in chronological order.
  * @throws If the requested count cannot fit within peak hours with the minimum gap.
  */
-export function generateRandomTimes(count: number, targetDate: Date): Date[] {
+export function generateRandomTimes(
+  count: number,
+  targetDate: Date,
+  minGapMinutes: number = DEFAULT_MIN_GAP_MINUTES
+): Date[] {
   if (count <= 0) return [];
 
   const totalWindowMinutes = (PEAK_END_HOUR - PEAK_START_HOUR) * 60; // 840 min
-  const maxSlots = Math.floor(
-    (totalWindowMinutes - MIN_GAP_MINUTES * (count - 1)) / 1 // each slot is ~1 min wide
-  );
 
-  if (count > Math.floor(totalWindowMinutes / MIN_GAP_MINUTES) + 1) {
+  if (count > Math.floor(totalWindowMinutes / minGapMinutes) + 1) {
     throw new Error(
-      `Cannot fit ${count} pins in the peak window with ${MIN_GAP_MINUTES}-minute gaps. ` +
-        `Maximum is ${Math.floor(totalWindowMinutes / MIN_GAP_MINUTES) + 1}.`
+      `Cannot fit ${count} pins in the peak window with ${minGapMinutes}-minute gaps. ` +
+        `Maximum is ${Math.floor(totalWindowMinutes / minGapMinutes) + 1}.`
     );
   }
 
@@ -62,7 +64,7 @@ export function generateRandomTimes(count: number, targetDate: Date): Date[] {
 
     // Enforce minimum gap from previous time
     if (times.length > 0) {
-      const minAllowed = times[times.length - 1] + MIN_GAP_MINUTES * 60000;
+      const minAllowed = times[times.length - 1] + minGapMinutes * 60000;
       if (candidate < minAllowed) {
         candidate = minAllowed;
       }

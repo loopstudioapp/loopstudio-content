@@ -14,6 +14,18 @@ export interface PinterestAccount {
   pins_per_day: number;
   telegram_chat_id: string | null;
   app_store_url: string;
+  running: boolean;
+  created_at: string;
+}
+
+export type ScheduleStatus = "pending" | "processing" | "done" | "failed" | "skipped";
+
+export interface PinterestSchedule {
+  id: string;
+  account_id: string;
+  scheduled_at: string;
+  pin_id: string | null;
+  status: ScheduleStatus;
   created_at: string;
 }
 

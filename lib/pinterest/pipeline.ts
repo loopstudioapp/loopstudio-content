@@ -25,8 +25,8 @@ function parseJSON<T>(raw: string): T {
   return JSON.parse(cleaned);
 }
 
-/** Get last 20 pin titles for dedup */
-async function getRecentTitles(accountId: string): Promise<string[]> {
+/** Get last 50 pin titles for dedup */
+export async function getRecentTitles(accountId: string): Promise<string[]> {
   const { data } = await supabase
     .from("pinterest_pins")
     .select("title")
@@ -44,7 +44,7 @@ interface InfographicIdea {
   steps: { step_title: string; description: string }[];
 }
 
-async function generateIdea(recentTitles: string[]): Promise<InfographicIdea> {
+export async function generateIdea(recentTitles: string[]): Promise<InfographicIdea> {
   const recentList = recentTitles.length > 0
     ? recentTitles.map((t) => `- ${t}`).join("\n")
     : "(none)";
@@ -87,13 +87,13 @@ Return ONLY valid JSON:
    ═══════════════════════════════════════════════════════════════ */
 
 /** Build image prompt directly (no GPT-4o middleman) */
-function buildImagePrompt(idea: InfographicIdea): string {
+export function buildImagePrompt(idea: InfographicIdea): string {
   const stepTitles = idea.steps.map((s, i) => `${i + 1}. ${s.step_title}`).join("\n");
   return `Create a Pinterest infographic titled "${idea.title}" on a plain light beige/cream background with the hex color code #F5F0E8. The design should be informative and visually appealing. Use elegant and modern typography with a well-organized layout. Only include the step titles below, no descriptions or extra text:\n\n${stepTitles}\n\nMake sure all steps fit inside the infographic with clear numbering. At the very bottom, add a simple clean banner with just the text CTA "${APP_NAME}: Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge. Ensure that all text and elements are easily legible against the background.`;
 }
 
 /** Step 2b: Generate the image with gpt-image-1.5 */
-async function generateImage(prompt: string): Promise<string | null> {
+export async function generateImage(prompt: string): Promise<string | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const result = await openai.images.generate({
@@ -122,7 +122,7 @@ interface SEOMetadata {
   tags: string[];
 }
 
-async function generateSEO(idea: InfographicIdea): Promise<SEOMetadata> {
+export async function generateSEO(idea: InfographicIdea): Promise<SEOMetadata> {
   const stepTitles = idea.steps.map((s) => s.step_title);
 
   const res = await openai.chat.completions.create({
@@ -158,7 +158,7 @@ Return ONLY valid JSON:
 /* ═══════════════════════════════════════════════════════════════
    STEP 4: Upload & Post via Postiz
    ═══════════════════════════════════════════════════════════════ */
-async function uploadAndPost(
+export async function uploadAndPost(
   apiKey: string,
   imageB64: string,
   pinId: string,

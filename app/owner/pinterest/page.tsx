@@ -18,6 +18,7 @@ type PAccount = {
   pins_per_day: number;
   telegram_chat_id: string | null;
   app_store_url: string;
+  running: boolean;
   created_at: string;
 };
 
@@ -33,6 +34,15 @@ type PPin = {
   status: string;
   error_message: string | null;
   retry_count: number;
+  created_at: string;
+};
+
+type ScheduleEntry = {
+  id: string;
+  account_id: string;
+  scheduled_at: string;
+  pin_id: string | null;
+  status: string;
   created_at: string;
 };
 
@@ -139,11 +149,13 @@ export default function PinterestPage() {
   const [accounts, setAccounts] = useState<PAccount[]>([]);
   const [pins, setPins] = useState<PPin[]>([]);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const { lang, setLang, t } = useLang();
   const router = useRouter();
+
+  // Schedule data per account
+  const [schedules, setSchedules] = useState<Record<string, ScheduleEntry[]>>({});
 
   // Overall analytics
   const [overallAnalytics, setOverallAnalytics] = useState<AnalyticsMetric[]>([]);
@@ -176,10 +188,30 @@ export default function PinterestPage() {
     ]);
     const accs = await accRes.json();
     const pinData = await pinRes.json();
-    setAccounts(Array.isArray(accs) ? accs : []);
+    const accountList = Array.isArray(accs) ? accs : [];
+    setAccounts(accountList);
     setPins(Array.isArray(pinData) ? pinData : []);
     setLoading(false);
+
+    // Load schedules for all accounts
+    loadSchedules(accountList);
   }, []);
+
+  const loadSchedules = async (accountList: PAccount[]) => {
+    const scheduleMap: Record<string, ScheduleEntry[]> = {};
+    await Promise.all(
+      accountList.map(async (acc) => {
+        try {
+          const res = await fetch(`/api/pinterest/schedule?account_id=${acc.id}`);
+          const data = await res.json();
+          scheduleMap[acc.id] = Array.isArray(data) ? data : [];
+        } catch {
+          scheduleMap[acc.id] = [];
+        }
+      })
+    );
+    setSchedules(scheduleMap);
+  };
 
   useEffect(() => {
     loadAll();
@@ -208,7 +240,6 @@ export default function PinterestPage() {
     setLoadingOverall(true);
     const d = days || overallDays;
     try {
-      // Fetch analytics for all accounts in parallel
       const results = await Promise.all(
         accounts.map(async (acc) => {
           const res = await fetch(
@@ -219,7 +250,6 @@ export default function PinterestPage() {
         })
       );
 
-      // Merge: aggregate by label
       const merged: Record<string, AnalyticsMetric> = {};
       for (const accountMetrics of results) {
         for (const metric of accountMetrics) {
@@ -230,7 +260,6 @@ export default function PinterestPage() {
               percentageChange: metric.percentageChange,
             };
           } else {
-            // Sum totals by date
             const existing = merged[metric.label];
             for (let i = 0; i < metric.data.length; i++) {
               if (existing.data[i]) {
@@ -267,23 +296,21 @@ export default function PinterestPage() {
     setLoadingAnalytics(false);
   };
 
-  /* ── Pipeline Actions ── */
-  const triggerPipeline = async (accountId?: string) => {
-    setRunning(accountId || "all");
-    setRunResult(null);
+  /* ── Start/Stop Toggle ── */
+  const toggleScheduler = async (account: PAccount) => {
+    setToggling(account.id);
     try {
-      const res = await fetch("/api/pinterest/trigger", {
+      const action = account.running ? "stop" : "start";
+      const res = await fetch("/api/pinterest/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(accountId ? { account_id: accountId } : {}),
+        body: JSON.stringify({ account_id: account.id, action }),
       });
-      const data = await res.json();
-      setRunResult(data.summary || `Scheduled: ${data.scheduled}, Failed: ${data.failed}`);
-      loadAll();
-    } catch {
-      setRunResult("Pipeline failed");
-    }
-    setRunning(null);
+      if (res.ok) {
+        await loadAll();
+      }
+    } catch { /* silent */ }
+    setToggling(null);
   };
 
   if (loading) {
@@ -302,6 +329,7 @@ export default function PinterestPage() {
   const posted = todayPins.filter((p) => p.status === "posted").length;
   const generating = todayPins.filter((p) => ["pending", "generating", "uploading"].includes(p.status)).length;
   const accountMap = Object.fromEntries(accounts.map((a) => [a.id, a.name]));
+  const runningCount = accounts.filter((a) => a.running).length;
 
   const filteredPins = pins.filter((p) => {
     if (filterAccount !== "all" && p.account_id !== filterAccount) return false;
@@ -309,13 +337,37 @@ export default function PinterestPage() {
     return true;
   });
 
+  /** Get the next pending schedule time for an account */
+  const getNextScheduled = (accountId: string): string | null => {
+    const entries = schedules[accountId] || [];
+    const pending = entries.filter((e) => e.status === "pending");
+    if (pending.length === 0) return null;
+    return pending[0].scheduled_at;
+  };
+
+  /** Get count of pending entries for an account */
+  const getPendingCount = (accountId: string): number => {
+    const entries = schedules[accountId] || [];
+    return entries.filter((e) => e.status === "pending").length;
+  };
+
+  /** Get count of done entries for today */
+  const getDoneToday = (accountId: string): number => {
+    const entries = schedules[accountId] || [];
+    return entries.filter((e) => e.status === "done" && e.scheduled_at.startsWith(today)).length;
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-4 sm:p-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-xl font-bold text-white">Pinterest Automation</h1>
-          <p className="text-sm text-[#525252]">Auto-synced from Postiz</p>
+          <p className="text-sm text-[#525252]">
+            {runningCount > 0
+              ? `${runningCount} account${runningCount > 1 ? "s" : ""} running`
+              : "All accounts stopped"}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={syncFromPostiz} disabled={syncing} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors disabled:opacity-50">
@@ -330,20 +382,12 @@ export default function PinterestPage() {
         </div>
       </div>
 
-      {/* Result Banner */}
-      {runResult && (
-        <div className="mb-6 p-3 bg-[#141414] border border-[#262626] rounded-xl flex items-center justify-between">
-          <pre className="text-sm text-[#a3a3a3] whitespace-pre-wrap">{runResult}</pre>
-          <button onClick={() => setRunResult(null)} className="text-[#525252] hover:text-white text-xs ml-3">✕</button>
-        </div>
-      )}
-
       {/* Stats Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#e60023] text-[10px] uppercase tracking-wider">Accounts</p>
-          <p className="text-white text-2xl font-bold mt-1">{accounts.filter((a) => a.status === "active").length}</p>
-          <p className="text-[#525252] text-[10px]">{t("active")}</p>
+          <p className="text-[#e60023] text-[10px] uppercase tracking-wider">Running</p>
+          <p className="text-white text-2xl font-bold mt-1">{runningCount}</p>
+          <p className="text-[#525252] text-[10px]">of {accounts.length}</p>
         </div>
         <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
           <p className="text-[#22c55e] text-[10px] uppercase tracking-wider">Scheduled</p>
@@ -363,13 +407,6 @@ export default function PinterestPage() {
           <p className="text-[#ef4444] text-[10px] uppercase tracking-wider">Failed</p>
           <p className="text-white text-2xl font-bold mt-1">{failed}</p>
         </div>
-      </div>
-
-      {/* Run All */}
-      <div className="flex flex-wrap gap-3 mb-8">
-        <button onClick={() => triggerPipeline()} disabled={running !== null} className="px-4 py-2 bg-[#e60023] text-white text-sm font-medium rounded-lg hover:bg-[#cc001f] disabled:opacity-50 transition-colors">
-          {running === "all" ? "Running Pipeline..." : "Run All"}
-        </button>
       </div>
 
       {/* ═══════════════ OVERALL ANALYTICS ═══════════════ */}
@@ -411,6 +448,9 @@ export default function PinterestPage() {
             const accScheduled = accPins.filter((p) => p.status === "scheduled").length;
             const accFailed = accPins.filter((p) => p.status === "failed").length;
             const accPosted = accPins.filter((p) => p.status === "posted").length;
+            const nextTime = getNextScheduled(acc.id);
+            const pendingSlots = getPendingCount(acc.id);
+            const doneToday = getDoneToday(acc.id);
 
             return (
               <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -419,10 +459,38 @@ export default function PinterestPage() {
                     <h3 className="text-white font-semibold">{acc.name}</h3>
                     {acc.pinterest_username && <p className="text-[#525252] text-xs">@{acc.pinterest_username}</p>}
                   </div>
-                  <span className={`text-[10px] ${acc.status === "active" ? "text-[#22c55e]" : "text-[#f59e0b]"}`}>
-                    {acc.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                      acc.running
+                        ? "text-[#22c55e] bg-[#22c55e]/10"
+                        : "text-[#737373] bg-[#737373]/10"
+                    }`}>
+                      {acc.running ? "Running" : "Stopped"}
+                    </span>
+                  </div>
                 </div>
+
+                {/* Schedule info */}
+                {acc.running && (
+                  <div className="mb-3 p-2.5 bg-[#0a0a0a] rounded-lg border border-[#262626]">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-[#525252]">Done today</span>
+                      <span className="text-white font-medium">{doneToday}/5</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] mt-1">
+                      <span className="text-[#525252]">Pending slots</span>
+                      <span className="text-[#f59e0b] font-medium">{pendingSlots}</span>
+                    </div>
+                    {nextTime && (
+                      <div className="flex items-center justify-between text-[10px] mt-1">
+                        <span className="text-[#525252]">Next post</span>
+                        <span className="text-[#3b82f6] font-medium">
+                          {new Date(nextTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   <div className="text-center">
@@ -440,13 +508,23 @@ export default function PinterestPage() {
                 </div>
 
                 <div className="h-1.5 bg-[#262626] rounded-full overflow-hidden mb-3">
-                  <div className="h-full bg-[#22c55e] rounded-full transition-all" style={{ width: `${Math.min(100, ((accScheduled + accPosted) / acc.pins_per_day) * 100)}%` }} />
+                  <div className="h-full bg-[#22c55e] rounded-full transition-all" style={{ width: `${Math.min(100, ((accScheduled + accPosted) / 5) * 100)}%` }} />
                 </div>
-                <p className="text-[#525252] text-[10px] mb-3">{accScheduled + accPosted}/{acc.pins_per_day} pins today</p>
+                <p className="text-[#525252] text-[10px] mb-3">{accScheduled + accPosted}/5 pins today</p>
 
                 <div className="flex gap-2">
-                  <button onClick={() => triggerPipeline(acc.id)} disabled={running !== null} className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-white rounded-lg hover:bg-[#333] disabled:opacity-50 transition-colors">
-                    {running === acc.id ? "Running..." : "Run"}
+                  <button
+                    onClick={() => toggleScheduler(acc)}
+                    disabled={toggling !== null}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                      acc.running
+                        ? "bg-[#ef4444]/10 text-[#ef4444] hover:bg-[#ef4444]/20 border border-[#ef4444]/30"
+                        : "bg-[#22c55e]/10 text-[#22c55e] hover:bg-[#22c55e]/20 border border-[#22c55e]/30"
+                    }`}
+                  >
+                    {toggling === acc.id
+                      ? (acc.running ? "Stopping..." : "Starting...")
+                      : (acc.running ? "■ Stop" : "▶ Start")}
                   </button>
                   <button onClick={() => loadAnalytics(acc)} className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-[#3b82f6] rounded-lg hover:bg-[#333] transition-colors">
                     Analytics

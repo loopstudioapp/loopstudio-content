@@ -159,7 +159,107 @@ interface AccountMetrics {
   prev_lm8_posts: number | null;
 }
 
-async function sendTelegramReport(date: string, allMetrics: AccountMetrics[], rcData: RCReportData | null) {
+interface PinterestReportData {
+  totalPinsPosted: number;
+  totalImpressions: number;
+  totalPinClicks: number;
+  totalSaves: number;
+  prevImpressions: number;
+  prevPinClicks: number;
+  prevSaves: number;
+  recentPinLinks: { title: string; url: string }[];
+}
+
+async function fetchPinterestReport(): Promise<PinterestReportData | null> {
+  try {
+    // Get all active Pinterest accounts
+    const { data: pAccounts } = await supabase
+      .from("pinterest_accounts")
+      .select("*")
+      .eq("status", "active");
+
+    if (!pAccounts || pAccounts.length === 0) return null;
+
+    let totalImpressions = 0;
+    let totalPinClicks = 0;
+    let totalSaves = 0;
+    let prevImpressions = 0;
+    let prevPinClicks = 0;
+    let prevSaves = 0;
+
+    // Fetch analytics for each account (7 days for current, compare with stored previous)
+    for (const acc of pAccounts) {
+      try {
+        const res = await fetch(
+          `https://api.postiz.com/public/v1/analytics/${acc.postiz_integration_id}?date=7`,
+          { headers: { Authorization: acc.postiz_api_key } }
+        );
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (!Array.isArray(data)) continue;
+
+        for (const metric of data) {
+          const values = (metric.data || []).map((d: { total: number }) => d.total);
+          const sum = values.reduce((s: number, v: number) => s + v, 0);
+          if (metric.label === "Impressions") totalImpressions += sum;
+          if (metric.label === "Pin Clicks") totalPinClicks += sum;
+          if (metric.label === "Saves") totalSaves += sum;
+        }
+      } catch { /* skip this account */ }
+    }
+
+    // Get previous values from tracker row
+    const { data: prevRow } = await supabase
+      .from("pinterest_topics")
+      .select("description_template")
+      .eq("id", "__pinterest_metrics_tracker__")
+      .single();
+
+    if (prevRow?.description_template) {
+      try {
+        const prev = JSON.parse(prevRow.description_template);
+        prevImpressions = prev.impressions ?? 0;
+        prevPinClicks = prev.pinClicks ?? 0;
+        prevSaves = prev.saves ?? 0;
+      } catch { /* ignore parse errors */ }
+    }
+
+    // Store current values for next report
+    await supabase.from("pinterest_topics").upsert(
+      {
+        id: "__pinterest_metrics_tracker__",
+        category: "system",
+        title_template: "Pinterest Metrics Tracker",
+        description_template: JSON.stringify({ impressions: totalImpressions, pinClicks: totalPinClicks, saves: totalSaves }),
+        prompt_seed: "system",
+      },
+      { onConflict: "id" }
+    );
+
+    // Get recently posted pins (last 24 hours)
+    const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+    const { data: recentPins } = await supabase
+      .from("pinterest_pins")
+      .select("title, image_url, postiz_post_id")
+      .in("status", ["posted", "scheduled"])
+      .gte("created_at", oneDayAgo)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const totalPinsPosted = recentPins?.length ?? 0;
+    const recentPinLinks = (recentPins || []).map((p) => ({
+      title: p.title || "Untitled",
+      url: p.image_url || "",
+    }));
+
+    return { totalPinsPosted, totalImpressions, totalPinClicks, totalSaves, prevImpressions, prevPinClicks, prevSaves, recentPinLinks };
+  } catch (e) {
+    console.error("Pinterest report fetch failed:", e);
+    return null;
+  }
+}
+
+async function sendTelegramReport(date: string, allMetrics: AccountMetrics[], rcData: RCReportData | null, pinterestData: PinterestReportData | null) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
 
   // Overall totals
@@ -213,6 +313,23 @@ async function sendTelegramReport(date: string, allMetrics: AccountMetrics[], rc
     msg += `Followers: ${fmt(m.lm8_followers)}${diff(m.lm8_followers, m.prev_lm8_followers)}\n`;
     msg += `Likes: ${fmt(m.lm8_total_likes)}${diff(m.lm8_total_likes, m.prev_lm8_total_likes)}\n`;
     msg += `Posts: ${fmt(m.lm8_posts)}${diff(m.lm8_posts, m.prev_lm8_posts)}\n`;
+  }
+
+  // Pinterest section
+  if (pinterestData) {
+    msg += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    msg += `📌 *Pinterest*\n\n`;
+    msg += `Pins Posted (24h): ${pinterestData.totalPinsPosted}\n`;
+    msg += `Impressions (7d): ${fmt(pinterestData.totalImpressions)}${diff(pinterestData.totalImpressions, pinterestData.prevImpressions)}\n`;
+    msg += `Pin Clicks (7d): ${fmt(pinterestData.totalPinClicks)}${diff(pinterestData.totalPinClicks, pinterestData.prevPinClicks)}\n`;
+    msg += `Saves (7d): ${fmt(pinterestData.totalSaves)}${diff(pinterestData.totalSaves, pinterestData.prevSaves)}\n`;
+
+    if (pinterestData.recentPinLinks.length > 0) {
+      msg += `\nRecent pins:\n`;
+      for (const pin of pinterestData.recentPinLinks.slice(0, 10)) {
+        msg += `• ${pin.title}\n`;
+      }
+    }
   }
 
   msg += `\n━━━━━━━━━━━━━━━━━━━━`;
@@ -322,9 +439,17 @@ export async function GET(req: Request) {
     console.error("RevenueCat fetch failed:", e);
   }
 
+  // Fetch Pinterest data
+  let pinterestData: PinterestReportData | null = null;
+  try {
+    pinterestData = await fetchPinterestReport();
+  } catch (e) {
+    console.error("Pinterest report fetch failed:", e);
+  }
+
   // Send Telegram report
   try {
-    await sendTelegramReport(today, allMetrics, rcData);
+    await sendTelegramReport(today, allMetrics, rcData, pinterestData);
   } catch (e) {
     console.error("Telegram send failed:", e);
   }
