@@ -136,7 +136,7 @@ export async function POST(req: Request) {
         const baseResult = await openai.images.generate({
           model: "gpt-image-1.5",
           prompt: content.basePrompt,
-          quality: "medium",
+          quality: "low",
           size: "1024x1536",
           n: 1,
         });
@@ -169,7 +169,7 @@ export async function POST(req: Request) {
               model: "gpt-image-1.5",
               image: baseFile,
               prompt,
-              quality: "medium",
+              quality: "low",
               size: "1024x1536",
               n: 1,
             });
