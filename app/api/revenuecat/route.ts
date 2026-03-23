@@ -53,7 +53,8 @@ async function fetchOverview(apiKey: string, projectId: string) {
       .from("rc_subscriptions")
       .select("id", { count: "exact", head: true })
       .eq("status", "active")
-      .eq("environment", "production"),
+      .eq("environment", "production")
+      .gt("revenue_gross", 0),
   ]);
 
   const data = {
@@ -91,9 +92,11 @@ async function fetchSubscribers(filter: string) {
     .eq("status", statusFilter)
     .eq("environment", "production");
 
-  // Only filter non-cancelled for trials, show all active subs (including cancelled)
+  // Only filter non-cancelled for trials; for active subs exclude $0 (still in trial)
   if (filter === "trial") {
     query = query.eq("auto_renewal", "will_renew");
+  } else {
+    query = query.gt("revenue_gross", 0);
   }
 
   const { data, error } = await query.order("purchased_at", { ascending: true });
