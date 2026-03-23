@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import sharp from "sharp";
 import { supabase } from "@/lib/supabase";
 import { uploadImage, schedulePin } from "./postiz";
 import { generateRandomTimes } from "./scheduler";
@@ -31,7 +32,7 @@ async function getRecentTitles(accountId: string): Promise<string[]> {
     .select("title")
     .eq("account_id", accountId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(50);
   return (data || []).map((r) => r.title);
 }
 
@@ -87,7 +88,8 @@ Return ONLY valid JSON:
 
 /** Build image prompt directly (no GPT-4o middleman) */
 function buildImagePrompt(idea: InfographicIdea): string {
-  return `Create a Pinterest infographic titled "${idea.title}" on a plain light beige/cream background with the hex color code #F5F0E8. The design should be informative, featuring step-by-step text instructions or tips on the topic. Make sure all the steps and tips fit inside the infographics. Use elegant and modern typography with a well-organized layout to enhance readability. At the very bottom, add a simple clean banner with just the text CTA "${APP_NAME}: Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge. Ensure that all text and elements are easily legible against the background.`;
+  const stepTitles = idea.steps.map((s, i) => `${i + 1}. ${s.step_title}`).join("\n");
+  return `Create a Pinterest infographic titled "${idea.title}" on a plain light beige/cream background with the hex color code #F5F0E8. The design should be informative and visually appealing. Use elegant and modern typography with a well-organized layout. Only include the step titles below, no descriptions or extra text:\n\n${stepTitles}\n\nMake sure all steps fit inside the infographic with clear numbering. At the very bottom, add a simple clean banner with just the text CTA "${APP_NAME}: Design Your Home In Seconds!", and an App Store download badge. No phone mockups, no app screenshots, no logos, no icons, no app icons, no symbols next to the app name — only plain text and the App Store download badge. Ensure that all text and elements are easily legible against the background.`;
 }
 
 /** Step 2b: Generate the image with gpt-image-1.5 */
@@ -164,7 +166,9 @@ async function uploadAndPost(
   seo: SEOMetadata,
   scheduledAt: Date
 ): Promise<{ imageUrl: string; postId: string }> {
-  const imageBuffer = Buffer.from(imageB64, "base64");
+  const rawBuffer = Buffer.from(imageB64, "base64");
+  // Strip AI metadata (C2PA/IPTC) to avoid Pinterest "AI modified" label
+  const imageBuffer = await sharp(rawBuffer).png().toBuffer();
   const uploaded = await uploadImage(apiKey, imageBuffer, `pin-${pinId}.png`);
 
   const postId = await schedulePin(apiKey, {
