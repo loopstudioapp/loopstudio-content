@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import sharp from "sharp";
+import path from "path";
 import { supabase } from "@/lib/supabase";
 import { generateContent } from "@/lib/generate-prompts";
 
@@ -182,7 +184,24 @@ export async function POST(req: Request) {
 
     const transformImages = transformResults.map((r) => r?.data?.[0]?.b64_json).filter(Boolean) as string[];
 
-    // Step 3: Send to Telegram (4 messages)
+    // Step 3: Generate promo image (blurred base + App Store card)
+    let promoB64: string | null = null;
+    try {
+      const cardPath = path.join(process.cwd(), "public", "appstore-card.png");
+      const cardMeta = await sharp(cardPath).metadata();
+      const baseW = 1024;
+      const baseH = 1536;
+      const targetCardW = Math.round(baseW * 0.8);
+      const scale = targetCardW / (cardMeta.width || 588);
+      const targetCardH = Math.round((cardMeta.height || 206) * scale);
+      const scaledCard = await sharp(cardPath).resize(targetCardW, targetCardH).png().toBuffer();
+      const cardX = Math.round((baseW - targetCardW) / 2);
+      const cardY = Math.round((baseH / 2) - targetCardH / 2 - 220);
+      const promoBuffer = await sharp(baseBuffer).blur(5).composite([{ input: scaledCard, left: cardX, top: cardY }]).png().toBuffer();
+      promoB64 = promoBuffer.toString("base64");
+    } catch { /* skip promo if it fails */ }
+
+    // Step 4: Send to Telegram (4 messages)
     if (chatId) {
       const handle = account.username.replace(/^@/, "");
 
@@ -195,8 +214,9 @@ export async function POST(req: Request) {
       // Message 3: Caption only (easy copy-paste)
       await sendMessageToTelegram(chatId, content.caption);
 
-      // Message 4: All 6 images in one media group (compressed)
+      // Message 4: All images (1 base + 5 transforms + 1 promo)
       const allImages = [baseImageB64, ...transformImages];
+      if (promoB64) allImages.push(promoB64);
       await sendMediaGroupToTelegram(chatId, allImages);
     }
 
