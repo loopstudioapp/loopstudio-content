@@ -53,7 +53,6 @@ async function fetchOverview(apiKey: string, projectId: string) {
       .from("rc_subscriptions")
       .select("id", { count: "exact", head: true })
       .eq("status", "active")
-      .eq("auto_renewal", "will_renew")
       .eq("environment", "production"),
   ]);
 
@@ -86,13 +85,18 @@ interface SubInfo {
 async function fetchSubscribers(filter: string) {
   const statusFilter = filter === "trial" ? "trialing" : "active";
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("rc_subscriptions")
     .select("*")
     .eq("status", statusFilter)
-    .eq("auto_renewal", "will_renew")
-    .eq("environment", "production")
-    .order("purchased_at", { ascending: true });
+    .eq("environment", "production");
+
+  // Only filter non-cancelled for trials, show all active subs (including cancelled)
+  if (filter === "trial") {
+    query = query.eq("auto_renewal", "will_renew");
+  }
+
+  const { data, error } = await query.order("purchased_at", { ascending: true });
 
   if (error) {
     throw new Error(`Database error: ${error.message}`);

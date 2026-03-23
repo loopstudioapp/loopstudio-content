@@ -358,7 +358,7 @@ export default function OwnerDashboard() {
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                   <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
                   <p className="text-white text-3xl font-bold">{activeSubs.length || rc?.active_subs || 0}</p>
-                  <p className="text-[#525252] text-[10px] mt-1">non-cancelled</p>
+                  <p className="text-[#525252] text-[10px] mt-1">all active</p>
                 </div>
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                   <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">28-Day Revenue</p>
