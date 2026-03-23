@@ -74,24 +74,38 @@ interface RCReportData {
   yesterdayRevenue: number;
 }
 
-async function fetchRevenueCatReport(baseUrl: string): Promise<RCReportData | null> {
+async function fetchRevenueCatReport(): Promise<RCReportData | null> {
   try {
-    // Use the same /api/revenuecat endpoint as the web dashboard
-    const [overviewRes, trialsRes, activeRes] = await Promise.all([
-      fetch(`${baseUrl}/api/revenuecat?type=overview`),
-      fetch(`${baseUrl}/api/revenuecat?type=subscribers&filter=trial`),
-      fetch(`${baseUrl}/api/revenuecat?type=subscribers&filter=active`),
+    if (!RC_API_KEY || !RC_PROJECT_ID) return null;
+
+    // Get overview from RevenueCat API directly
+    const overviewRes = await fetch(
+      `https://api.revenuecat.com/v2/projects/${RC_PROJECT_ID}/metrics/overview`,
+      { headers: { Authorization: `Bearer ${RC_API_KEY}`, "Content-Type": "application/json" } }
+    );
+    const overviewJson = await overviewRes.json();
+    const metricsArr: { id: string; value: number }[] = overviewJson.metrics || [];
+    const m = Object.fromEntries(metricsArr.map((x) => [x.id, x.value]));
+
+    // Get trial/sub counts from DB directly (same logic as /api/revenuecat)
+    const [trialsResult, subsResult] = await Promise.all([
+      supabase
+        .from("rc_subscriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "trialing")
+        .eq("auto_renewal", "will_renew")
+        .eq("environment", "production"),
+      supabase
+        .from("rc_subscriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "active")
+        .eq("environment", "production")
+        .gt("revenue_gross", 0),
     ]);
 
-    const overview = await overviewRes.json();
-    const trialsData = await trialsRes.json();
-    const activeData = await activeRes.json();
-
-    if (overview.error) return null;
-
-    const currentRevenue = overview.revenue_30d ?? 0;
-    const activeTrials = trialsData.subscribers?.length ?? overview.active_trials ?? 0;
-    const activeSubs = activeData.subscribers?.length ?? overview.active_subs ?? 0;
+    const activeTrials = trialsResult.count ?? 0;
+    const activeSubs = subsResult.count ?? 0;
+    const currentRevenue = m.revenue ?? 0;
 
     // Calculate yesterday's revenue from stored value
     const { data: prevRow } = await supabase
@@ -110,7 +124,8 @@ async function fetchRevenueCatReport(baseUrl: string): Promise<RCReportData | nu
     );
 
     return { activeTrials, activeSubs, monthRevenue: currentRevenue, yesterdayRevenue };
-  } catch {
+  } catch (e) {
+    console.error("RevenueCat report fetch failed:", e);
     return null;
   }
 }
@@ -299,13 +314,10 @@ export async function GET(req: Request) {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Fetch RevenueCat data (use same API as web dashboard)
-  const host = req.headers.get("host") || "content.loopstudio.tech";
-  const protocol = host.includes("localhost") ? "http" : "https";
-  const baseUrl = `${protocol}://${host}`;
+  // Fetch RevenueCat data directly from API + DB
   let rcData: RCReportData | null = null;
   try {
-    rcData = await fetchRevenueCatReport(baseUrl);
+    rcData = await fetchRevenueCatReport();
   } catch (e) {
     console.error("RevenueCat fetch failed:", e);
   }
