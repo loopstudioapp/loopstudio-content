@@ -9,7 +9,19 @@ import Link from "next/link";
 
 type MetricPair = { latest: DailyMetric | null; previous: DailyMetric | null };
 
+const AVATAR_COLORS = [
+  "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444",
+  "#ec4899", "#22d3ee", "#f97316", "#14b8a6",
+];
+
+const emptyAccForm = {
+  employee_id: "", angle: "1", platform: "TikTok / Lemon8", username: "",
+  login_email: "", login_method: "Email", app: "Loop Studio", device: "", status: "Active", notes: "",
+  telegram_chat_id: "",
+};
+
 export default function OwnerTikTokDashboard() {
+  const [activeTab, setActiveTab] = useState<"dashboard" | "accounts">("dashboard");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [metrics, setMetrics] = useState<Record<string, MetricPair>>({});
@@ -18,6 +30,14 @@ export default function OwnerTikTokDashboard() {
   const [filterAngle, setFilterAngle] = useState("all");
   const { lang, setLang, t } = useLang();
   const router = useRouter();
+
+  // Accounts tab state
+  const [showEmpForm, setShowEmpForm] = useState(false);
+  const [empForm, setEmpForm] = useState({ name: "", pin: "" });
+  const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+  const [accForm, setAccForm] = useState(emptyAccForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAccForm, setShowAccForm] = useState(false);
 
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
@@ -60,6 +80,87 @@ export default function OwnerTikTokDashboard() {
     );
   };
 
+  // --- Accounts tab functions ---
+  const getNextColor = () => {
+    const used = employees.map((e) => e.avatar_color);
+    const available = AVATAR_COLORS.filter((c) => !used.includes(c));
+    const pool = available.length > 0 ? available : AVATAR_COLORS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+
+  const saveEmployee = async () => {
+    if (!empForm.name || !empForm.pin || empForm.pin.length !== 4) return;
+    if (editingEmpId) {
+      await supabase.from("employees").update({ name: empForm.name, pin: empForm.pin }).eq("id", editingEmpId);
+    } else {
+      await supabase.from("employees").insert({ ...empForm, avatar_color: getNextColor() });
+    }
+    setEmpForm({ name: "", pin: "" });
+    setEditingEmpId(null);
+    setShowEmpForm(false);
+    load();
+  };
+
+  const openEditEmployee = (emp: Employee) => {
+    setEditingEmpId(emp.id);
+    setEmpForm({ name: emp.name, pin: emp.pin });
+    setShowEmpForm(true);
+  };
+
+  const deleteEmployee = async (id: string) => {
+    if (!confirm(t("deleteEmployeeConfirm"))) return;
+    await supabase.from("employees").delete().eq("id", id);
+    load();
+  };
+
+  const openAdd = () => {
+    setEditingId(null);
+    setAccForm(emptyAccForm);
+    setShowAccForm(true);
+  };
+
+  const openEdit = (acc: Account) => {
+    setEditingId(acc.id);
+    setAccForm({
+      employee_id: acc.employee_id,
+      angle: String(acc.angle),
+      platform: acc.platform,
+      username: acc.username,
+      login_email: acc.login_email,
+      login_method: acc.login_method,
+      app: acc.app,
+      device: acc.device,
+      status: acc.status,
+      notes: acc.notes,
+      telegram_chat_id: acc.telegram_chat_id || "",
+    });
+    setShowAccForm(true);
+  };
+
+  const saveAccount = async () => {
+    if (!accForm.employee_id || !accForm.username) return;
+    const payload = { ...accForm, angle: parseInt(accForm.angle) };
+
+    if (editingId) {
+      await supabase.from("accounts").update(payload).eq("id", editingId);
+    } else {
+      await supabase.from("accounts").insert(payload);
+    }
+
+    setAccForm(emptyAccForm);
+    setEditingId(null);
+    setShowAccForm(false);
+    load();
+  };
+
+  const deleteAccount = async (id: string) => {
+    if (!confirm(t("deleteAccountConfirm"))) return;
+    await supabase.from("content_generations").delete().eq("account_id", id);
+    await supabase.from("daily_metrics").delete().eq("account_id", id);
+    await supabase.from("accounts").delete().eq("id", id);
+    load();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -85,7 +186,7 @@ export default function OwnerTikTokDashboard() {
   return (
     <div className="min-h-screen p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-xl font-bold text-white">Loop Studio</h1>
           <p className="text-sm text-[#525252]">{t("ownerOverview")}</p>
@@ -97,135 +198,351 @@ export default function OwnerTikTokDashboard() {
           >
             {lang === "en" ? "VN" : "EN"}
           </button>
-          <Link href="/owner/tiktok/accounts" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
-            {t("accountsLink")}
-          </Link>
           <Link href="/owner" className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
             {t("home")}
           </Link>
         </div>
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8">
-        <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#525252] text-[10px] uppercase tracking-wider">{t("accountsLink")}</p>
-          <p className="text-white text-2xl font-bold mt-1">{activeCount}<span className="text-[#525252] text-sm font-normal">/{filtered.length}</span></p>
-          <p className="text-[#525252] text-[10px]">{t("active")}</p>
-        </div>
-        <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokLikes")}</p>
-          <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkLikes)}</p>
-        </div>
-        <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokPosts")}</p>
-          <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkPosts)}</p>
-        </div>
-        <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Likes")}</p>
-          <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmLikes)}</p>
-        </div>
-        <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
-          <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Posts")}</p>
-          <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmPosts)}</p>
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-1 mb-8 border-b border-[#262626]">
+        <button
+          onClick={() => setActiveTab("dashboard")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
+            activeTab === "dashboard"
+              ? "text-white"
+              : "text-[#525252] hover:text-[#a3a3a3]"
+          }`}
+        >
+          {t("overview")}
+          {activeTab === "dashboard" && (
+            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("accounts")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
+            activeTab === "accounts"
+              ? "text-white"
+              : "text-[#525252] hover:text-[#a3a3a3]"
+          }`}
+        >
+          {t("accountsLink")}
+          {activeTab === "accounts" && (
+            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+          )}
+        </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-4">
-        <select
-          value={filterEmployee}
-          onChange={(e) => setFilterEmployee(e.target.value)}
-          className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
-        >
-          <option value="all">{t("allEmployees")}</option>
-          {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-        </select>
-        <select
-          value={filterAngle}
-          onChange={(e) => setFilterAngle(e.target.value)}
-          className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
-        >
-          <option value="all">{t("allAngles")}</option>
-          {angles.map((n) => <option key={n} value={n}>{t("angle")} {n} — {ANGLE_NAMES[n]}</option>)}
-        </select>
-        <p className="self-center text-xs text-[#525252]">{filtered.length} {t("accounts")}</p>
-      </div>
+      {/* Dashboard Tab */}
+      {activeTab === "dashboard" && (
+        <>
+          {/* Stats row */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8">
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+              <p className="text-[#525252] text-[10px] uppercase tracking-wider">{t("accountsLink")}</p>
+              <p className="text-white text-2xl font-bold mt-1">{activeCount}<span className="text-[#525252] text-sm font-normal">/{filtered.length}</span></p>
+              <p className="text-[#525252] text-[10px]">{t("active")}</p>
+            </div>
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+              <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokLikes")}</p>
+              <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkLikes)}</p>
+            </div>
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+              <p className="text-[#ff0050] text-[10px] uppercase tracking-wider">{t("tikTokPosts")}</p>
+              <p className="text-white text-2xl font-bold mt-1">{formatNumber(tkPosts)}</p>
+            </div>
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+              <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Likes")}</p>
+              <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmLikes)}</p>
+            </div>
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+              <p className="text-[#ffe135] text-[10px] uppercase tracking-wider">{t("lemon8Posts")}</p>
+              <p className="text-white text-2xl font-bold mt-1">{formatNumber(lmPosts)}</p>
+            </div>
+          </div>
 
-      {/* Table */}
-      <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-x-auto">
-        <table className="w-full text-sm min-w-[640px]">
-          <thead>
-            <tr className="border-b border-[#262626]">
-              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("account")}</th>
-              <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("assignedTo")}</th>
-              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("angle")}</th>
-              <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("status")}</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("likes")}</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("posts")}</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("likes")}</th>
-              <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("posts")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((acc) => {
-              const m = metrics[acc.id];
-              const lat = m?.latest;
-              const prev = m?.previous;
-              return (
-                <tr key={acc.id} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/account/${acc.id}`} className="text-white font-medium hover:underline">
-                      {acc.username}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">
+          {/* Filters */}
+          <div className="flex flex-wrap gap-3 mb-4">
+            <select
+              value={filterEmployee}
+              onChange={(e) => setFilterEmployee(e.target.value)}
+              className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="all">{t("allEmployees")}</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <select
+              value={filterAngle}
+              onChange={(e) => setFilterAngle(e.target.value)}
+              className="bg-[#141414] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="all">{t("allAngles")}</option>
+              {angles.map((n) => <option key={n} value={n}>{t("angle")} {n} — {ANGLE_NAMES[n]}</option>)}
+            </select>
+            <p className="self-center text-xs text-[#525252]">{filtered.length} {t("accounts")}</p>
+          </div>
+
+          {/* Table */}
+          <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-[#262626]">
+                  <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("account")}</th>
+                  <th className="text-left px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("assignedTo")}</th>
+                  <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("angle")}</th>
+                  <th className="text-center px-4 py-3 text-[10px] text-[#525252] uppercase tracking-wider font-semibold">{t("status")}</th>
+                  <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("likes")}</th>
+                  <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ff0050" }}>TK {t("posts")}</th>
+                  <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("likes")}</th>
+                  <th className="text-right px-4 py-3 text-[10px] uppercase tracking-wider font-semibold" style={{ color: "#ffe135" }}>LM {t("posts")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((acc) => {
+                  const m = metrics[acc.id];
+                  const lat = m?.latest;
+                  const prev = m?.previous;
+                  return (
+                    <tr key={acc.id} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
+                      <td className="px-4 py-3">
+                        <Link href={`/dashboard/account/${acc.id}`} className="text-white font-medium hover:underline">
+                          {acc.username}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={acc.employee_id}
+                          onChange={(e) => reassign(acc.id, e.target.value)}
+                          className="bg-transparent border border-[#262626] rounded px-2 py-1 text-xs text-[#a3a3a3] hover:border-[#404040] cursor-pointer"
+                        >
+                          <option value="">—</option>
+                          {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-[#a3a3a3]">
+                          <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: ANGLE_COLORS[acc.angle] }} />
+                          {acc.angle}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className="text-[10px] px-2 py-0.5 rounded-full"
+                          style={{
+                            backgroundColor: acc.status === "Active" ? "#22c55e18" : "#ef444418",
+                            color: acc.status === "Active" ? "#22c55e" : "#ef4444",
+                            border: `1px solid ${acc.status === "Active" ? "#22c55e33" : "#ef444433"}`,
+                          }}
+                        >
+                          {acc.status}
+                        </span>
+                      </td>
+                      <MetricCell value={lat?.total_likes} prev={prev?.total_likes} />
+                      <MetricCell value={lat?.posts} prev={prev?.posts} />
+                      <MetricCell value={lat?.lm8_total_likes} prev={prev?.lm8_total_likes} />
+                      <MetricCell value={lat?.lm8_posts} prev={prev?.lm8_posts} />
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-[#262626]">
+                  <td className="px-4 py-3 text-[#525252] text-xs font-semibold" colSpan={4}>{t("total")}</td>
+                  <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkLikes)}</td>
+                  <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkPosts)}</td>
+                  <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(lmLikes)}</td>
+                  <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(lmPosts)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Accounts Tab */}
+      {activeTab === "accounts" && (
+        <>
+          {/* Employees */}
+          <div className="mb-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
+                {t("employees")} ({employees.length})
+              </h2>
+              <button
+                onClick={() => { setEditingEmpId(null); setEmpForm({ name: "", pin: "" }); setShowEmpForm(!showEmpForm); }}
+                className="px-3 py-1.5 bg-[#22c55e] text-black text-xs font-semibold rounded-lg"
+              >
+                {t("add")}
+              </button>
+            </div>
+
+            {showEmpForm && (
+              <div className="bg-[#141414] border border-[#262626] rounded-xl p-5 mb-4">
+                <p className="text-xs text-[#a3a3a3] font-semibold uppercase tracking-wider mb-4">
+                  {editingEmpId ? t("editEmployee") : t("newEmployee")}
+                </p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Input label={t("name")} value={empForm.name} onChange={(v) => setEmpForm({ ...empForm, name: v })} />
+                  <Input label={t("pin4digit")} value={empForm.pin} onChange={(v) => setEmpForm({ ...empForm, pin: v.slice(0, 4) })} />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveEmployee} className="px-4 py-2 bg-[#22c55e] text-black text-sm font-semibold rounded-lg">
+                    {editingEmpId ? t("update") : t("save")}
+                  </button>
+                  <button onClick={() => { setShowEmpForm(false); setEditingEmpId(null); }} className="px-4 py-2 bg-[#1a1a1a] text-[#737373] text-sm rounded-lg border border-[#333]">
+                    {t("cancel")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {employees.map((emp) => {
+                const empAccounts = accounts.filter((a) => a.employee_id === emp.id);
+                return (
+                  <div key={emp.id} className="bg-[#141414] border border-[#262626] rounded-xl p-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold text-black"
+                        style={{ backgroundColor: emp.avatar_color }}
+                      >
+                        {emp.name[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-white font-semibold text-sm">{emp.name}</p>
+                        <p className="text-[#525252] text-xs">PIN: {emp.pin} &middot; {empAccounts.length} {t("accounts")}</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => openEditEmployee(emp)}
+                          className="text-[#3b82f6] text-xs hover:underline"
+                        >
+                          {t("edit")}
+                        </button>
+                        <button
+                          onClick={() => deleteEmployee(emp.id)}
+                          className="text-[#ef4444] text-xs hover:underline"
+                        >
+                          {t("delete")}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Accounts */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-[#a3a3a3] uppercase tracking-wider">
+                {t("accountsLink")} ({accounts.length})
+              </h2>
+              <button
+                onClick={openAdd}
+                className="px-3 py-1.5 bg-[#3b82f6] text-white text-xs font-semibold rounded-lg"
+              >
+                {t("add")}
+              </button>
+            </div>
+
+            {showAccForm && (
+              <div className="bg-[#141414] border border-[#262626] rounded-xl p-5 mb-4">
+                <p className="text-xs text-[#a3a3a3] font-semibold uppercase tracking-wider mb-4">
+                  {editingId ? t("editAccount") : t("newAccount")}
+                </p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("employee")}</p>
                     <select
-                      value={acc.employee_id}
-                      onChange={(e) => reassign(acc.id, e.target.value)}
-                      className="bg-transparent border border-[#262626] rounded px-2 py-1 text-xs text-[#a3a3a3] hover:border-[#404040] cursor-pointer"
+                      value={accForm.employee_id}
+                      onChange={(e) => setAccForm({ ...accForm, employee_id: e.target.value })}
+                      className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
                     >
-                      <option value="">—</option>
+                      <option value="">{t("select")}</option>
                       {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                     </select>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="inline-flex items-center gap-1.5 text-xs text-[#a3a3a3]">
-                      <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: ANGLE_COLORS[acc.angle] }} />
-                      {acc.angle}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span
-                      className="text-[10px] px-2 py-0.5 rounded-full"
-                      style={{
-                        backgroundColor: acc.status === "Active" ? "#22c55e18" : "#ef444418",
-                        color: acc.status === "Active" ? "#22c55e" : "#ef4444",
-                        border: `1px solid ${acc.status === "Active" ? "#22c55e33" : "#ef444433"}`,
-                      }}
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("angle")}</p>
+                    <select
+                      value={accForm.angle}
+                      onChange={(e) => setAccForm({ ...accForm, angle: e.target.value })}
+                      className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
                     >
-                      {acc.status}
-                    </span>
-                  </td>
-                  <MetricCell value={lat?.total_likes} prev={prev?.total_likes} />
-                  <MetricCell value={lat?.posts} prev={prev?.posts} />
-                  <MetricCell value={lat?.lm8_total_likes} prev={prev?.lm8_total_likes} />
-                  <MetricCell value={lat?.lm8_posts} prev={prev?.lm8_posts} />
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-[#262626]">
-              <td className="px-4 py-3 text-[#525252] text-xs font-semibold" colSpan={4}>{t("total")}</td>
-              <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkLikes)}</td>
-              <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(tkPosts)}</td>
-              <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(lmLikes)}</td>
-              <td className="px-4 py-3 text-right text-white font-semibold">{formatNumber(lmPosts)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+                      {[1, 2, 3].map((n) => <option key={n} value={n}>{t("angle")} {n} — {ANGLE_NAMES[n]}</option>)}
+                    </select>
+                  </div>
+                  <Input label={t("username")} value={accForm.username} onChange={(v) => setAccForm({ ...accForm, username: v })} placeholder="@handle" />
+                  <Input label={t("loginEmail")} value={accForm.login_email} onChange={(v) => setAccForm({ ...accForm, login_email: v })} />
+                  <Input label={t("loginMethod")} value={accForm.login_method} onChange={(v) => setAccForm({ ...accForm, login_method: v })} />
+                  <Input label={t("device")} value={accForm.device} onChange={(v) => setAccForm({ ...accForm, device: v })} />
+                  <Input label={t("app")} value={accForm.app} onChange={(v) => setAccForm({ ...accForm, app: v })} />
+                  <div>
+                    <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{t("status")}</p>
+                    <select
+                      value={accForm.status}
+                      onChange={(e) => setAccForm({ ...accForm, status: e.target.value })}
+                      className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Paused">Paused</option>
+                      <option value="Banned">Banned</option>
+                    </select>
+                  </div>
+                  <Input label={t("telegramChatId")} value={accForm.telegram_chat_id} onChange={(v) => setAccForm({ ...accForm, telegram_chat_id: v })} placeholder={t("optionalAutoCreated")} />
+                  <div className="col-span-2">
+                    <Input label={t("notes")} value={accForm.notes} onChange={(v) => setAccForm({ ...accForm, notes: v })} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveAccount} className="px-4 py-2 bg-[#3b82f6] text-white text-sm font-semibold rounded-lg">
+                    {editingId ? t("update") : t("save")}
+                  </button>
+                  <button
+                    onClick={() => { setShowAccForm(false); setEditingId(null); }}
+                    className="px-4 py-2 bg-[#1a1a1a] text-[#737373] text-sm rounded-lg border border-[#333]"
+                  >
+                    {t("cancel")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {accounts.map((acc) => {
+                const emp = employees.find((e) => e.id === acc.employee_id);
+                return (
+                  <div key={acc.id} className="bg-[#141414] border border-[#262626] rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-white text-sm font-semibold">{acc.username}</p>
+                      <p className="text-[#525252] text-xs">
+                        {emp?.name || t("unassigned")} &middot; {t("angle")} {acc.angle} &middot; {acc.device || t("noDevice")} &middot; {acc.status}
+                      </p>
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => openEdit(acc)}
+                        className="text-[#3b82f6] text-xs hover:underline"
+                      >
+                        {t("edit")}
+                      </button>
+                      <button
+                        onClick={() => deleteAccount(acc.id)}
+                        className="text-[#ef4444] text-xs hover:underline"
+                      >
+                        {t("delete")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -243,5 +560,19 @@ function MetricCell({ value, prev }: { value?: number; prev?: number }) {
         </span>
       )}
     </td>
+  );
+}
+
+function Input({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div>
+      <p className="text-xs text-[#525252] uppercase tracking-wider mb-1">{label}</p>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#3b82f6]"
+      />
+    </div>
   );
 }
