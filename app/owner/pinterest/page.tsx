@@ -475,7 +475,7 @@ export default function PinterestPage() {
                   <div className="mb-3 p-2.5 bg-[#0a0a0a] rounded-lg border border-[#262626]">
                     <div className="flex items-center justify-between text-[10px]">
                       <span className="text-[#525252]">Done today</span>
-                      <span className="text-white font-medium">{doneToday}/5</span>
+                      <span className="text-white font-medium">{doneToday}/{acc.pins_per_day || 5}</span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] mt-1">
                       <span className="text-[#525252]">Pending slots</span>
@@ -508,9 +508,9 @@ export default function PinterestPage() {
                 </div>
 
                 <div className="h-1.5 bg-[#262626] rounded-full overflow-hidden mb-3">
-                  <div className="h-full bg-[#22c55e] rounded-full transition-all" style={{ width: `${Math.min(100, ((accScheduled + accPosted) / 5) * 100)}%` }} />
+                  <div className="h-full bg-[#22c55e] rounded-full transition-all" style={{ width: `${Math.min(100, ((accScheduled + accPosted) / (acc.pins_per_day || 5)) * 100)}%` }} />
                 </div>
-                <p className="text-[#525252] text-[10px] mb-3">{accScheduled + accPosted}/5 pins today</p>
+                <p className="text-[#525252] text-[10px] mb-3">{accScheduled + accPosted}/{acc.pins_per_day || 5} pins today</p>
 
                 <div className="flex gap-2">
                   <button

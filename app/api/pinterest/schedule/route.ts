@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { generateRandomTimes } from "@/lib/pinterest/scheduler";
+
+/**
+ * Simple cookie-based auth check.
+ * Returns true if the request has an admin or employee_id cookie.
+ */
+function isAuthenticated(req: Request): boolean {
+  const cookieHeader = req.headers.get("cookie") || "";
+  const hasAdmin = /(?:^|;\s*)admin=/.test(cookieHeader);
+  const hasEmployee = /(?:^|;\s*)employee_id=/.test(cookieHeader);
+  return hasAdmin || hasEmployee;
+}
 
 /**
  * GET — list schedule entries for an account
  * Query: ?account_id=xxx
  */
 export async function GET(req: Request) {
+  if (!isAuthenticated(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(req.url);
   const accountId = searchParams.get("account_id");
 
@@ -27,8 +41,15 @@ export async function GET(req: Request) {
 /**
  * POST — start or stop an account's scheduler
  * Body: { account_id, action: "start" | "stop" }
+ *
+ * Start: sets running=true. The daily cron at 1AM VN will generate & schedule pins.
+ * Stop: sets running=false. The cron will skip this account.
  */
 export async function POST(req: Request) {
+  if (!isAuthenticated(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
   const { account_id, action } = body;
 
@@ -37,7 +58,7 @@ export async function POST(req: Request) {
   }
 
   if (action === "start") {
-    // Set running = true
+    // Set running = true — the daily cron will pick it up
     const { error: updateErr } = await supabase
       .from("pinterest_accounts")
       .update({ running: true })
@@ -47,63 +68,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // Generate 5 random times for today (2hr+ apart)
-    const today = new Date();
-    const now = Date.now();
-    const times = generateRandomTimes(5, today, 120); // 120 min = 2 hours
+    // Get pins_per_day for the response
+    const { data: account } = await supabase
+      .from("pinterest_accounts")
+      .select("pins_per_day")
+      .eq("id", account_id)
+      .single();
 
-    // Filter out times that have already passed
-    const futureTimes = times.filter((t) => t.getTime() > now);
-
-    if (futureTimes.length === 0) {
-      // All today's times have passed — generate for tomorrow instead
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowTimes = generateRandomTimes(5, tomorrow, 120);
-
-      const inserts = tomorrowTimes.map((t) => ({
-        account_id,
-        scheduled_at: t.toISOString(),
-        status: "pending" as const,
-      }));
-
-      const { error: insertErr } = await supabase
-        .from("pinterest_schedule")
-        .insert(inserts);
-
-      if (insertErr) {
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: "start",
-        scheduled_count: tomorrowTimes.length,
-        note: "All today slots passed, scheduled for tomorrow",
-        times: tomorrowTimes.map((t) => t.toISOString()),
-      });
-    }
-
-    // Insert future times for today
-    const inserts = futureTimes.map((t) => ({
-      account_id,
-      scheduled_at: t.toISOString(),
-      status: "pending" as const,
-    }));
-
-    const { error: insertErr } = await supabase
-      .from("pinterest_schedule")
-      .insert(inserts);
-
-    if (insertErr) {
-      return NextResponse.json({ error: insertErr.message }, { status: 500 });
-    }
+    const pinsPerDay = account?.pins_per_day || 5;
 
     return NextResponse.json({
       ok: true,
       action: "start",
-      scheduled_count: futureTimes.length,
-      times: futureTimes.map((t) => t.toISOString()),
+      message: `Account will post ${pinsPerDay} pins daily. The cron runs at 1AM VN (6PM UTC).`,
     });
   }
 
@@ -116,17 +93,6 @@ export async function POST(req: Request) {
 
     if (updateErr) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
-    }
-
-    // Mark all pending schedule entries as skipped
-    const { error: skipErr } = await supabase
-      .from("pinterest_schedule")
-      .update({ status: "skipped" })
-      .eq("account_id", account_id)
-      .eq("status", "pending");
-
-    if (skipErr) {
-      return NextResponse.json({ error: skipErr.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, action: "stop" });

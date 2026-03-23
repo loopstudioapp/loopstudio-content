@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { uploadImage, schedulePin } from "@/lib/pinterest/postiz";
-import { buildPinPrompt } from "@/lib/pinterest/prompts";
+import {
+  generateIdea,
+  buildImagePrompt,
+  generateImage,
+  generateSEO,
+  uploadAndPost,
+  getRecentTitles,
+} from "@/lib/pinterest/pipeline";
 import type { PinterestAccount } from "@/lib/pinterest/types";
-import OpenAI from "openai";
 
 export const maxDuration = 300;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+/** Safety cutoff: stop processing if elapsed > 240s (4 min) */
+const TIMEOUT_MS = 240_000;
 
 async function sendTelegram(chatId: string, text: string) {
   if (!TELEGRAM_BOT_TOKEN) return;
@@ -25,6 +32,8 @@ export async function GET(req: Request) {
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const startTime = Date.now();
 
   // Get failed pins with retry_count < 3
   const { data: failedPins } = await supabase
@@ -42,52 +51,52 @@ export async function GET(req: Request) {
   let succeeded = 0;
 
   for (const pin of failedPins) {
+    // Time safety check
+    if (Date.now() - startTime > TIMEOUT_MS) break;
+
     const account = pin.pinterest_accounts as unknown as PinterestAccount;
     if (!account) continue;
 
     try {
-      // Get topic
-      const { data: topic } = await supabase
-        .from("pinterest_topics")
-        .select("*")
-        .eq("id", pin.topic_id)
-        .single();
+      // Increment retry_count immediately
+      await supabase.from("pinterest_pins").update({
+        retry_count: (pin.retry_count || 0) + 1,
+        status: "generating",
+        error_message: null,
+      }).eq("id", pin.id);
 
-      if (!topic) continue;
+      // Re-run the full pipeline: generate fresh idea + image + SEO
+      const recentTitles = await getRecentTitles(account.id);
+      const idea = await generateIdea(recentTitles);
 
-      // Generate image
-      const prompt = buildPinPrompt(account.content_type, {
-        titleTemplate: topic.title_template,
-        promptSeed: topic.prompt_seed,
-      });
+      const imagePrompt = buildImagePrompt(idea);
+      const imageB64 = await generateImage(imagePrompt);
+      if (!imageB64) throw new Error("Image generation failed");
 
-      const result = await openai.images.generate({
-        model: "gpt-image-1.5",
-        prompt,
-        quality: "medium",
-        size: "1024x1536",
-        n: 1,
-      });
+      const seo = await generateSEO(idea);
 
-      const imageB64 = result.data?.[0]?.b64_json;
-      if (!imageB64) throw new Error("No image generated");
+      // Update pin with new content
+      await supabase.from("pinterest_pins").update({
+        title: seo.pin_title,
+        description: seo.description,
+        topic_id: idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60),
+        status: "uploading",
+      }).eq("id", pin.id);
 
-      // Upload and schedule
-      const imageBuffer = Buffer.from(imageB64, "base64");
-      const uploaded = await uploadImage(account.postiz_api_key, imageBuffer, `pin-retry-${pin.id}.png`);
-      const postId = await schedulePin(account.postiz_api_key, {
-        integrationId: account.postiz_integration_id,
-        boardId: account.board_id,
-        imageUrl: uploaded.path,
-        title: pin.title,
-        description: pin.description,
-        scheduledAt: pin.scheduled_at || new Date().toISOString(),
-        appStoreUrl: account.app_store_url || "https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8",
-      });
+      // Upload & schedule via Postiz (uploadAndPost already strips metadata with sharp)
+      const scheduledAt = pin.scheduled_at ? new Date(pin.scheduled_at) : new Date();
+      const { imageUrl, postId } = await uploadAndPost(
+        account.postiz_api_key,
+        imageB64,
+        pin.id,
+        account,
+        seo,
+        scheduledAt
+      );
 
       await supabase.from("pinterest_pins").update({
         status: "scheduled",
-        image_url: uploaded.path,
+        image_url: imageUrl,
         postiz_post_id: postId,
         error_message: null,
       }).eq("id", pin.id);
@@ -96,16 +105,16 @@ export async function GET(req: Request) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Retry failed";
       await supabase.from("pinterest_pins").update({
-        retry_count: (pin.retry_count || 0) + 1,
+        status: "failed",
         error_message: msg,
       }).eq("id", pin.id);
     }
 
     retried++;
-    await new Promise((r) => setTimeout(r, 4000));
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
-  const summary = `🔄 Pinterest Retry — ${succeeded}/${retried} recovered`;
+  const summary = `Pinterest Retry — ${succeeded}/${retried} recovered`;
   if (ADMIN_CHAT_ID && retried > 0) {
     await sendTelegram(ADMIN_CHAT_ID, summary);
   }

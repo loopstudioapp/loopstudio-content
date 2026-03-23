@@ -8,13 +8,16 @@ import {
   uploadAndPost,
   getRecentTitles,
 } from "@/lib/pinterest/pipeline";
-import { generateRandomTimes } from "@/lib/pinterest/scheduler";
+import { generateRandomTimes, getTomorrowEastern } from "@/lib/pinterest/scheduler";
 import type { PinterestAccount } from "@/lib/pinterest/types";
 
 export const maxDuration = 300;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+/** Safety cutoff: stop processing if elapsed > 240s (4 min) */
+const TIMEOUT_MS = 240_000;
 
 async function sendTelegram(text: string) {
   if (!TELEGRAM_BOT_TOKEN || !ADMIN_CHAT_ID) return;
@@ -26,16 +29,20 @@ async function sendTelegram(text: string) {
 }
 
 /**
- * Daily cron (midnight VN / 0 0 UTC):
- * For each running account, generate 5 pins and SCHEDULE them via Postiz
- * at random times throughout the day (2hr+ apart, 8AM-10PM EST).
+ * Daily cron (1AM VN / 18:00 UTC):
+ * For each running account, generate pins and SCHEDULE them via Postiz
+ * at random times throughout the next US day (6AM-11PM Eastern, 2hr+ apart).
  * Postiz handles posting at the scheduled times.
+ *
+ * Includes a 4-minute safety cutoff to stay under maxDuration=300.
  */
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const startTime = Date.now();
 
   // Get all running accounts
   const { data: accounts } = await supabase
@@ -51,17 +58,29 @@ export async function GET(req: Request) {
   const results: string[] = [];
   let totalScheduled = 0;
   let totalFailed = 0;
+  let totalSkipped = 0;
+
+  // Schedule for tomorrow in US Eastern time
+  const targetDate = getTomorrowEastern();
 
   for (const account of accounts as PinterestAccount[]) {
     const pinsPerDay = account.pins_per_day || 5;
 
-    // Generate random times for today (2hr+ apart)
-    const today = new Date();
-    const scheduleTimes = generateRandomTimes(pinsPerDay, today, 120);
+    // Generate random times for the next US day (2hr+ apart)
+    const scheduleTimes = generateRandomTimes(pinsPerDay, targetDate, 120);
 
     const recentTitles = await getRecentTitles(account.id);
 
     for (let i = 0; i < pinsPerDay; i++) {
+      // Time safety check: stop if we've been running > 4 minutes
+      const elapsed = Date.now() - startTime;
+      if (elapsed > TIMEOUT_MS) {
+        const remaining = pinsPerDay - i;
+        totalSkipped += remaining;
+        results.push(`${account.name}: SKIPPED ${remaining} pins (timeout at ${Math.round(elapsed / 1000)}s)`);
+        break;
+      }
+
       const scheduledAt = scheduleTimes[i];
 
       try {
@@ -119,25 +138,25 @@ export async function GET(req: Request) {
 
         totalScheduled++;
         recentTitles.push(seo.pin_title);
-        results.push(`${account.name}: scheduled "${seo.pin_title}" at ${scheduledAt.toLocaleTimeString()}`);
+        results.push(`${account.name}: scheduled "${seo.pin_title}" at ${scheduledAt.toISOString()}`);
       } catch (e: unknown) {
         totalFailed++;
         const msg = e instanceof Error ? e.message : "Unknown error";
         results.push(`${account.name}: FAILED pin ${i + 1} — ${msg}`);
       }
 
-      // Delay between pins for rate limiting (5s)
+      // Short delay between pins for rate limiting (2s)
       if (i < pinsPerDay - 1) {
-        await new Promise((r) => setTimeout(r, 5000));
+        await new Promise((r) => setTimeout(r, 2000));
       }
     }
   }
 
   // Telegram notification
-  if (totalScheduled > 0 || totalFailed > 0) {
+  if (totalScheduled > 0 || totalFailed > 0 || totalSkipped > 0) {
     const summary = [
-      `📌 Pinterest Daily — ${new Date().toISOString().split("T")[0]}`,
-      `✅ ${totalScheduled} scheduled, ❌ ${totalFailed} failed`,
+      `Pinterest Daily — ${new Date().toISOString().split("T")[0]}`,
+      `${totalScheduled} scheduled, ${totalFailed} failed, ${totalSkipped} skipped`,
       "",
       ...results,
     ].join("\n");
@@ -148,6 +167,7 @@ export async function GET(req: Request) {
     ok: true,
     scheduled: totalScheduled,
     failed: totalFailed,
+    skipped: totalSkipped,
     details: results,
   });
 }
