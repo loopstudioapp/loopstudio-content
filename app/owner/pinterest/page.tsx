@@ -19,6 +19,7 @@ type PAccount = {
   telegram_chat_id: string | null;
   app_store_url: string;
   running: boolean;
+  ba_running: boolean;
   created_at: string;
 };
 
@@ -313,6 +314,23 @@ export default function PinterestPage() {
     setToggling(null);
   };
 
+  /* ── Start/Stop B/A Toggle ── */
+  const toggleBA = async (account: PAccount) => {
+    setToggling(account.id + "-ba");
+    try {
+      const action = account.ba_running ? "stop_ba" : "start_ba";
+      const res = await fetch("/api/pinterest/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: account.id, action }),
+      });
+      if (res.ok) {
+        await loadAll();
+      }
+    } catch { /* silent */ }
+    setToggling(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
@@ -525,6 +543,19 @@ export default function PinterestPage() {
                     {toggling === acc.id
                       ? (acc.running ? "Stopping..." : "Starting...")
                       : (acc.running ? "■ Stop" : "▶ Start")}
+                  </button>
+                  <button
+                    onClick={() => toggleBA(acc)}
+                    disabled={toggling !== null}
+                    className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                      acc.ba_running
+                        ? "bg-[#ef4444]/10 text-[#ef4444] hover:bg-[#ef4444]/20 border border-[#ef4444]/30"
+                        : "bg-[#22c55e]/10 text-[#22c55e] hover:bg-[#22c55e]/20 border border-[#22c55e]/30"
+                    }`}
+                  >
+                    {toggling === acc.id + "-ba"
+                      ? (acc.ba_running ? "Stopping..." : "Starting...")
+                      : (acc.ba_running ? "■ Stop B/A" : "▶ Start B/A")}
                   </button>
                   <button onClick={() => loadAnalytics(acc)} className="flex-1 px-3 py-1.5 text-xs bg-[#262626] text-[#3b82f6] rounded-lg hover:bg-[#333] transition-colors">
                     Analytics

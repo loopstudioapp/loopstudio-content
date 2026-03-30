@@ -15,6 +15,7 @@ export interface PinterestAccount {
   telegram_chat_id: string | null;
   app_store_url: string;
   running: boolean;
+  ba_running: boolean;
   created_at: string;
 }
 

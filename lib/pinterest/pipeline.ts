@@ -83,6 +83,91 @@ Return ONLY valid JSON:
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   BEFORE/AFTER FLOW — Idea + Prompt
+   ═══════════════════════════════════════════════════════════════ */
+export interface BeforeAfterIdea {
+  title: string;
+  room: string;
+  before: string;
+  after: string;
+}
+
+export async function generateBeforeAfterIdea(recentTitles: string[]): Promise<BeforeAfterIdea> {
+  const recentList = recentTitles.length > 0
+    ? recentTitles.map((t) => `- ${t}`).join("\n")
+    : "(none)";
+
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: `Generate a before and after home interior transformation idea for a Pinterest pin.
+
+Requirements:
+- Pick a specific room type and design style
+- Describe the "before" room in detail (what makes it dated/ugly)
+- Describe the "after" room in detail (what makes it beautiful/modern)
+- Title should be catchy and SEO-friendly for Pinterest
+
+Do NOT repeat these recent topics:
+${recentList}
+
+Return ONLY valid JSON:
+{
+  "title": "...",
+  "room": "...",
+  "before": "...",
+  "after": "..."
+}`,
+      },
+    ],
+  });
+
+  const raw = res.choices[0]?.message?.content || "";
+  return parseJSON<BeforeAfterIdea>(raw);
+}
+
+export function buildBeforeAfterPrompt(idea: BeforeAfterIdea): string {
+  return `Create a Pinterest pin showing a dramatic before and after ${idea.room} transformation. The image should be split vertically into two halves filling the entire frame. Top half: ${idea.before}. A small "BEFORE" label in the corner. Bottom half: ${idea.after}. A small "AFTER" label in the corner. No title text at the top — the before and after images should fill the entire pin from edge to edge. At the very bottom, a thin subtle banner with small text "${APP_NAME}: Design Your Home In Seconds!" on the left, and a simple small black rounded rectangle with just an Apple logo and the words "App Store" on the right. Keep the App Store badge very simple — just the Apple icon and "App Store" text, nothing else. The banner should be minimal and small.`;
+}
+
+/** Generate SEO metadata for a before/after pin */
+export async function generateBeforeAfterSEO(idea: BeforeAfterIdea): Promise<{ pin_title: string; description: string; tags: string[] }> {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 512,
+    messages: [
+      {
+        role: "user",
+        content: `You are a Pinterest SEO expert. Generate optimized metadata for a before/after room transformation pin about:
+
+Title: ${idea.title}
+Room: ${idea.room}
+Before: ${idea.before}
+After: ${idea.after}
+
+Generate:
+1. **pin_title**: Catchy, keyword-rich title (max 100 chars). Use power words (Stunning, Dramatic, Incredible). Include the room/design topic.
+2. **description**: SEO-optimized description (150-300 chars). Include relevant keywords naturally. End with a CTA mentioning ${APP_NAME} for AI room design.
+3. **tags**: 8-12 relevant Pinterest tags/keywords. Mix broad ("home makeover") and specific ("small bedroom transformation"). Include trending terms.
+
+Return ONLY valid JSON:
+{
+    "pin_title": "...",
+    "description": "...",
+    "tags": ["...", "..."]
+}`,
+      },
+    ],
+  });
+
+  const raw = res.choices[0]?.message?.content || "";
+  return parseJSON<{ pin_title: string; description: string; tags: string[] }>(raw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STEP 2: Generate Infographic Image
    ═══════════════════════════════════════════════════════════════ */
 

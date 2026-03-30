@@ -98,5 +98,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, action: "stop" });
   }
 
-  return NextResponse.json({ error: "Invalid action. Use 'start' or 'stop'" }, { status: 400 });
+  if (action === "start_ba") {
+    const { error: updateErr } = await supabase
+      .from("pinterest_accounts")
+      .update({ ba_running: true })
+      .eq("id", account_id);
+
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      action: "start_ba",
+      message: "Before/After pipeline started. The cron runs at 1AM VN (6PM UTC).",
+    });
+  }
+
+  if (action === "stop_ba") {
+    const { error: updateErr } = await supabase
+      .from("pinterest_accounts")
+      .update({ ba_running: false })
+      .eq("id", account_id);
+
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, action: "stop_ba" });
+  }
+
+  return NextResponse.json({ error: "Invalid action. Use 'start', 'stop', 'start_ba', or 'stop_ba'" }, { status: 400 });
 }

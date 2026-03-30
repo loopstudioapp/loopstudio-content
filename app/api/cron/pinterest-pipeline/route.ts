@@ -7,6 +7,9 @@ import {
   generateSEO,
   uploadAndPost,
   getRecentTitles,
+  generateBeforeAfterIdea,
+  buildBeforeAfterPrompt,
+  generateBeforeAfterSEO,
 } from "@/lib/pinterest/pipeline";
 import { generateRandomTimes, getTomorrowEastern } from "@/lib/pinterest/scheduler";
 import type { PinterestAccount } from "@/lib/pinterest/types";
@@ -148,6 +151,101 @@ export async function GET(req: Request) {
       // Short delay between pins for rate limiting (2s)
       if (i < pinsPerDay - 1) {
         await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  // ═══════════════ BEFORE/AFTER LOOP ═══════════════
+  const { data: baAccounts } = await supabase
+    .from("pinterest_accounts")
+    .select("*")
+    .eq("status", "active")
+    .eq("ba_running", true);
+
+  if (baAccounts && baAccounts.length > 0) {
+    for (const account of baAccounts as PinterestAccount[]) {
+      const baPinsPerDay = 5;
+      const baScheduleTimes = generateRandomTimes(baPinsPerDay, targetDate, 120);
+      const baRecentTitles = await getRecentTitles(account.id);
+
+      for (let i = 0; i < baPinsPerDay; i++) {
+        // Time safety check
+        const elapsed = Date.now() - startTime;
+        if (elapsed > TIMEOUT_MS) {
+          const remaining = baPinsPerDay - i;
+          totalSkipped += remaining;
+          results.push(`${account.name} [B/A]: SKIPPED ${remaining} pins (timeout at ${Math.round(elapsed / 1000)}s)`);
+          break;
+        }
+
+        const scheduledAt = baScheduleTimes[i];
+
+        try {
+          // Step 1: Generate before/after idea
+          const idea = await generateBeforeAfterIdea(baRecentTitles);
+
+          // Step 2: Generate image
+          const imagePrompt = buildBeforeAfterPrompt(idea);
+          const imageB64 = await generateImage(imagePrompt);
+          if (!imageB64) throw new Error("Image generation failed");
+
+          // Step 3: Generate SEO
+          const seo = await generateBeforeAfterSEO(idea);
+
+          // Step 4: Create pin record (topic_id starts with "ba-")
+          const { data: pin } = await supabase
+            .from("pinterest_pins")
+            .insert({
+              account_id: account.id,
+              topic_id: "ba-" + idea.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 57),
+              title: seo.pin_title,
+              description: seo.description,
+              status: "uploading",
+              scheduled_at: scheduledAt.toISOString(),
+            })
+            .select("id")
+            .single();
+
+          if (!pin) throw new Error("Failed to insert pin record");
+
+          // Step 5: Upload & schedule via Postiz
+          const { imageUrl, postId } = await uploadAndPost(
+            account.postiz_api_key,
+            imageB64,
+            pin.id,
+            account,
+            seo,
+            scheduledAt
+          );
+
+          // Update pin as scheduled
+          await supabase.from("pinterest_pins").update({
+            status: "scheduled",
+            image_url: imageUrl,
+            postiz_post_id: postId,
+          }).eq("id", pin.id);
+
+          // Track in pinterest_schedule
+          await supabase.from("pinterest_schedule").insert({
+            account_id: account.id,
+            scheduled_at: scheduledAt.toISOString(),
+            pin_id: pin.id,
+            status: "done",
+          });
+
+          totalScheduled++;
+          baRecentTitles.push(seo.pin_title);
+          results.push(`${account.name} [B/A]: scheduled "${seo.pin_title}" at ${scheduledAt.toISOString()}`);
+        } catch (e: unknown) {
+          totalFailed++;
+          const msg = e instanceof Error ? e.message : "Unknown error";
+          results.push(`${account.name} [B/A]: FAILED pin ${i + 1} — ${msg}`);
+        }
+
+        // Short delay between pins (2s)
+        if (i < baPinsPerDay - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       }
     }
   }
