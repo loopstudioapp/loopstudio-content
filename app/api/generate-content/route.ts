@@ -7,7 +7,90 @@ import { generateContent } from "@/lib/generate-prompts";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const POSTBRIDGE_KEY = process.env.POSTIZ_API_KEY; // PostBridge API key (stored in POSTIZ_API_KEY env)
 const MAX_DAILY = 3;
+
+// Susan's account — special TikTok draft flow via PostBridge
+const SUSAN_USERNAME = "@susan.design.roomy";
+const SUSAN_TIKTOK_PB_ID = 53506;
+
+/** Generate TikTok-optimized slide texts + title + caption via GPT-4o */
+async function generateTikTokContent(basePrompt: string, transformPrompts: string[]) {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: `You are a TikTok content expert for home design and interior styling. Generate engaging slideshow text for a TikTok post.
+
+The slideshow has ${2 + transformPrompts.length} slides:
+- Slide 1: A base room image (the "before" or original space)
+- Slides 2-${1 + transformPrompts.length}: Different redesign transformations of that room
+- Last slide: App promotion slide
+
+Generate:
+1. A hook text for slide 1 that reels in viewers (short, punchy, curiosity-driven)
+2. Short text for each transformation slide (1 sentence each, casual tone)
+3. Text for the promo slide mentioning Roomy AI
+4. A TikTok post title optimized for maximum engagement and reach
+5. A TikTok caption optimized for engagement (casual, relatable, no hashtags, no excessive emojis, max 1-2 emojis)
+
+Return ONLY valid JSON:
+{
+  "slide_texts": ["hook text for slide 1", "text for slide 2", "text for slide 3", ...],
+  "promo_text": "text for the app promo slide",
+  "title": "...",
+  "caption": "..."
+}`
+    }],
+  });
+  const raw = res.choices[0]?.message?.content || "";
+  return JSON.parse(raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim());
+}
+
+/** Upload image to PostBridge and return media_id */
+async function uploadToPostBridge(imageBuffer: Buffer, filename: string): Promise<string> {
+  // Step 1: Get upload URL
+  const urlRes = await fetch("https://api.post-bridge.com/v1/media/create-upload-url", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${POSTBRIDGE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: filename, mime_type: "image/png", size_bytes: imageBuffer.length }),
+  });
+  const { media_id, upload_url } = await urlRes.json();
+
+  // Step 2: Upload binary
+  await fetch(upload_url, {
+    method: "PUT",
+    headers: { "Content-Type": "image/png" },
+    body: new Uint8Array(imageBuffer),
+  });
+
+  return media_id;
+}
+
+/** Post images as TikTok draft via PostBridge */
+async function postTikTokDraft(mediaIds: string[], title: string, caption: string) {
+  const res = await fetch("https://api.post-bridge.com/v1/posts", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${POSTBRIDGE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      caption,
+      media: mediaIds,
+      social_accounts: [SUSAN_TIKTOK_PB_ID],
+      scheduled_at: null,
+      is_draft: true,
+      platform_configurations: {
+        tiktok: {
+          title,
+          caption,
+          draft: true,
+          is_aigc: false,
+        },
+      },
+    }),
+  });
+  return res.json();
+}
 
 async function createTelegramChannel(name: string): Promise<string | null> {
   if (!TELEGRAM_BOT_TOKEN) return null;
@@ -201,7 +284,70 @@ export async function POST(req: Request) {
       promoB64 = promoBuffer.toString("base64");
     } catch { /* skip promo if it fails */ }
 
-    // Step 4: Send to Telegram (4 messages)
+    // === SUSAN SPECIAL FLOW: strip metadata → TikTok draft via PostBridge + slide texts to Telegram ===
+    const isSusan = account.username === SUSAN_USERNAME;
+
+    if (isSusan && POSTBRIDGE_KEY) {
+      // Strip metadata from ALL images
+      const stripMeta = async (b64: string) => sharp(Buffer.from(b64, "base64")).png().toBuffer();
+      const cleanBase = await stripMeta(baseImageB64);
+      const cleanTransforms = await Promise.all(transformImages.map(stripMeta));
+      const cleanPromo = promoB64 ? await stripMeta(promoB64) : null;
+
+      // Upload all images to PostBridge
+      const allClean = [cleanBase, ...cleanTransforms];
+      if (cleanPromo) allClean.push(cleanPromo);
+      const mediaIds = await Promise.all(
+        allClean.map((buf, i) => uploadToPostBridge(buf, `slide-${i}.png`))
+      );
+
+      // Generate TikTok-optimized text via GPT-4o
+      const tikTokContent = await generateTikTokContent(content.basePrompt, content.transformPrompts);
+
+      // Post as TikTok draft
+      await postTikTokDraft(mediaIds, tikTokContent.title, tikTokContent.caption);
+
+      // Send slide texts + title/caption to Telegram for manual posting
+      if (chatId) {
+        const handle = account.username.replace(/^@/, "");
+        await sendMessageToTelegram(chatId, `🎬 TikTok Draft Created (${used + 1}/${MAX_DAILY}) — @${handle}`);
+        await sendMessageToTelegram(chatId, `📱 *Title:* ${tikTokContent.title}\n\n📝 *Caption:* ${tikTokContent.caption}`);
+
+        // Send slide texts
+        let slideMsg = "📋 *Slide Texts:*\n";
+        const slideTexts: string[] = tikTokContent.slide_texts || [];
+        slideTexts.forEach((text: string, i: number) => {
+          slideMsg += `\nSlide ${i + 1}: ${text}`;
+        });
+        if (tikTokContent.promo_text) {
+          slideMsg += `\nSlide ${slideTexts.length + 1} (promo): ${tikTokContent.promo_text}`;
+        }
+        await sendMessageToTelegram(chatId, slideMsg);
+      }
+
+      // Record generation
+      await supabase.from("content_generations").insert({
+        account_id,
+        employee_id: employee_id === "admin" ? null : employee_id,
+        date: today,
+        title: tikTokContent.title,
+        caption: tikTokContent.caption,
+      });
+
+      return NextResponse.json({
+        success: true,
+        title: tikTokContent.title,
+        caption: tikTokContent.caption,
+        imagesGenerated: allClean.length,
+        sentToTikTokDraft: true,
+        sentToTelegram: !!chatId,
+        used: used + 1,
+        max: MAX_DAILY,
+        remaining: MAX_DAILY - used - 1,
+      });
+    }
+
+    // === DEFAULT FLOW: Send to Telegram ===
     if (chatId) {
       const handle = account.username.replace(/^@/, "");
 
@@ -220,7 +366,7 @@ export async function POST(req: Request) {
       await sendMediaGroupToTelegram(chatId, allImages);
     }
 
-    // Step 4: Record generation
+    // Record generation
     await supabase.from("content_generations").insert({
       account_id,
       employee_id: employee_id === "admin" ? null : employee_id,
