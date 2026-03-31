@@ -33,9 +33,9 @@ async function sendTelegram(text: string) {
 
 /**
  * Daily cron (1AM VN / 18:00 UTC):
- * For each running account, generate pins and SCHEDULE them via Postiz
+ * For each running account, generate pins and SCHEDULE them via PostBridge
  * at random times throughout the next US day (6AM-11PM Eastern, 2hr+ apart).
- * Postiz handles posting at the scheduled times.
+ * PostBridge handles posting at the scheduled times.
  *
  * Includes a 4-minute safety cutoff to stay under maxDuration=300.
  */
@@ -114,7 +114,7 @@ export async function GET(req: Request) {
 
         if (!pin) throw new Error("Failed to insert pin record");
 
-        // Step 5: Upload & SCHEDULE via Postiz at the random time
+        // Step 5: Upload & SCHEDULE via PostBridge at the random time
         const { imageUrl, postId } = await uploadAndPost(
           account.postiz_api_key,
           imageB64,
@@ -208,7 +208,7 @@ export async function GET(req: Request) {
 
           if (!pin) throw new Error("Failed to insert pin record");
 
-          // Step 5: Upload & schedule via Postiz
+          // Step 5: Upload & schedule via PostBridge
           const { imageUrl, postId } = await uploadAndPost(
             account.postiz_api_key,
             imageB64,

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getIntegrations } from "@/lib/pinterest/postbridge";
 
-const POSTIZ_API_KEY = process.env.POSTIZ_API_KEY;
+const POSTBRIDGE_API_KEY = process.env.POSTIZ_API_KEY;
 
 export async function POST() {
   // Get API key from env or from existing accounts
-  let apiKey = POSTIZ_API_KEY;
+  let apiKey = POSTBRIDGE_API_KEY;
 
   if (!apiKey) {
     // Fall back to first account's API key
@@ -18,61 +19,49 @@ export async function POST() {
   }
 
   if (!apiKey) {
-    return NextResponse.json({ error: "No Postiz API key configured" }, { status: 400 });
+    return NextResponse.json({ error: "No PostBridge API key configured" }, { status: 400 });
   }
 
   try {
-    // Fetch integrations from Postiz
-    const res = await fetch("https://api.postiz.com/public/v1/integrations", {
-      headers: { Authorization: apiKey },
-    });
+    // Fetch Pinterest accounts from PostBridge
+    const accounts = await getIntegrations(apiKey);
 
-    if (!res.ok) {
-      return NextResponse.json({ error: "Failed to fetch from Postiz" }, { status: 500 });
-    }
+    // Sync each account to our DB
+    for (const account of accounts) {
+      const accountId = String(account.id);
 
-    const integrations = await res.json();
-
-    // Filter Pinterest integrations only
-    const pinterestIntegrations = integrations.filter(
-      (i: { identifier: string }) => i.identifier === "pinterest"
-    );
-
-    // Sync each integration to our DB
-    for (const integration of pinterestIntegrations) {
       const { data: existing } = await supabase
         .from("pinterest_accounts")
         .select("id")
-        .eq("postiz_integration_id", integration.id)
+        .eq("postiz_integration_id", accountId)
         .single();
 
       if (!existing) {
         // Create new account
         await supabase.from("pinterest_accounts").insert({
-          name: integration.name || integration.profile || "Pinterest",
-          pinterest_username: integration.profile || null,
+          name: account.username || "Pinterest",
+          pinterest_username: account.username || null,
           postiz_api_key: apiKey,
-          postiz_integration_id: integration.id,
+          postiz_integration_id: accountId,
           board_id: "auto",
           content_type: "visual_guide",
-          status: integration.disabled ? "paused" : "active",
+          status: "active",
           pins_per_day: 5,
           app_store_url: "https://apps.apple.com/us/app/interior-design-roomy-ai/id6759851023?ct=pinterest&mt=8",
         });
       } else {
-        // Update existing — sync status
+        // Update existing — sync name
         await supabase
           .from("pinterest_accounts")
           .update({
-            name: integration.name || integration.profile || "Pinterest",
-            pinterest_username: integration.profile || null,
-            status: integration.disabled ? "paused" : "active",
+            name: account.username || "Pinterest",
+            pinterest_username: account.username || null,
           })
           .eq("id", existing.id);
       }
     }
 
-    return NextResponse.json({ ok: true, integrations: pinterestIntegrations });
+    return NextResponse.json({ ok: true, accounts });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Sync failed";
     return NextResponse.json({ error: msg }, { status: 500 });

@@ -216,7 +216,7 @@ export default function PinterestPage() {
 
   useEffect(() => {
     loadAll();
-    syncFromPostiz();
+    syncFromPostBridge();
   }, [loadAll]);
 
   // Load overall analytics when accounts are available
@@ -225,8 +225,8 @@ export default function PinterestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts.length]);
 
-  /* ── Sync from Postiz ── */
-  const syncFromPostiz = async () => {
+  /* ── Sync from PostBridge ── */
+  const syncFromPostBridge = async () => {
     setSyncing(true);
     try {
       await fetch("/api/pinterest/sync", { method: "POST" });
@@ -388,7 +388,7 @@ export default function PinterestPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={syncFromPostiz} disabled={syncing} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors disabled:opacity-50">
+          <button onClick={syncFromPostBridge} disabled={syncing} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors disabled:opacity-50">
             {syncing ? "Syncing..." : "Sync"}
           </button>
           <button onClick={() => setLang(lang === "en" ? "vi" : "en")} className="px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
@@ -458,7 +458,7 @@ export default function PinterestPage() {
       {/* ═══════════════ ACCOUNTS ═══════════════ */}
       <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">Accounts</h2>
       {accounts.length === 0 ? (
-        <p className="text-center text-[#525252] py-8">No Pinterest accounts synced. Connect Pinterest in Postiz, then click Sync.</p>
+        <p className="text-center text-[#525252] py-8">No Pinterest accounts synced. Connect Pinterest in PostBridge, then click Sync.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {accounts.map((acc) => {

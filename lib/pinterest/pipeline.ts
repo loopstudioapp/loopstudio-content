@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import sharp from "sharp";
 import { supabase } from "@/lib/supabase";
-import { uploadImage, schedulePin } from "./postiz";
+import { uploadImage, schedulePin } from "./postbridge";
 import { generateRandomTimes } from "./scheduler";
 import type { PinterestAccount, SchedulePinParams } from "./types";
 
@@ -241,7 +241,7 @@ Return ONLY valid JSON:
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   STEP 4: Upload & Post via Postiz
+   STEP 4: Upload & Post via PostBridge
    ═══════════════════════════════════════════════════════════════ */
 export async function uploadAndPost(
   apiKey: string,
@@ -268,7 +268,7 @@ export async function uploadAndPost(
     tags: seo.tags,
   } as SchedulePinParams);
 
-  return { imageUrl: uploaded.path, postId };
+  return { imageUrl: uploaded.id, postId };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -306,7 +306,7 @@ async function processPin(
       status: "uploading",
     }).eq("id", pinId);
 
-    // Step 4: Upload & schedule via Postiz
+    // Step 4: Upload & schedule via PostBridge
     const { imageUrl, postId } = await uploadAndPost(
       account.postiz_api_key,
       imageB64,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createPostizClient } from "@/lib/pinterest/postiz";
+import { createPostBridgeClient } from "@/lib/pinterest/postbridge";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const client = createPostizClient(apiKey);
+    const client = createPostBridgeClient(apiKey);
     const integrations = await client.getIntegrations();
     return NextResponse.json({ ok: true, integrations });
   } catch (e: unknown) {

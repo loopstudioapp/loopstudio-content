@@ -83,7 +83,7 @@ export async function GET(req: Request) {
         status: "uploading",
       }).eq("id", pin.id);
 
-      // Upload & schedule via Postiz (uploadAndPost already strips metadata with sharp)
+      // Upload & schedule via PostBridge (uploadAndPost already strips metadata with sharp)
       const scheduledAt = pin.scheduled_at ? new Date(pin.scheduled_at) : new Date();
       const { imageUrl, postId } = await uploadAndPost(
         account.postiz_api_key,
