@@ -414,22 +414,7 @@ export default function OwnerDashboard() {
         )}
       </section>
 
-      {/* ═══ PINTEREST ═══ */}
-      <section>
-        <div className="flex items-center gap-2 mb-5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#e60023]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Pinterest</h2>
-        </div>
-        {pinterestLoading ? skeleton(3, "grid-cols-1 sm:grid-cols-3") : pinterestMetrics.length === 0 ? (
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">No Pinterest analytics data yet</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <MetricCard label="Impressions" value={fmtNum(pinTotal("impression"))} color="#22c55e" data={pinValues("impression")} dates={pinDates("impression")} />
-            <MetricCard label="Pin Clicks" value={fmtNum(pinTotal("click"))} color="#3b82f6" data={pinValues("click")} dates={pinDates("click")} />
-            <MetricCard label="Saves" value={fmtNum(pinTotal("save"))} color="#f59e0b" data={pinValues("save")} dates={pinDates("save")} />
-          </div>
-        )}
-      </section>
+      {/* Pinterest analytics hidden — PostBridge has no analytics API */}
     </div>
   );
 }

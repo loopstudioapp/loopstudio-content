@@ -427,33 +427,7 @@ export default function PinterestPage() {
         </div>
       </div>
 
-      {/* ═══════════════ OVERALL ANALYTICS ═══════════════ */}
-      <div className="mb-8">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Overall Analytics</h2>
-          <select
-            className="bg-[#0a0a0a] border border-[#262626] rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#e60023] focus:outline-none"
-            value={overallDays}
-            onChange={(e) => { setOverallDays(e.target.value); loadOverallAnalytics(e.target.value); }}
-          >
-            <option value="7">7 Days</option>
-            <option value="30">30 Days</option>
-            <option value="90">90 Days</option>
-          </select>
-        </div>
-
-        {loadingOverall ? (
-          <p className="text-[#525252] text-sm py-4">Loading analytics...</p>
-        ) : overallAnalytics.length === 0 ? (
-          <p className="text-[#525252] text-sm py-4">No analytics data yet</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {overallAnalytics.map((metric) => (
-              <MetricCard key={metric.label} metric={metric} />
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Pinterest analytics hidden — PostBridge has no analytics API */}
 
       {/* ═══════════════ ACCOUNTS ═══════════════ */}
       <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider mb-4">Accounts</h2>
