@@ -62,6 +62,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing app_user_id" }, { status: 400 });
   }
 
+  // Detect which app based on product_id
+  const productId = (event.product_id || "").toLowerCase();
+  let appName = "Roomy AI";
+  if (productId.includes("swipe") || productId.includes("com.swipeaway")) {
+    appName = "SwipeAway";
+  }
+
   const baseRecord = {
     id: appUserId,
     app_user_id: appUserId,
@@ -72,6 +79,7 @@ export async function POST(request: NextRequest) {
     purchased_at: msToTimestamp(event.purchased_at_ms),
     expires_at: msToTimestamp(event.expiration_at_ms),
     revenue_gross: event.price || 0,
+    app_name: appName,
     updated_at: new Date().toISOString(),
   };
 

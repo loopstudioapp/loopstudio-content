@@ -147,7 +147,7 @@ interface SubInfo {
 async function fetchSubscribers(filter: string) {
   const statusFilter = filter === "trial" ? "trialing" : "active";
 
-  // Roomy AI subs from DB
+  // All apps from DB (Roomy AI + SwipeAway)
   let query = supabase
     .from("rc_subscriptions")
     .select("*")
@@ -160,13 +160,14 @@ async function fetchSubscribers(filter: string) {
     query = query.gt("revenue_gross", 0);
   }
 
-  const { data, error } = await query.order("purchased_at", { ascending: true });
+  const { data, error } = await query
+    .order("purchased_at", { ascending: true });
   if (error) throw new Error(`Database error: ${error.message}`);
 
   const subscribers: SubInfo[] = (data || []).map((row) => ({
     id: row.app_user_id || row.id,
     country: (row.country || "").toUpperCase(),
-    app: "Roomy AI",
+    app: row.app_name || "Roomy AI",
     plan: planName(row.product_id || ""),
     purchase_date: row.purchased_at || "",
     expiry_date: row.expires_at || "",
@@ -174,82 +175,6 @@ async function fetchSubscribers(filter: string) {
     auto_renewal: row.auto_renewal || "",
     status: row.status || "",
   }));
-
-  // SwipeAway subs from API (iterate customers)
-  const swipeaway = RC_PROJECTS.find((p) => p.name === "SwipeAway");
-  if (swipeaway?.apiKey && swipeaway?.projectId) {
-    try {
-      let cursor: string | undefined;
-      let checked = 0;
-      while (checked < 500) {
-        const url = new URL(`${RC_BASE}/projects/${swipeaway.projectId}/customers`);
-        url.searchParams.set("limit", "50");
-        if (cursor) url.searchParams.set("starting_after", cursor);
-
-        const res = await fetch(url.toString(), { headers: rcHeaders(swipeaway.apiKey) });
-        if (!res.ok) break;
-        const json = await res.json();
-        const items = json.items || [];
-        if (items.length === 0) break;
-
-        for (const c of items) {
-          const encoded = encodeURIComponent(c.id);
-          try {
-            const subRes = await fetch(
-              `${RC_BASE}/projects/${swipeaway.projectId}/customers/${encoded}/subscriptions`,
-              { headers: rcHeaders(swipeaway.apiKey) }
-            );
-            if (!subRes.ok) continue;
-            const subJson = await subRes.json();
-            for (const sub of subJson.items || []) {
-              const status = (sub.status || "").toLowerCase();
-              const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
-              const env = (sub.environment || "").toLowerCase();
-              const rev = sub.total_revenue_in_usd as
-                { gross?: number; proceeds?: number } | undefined;
-              if (env === "sandbox") continue;
-
-              let matches = false;
-              if (filter === "trial") {
-                matches = status === "trialing" &&
-                  autoRenewal === "will_renew";
-              } else {
-                matches = status === "active" &&
-                  (rev?.gross ?? 0) > 0;
-              }
-
-              if (matches) {
-                subscribers.push({
-                  id: c.id,
-                  country: (sub.country || "").toUpperCase(),
-                  app: "SwipeAway",
-                  plan: planName(sub.product_id || ""),
-                  purchase_date: sub.starts_at
-                    ? new Date(sub.starts_at).toISOString()
-                    : "",
-                  expiry_date: sub.current_period_ends_at
-                    ? new Date(sub.current_period_ends_at).toISOString()
-                    : "",
-                  revenue: rev?.gross ?? 0,
-                  auto_renewal: autoRenewal,
-                  status,
-                });
-              }
-            }
-          } catch { /* skip customer */ }
-        }
-
-        checked += items.length;
-        cursor = items[items.length - 1]?.id;
-        if (!json.next_page) break;
-      }
-    } catch { /* SwipeAway fetch failed, continue with Roomy only */ }
-  }
-
-  // Sort all by purchase date
-  subscribers.sort((a, b) =>
-    new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()
-  );
 
   return { subscribers, total: subscribers.length };
 }
