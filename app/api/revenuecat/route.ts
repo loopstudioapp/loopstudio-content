@@ -35,8 +35,8 @@ function rcHeaders(apiKey: string) {
 
 function planName(productId: string): string {
   if (!productId) return "—";
-  if (productId.includes("weekly") || productId === "prodb2f4f71b2d") return "Weekly";
-  if (productId.includes("yearly") || productId.includes("annual") || productId === "prod64a4d6b792") return "Yearly";
+  if (productId.includes("weekly") || productId === "prodb2f4f71b2d" || productId === "prod6b651edf9a") return "Weekly";
+  if (productId.includes("yearly") || productId.includes("annual") || productId === "prod64a4d6b792" || productId === "prodf03355abc6") return "Yearly";
   if (productId.includes("monthly")) return "Monthly";
   return productId;
 }
