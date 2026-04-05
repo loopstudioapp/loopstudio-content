@@ -252,8 +252,8 @@ export default function OwnerDashboard() {
           <table className="w-full min-w-[650px]">
             <thead>
               <tr className="border-b border-[#262626]">
-                {["Country", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
-                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 4 ? "text-right" : "text-left"}`}>{h}</th>
+                {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
+                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -261,6 +261,7 @@ export default function OwnerDashboard() {
               {items.map((s, i) => (
                 <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
                   <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{countryName(s.country)}</span></td>
+                  <td className="px-5 py-2.5 text-xs text-[#a3a3a3]">{s.app || "—"}</td>
                   <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
@@ -322,10 +323,10 @@ export default function OwnerDashboard() {
         </div>
       </div>
 
-      {/* ═══ ROOMY AI REVENUE ═══ */}
+      {/* ═══ REVENUE ═══ */}
       <section className="mb-10">
         <div className="flex items-center gap-3 mb-5">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Roomy AI</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Revenue</h2>
           <button
             onClick={loadRevenueCat}
             disabled={rcLoading}

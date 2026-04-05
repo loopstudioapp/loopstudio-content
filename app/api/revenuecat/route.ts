@@ -8,6 +8,20 @@ let overviewCache: { data: unknown; timestamp: number } | null = null;
 
 const RC_BASE = "https://api.revenuecat.com/v2";
 
+// Multiple RevenueCat projects
+const RC_PROJECTS = [
+  {
+    name: "Roomy AI",
+    apiKey: process.env.REVENUECAT_API_KEY || "",
+    projectId: process.env.REVENUECAT_PROJECT_ID || "",
+  },
+  {
+    name: "SwipeAway",
+    apiKey: process.env.REVENUECAT_SWIPEAWAY_API_KEY || "",
+    projectId: process.env.REVENUECAT_SWIPEAWAY_PROJECT_ID || "",
+  },
+];
+
 function getEnv() {
   const apiKey = process.env.REVENUECAT_API_KEY;
   const projectId = process.env.REVENUECAT_PROJECT_ID;
@@ -27,21 +41,57 @@ function planName(productId: string): string {
   return productId;
 }
 
-/* ── Overview Metrics ── */
+/* ── Overview Metrics (combines all projects) ── */
 async function fetchOverview(apiKey: string, projectId: string) {
   if (overviewCache && Date.now() - overviewCache.timestamp < CACHE_TTL) return overviewCache.data;
 
-  // Get RevenueCat aggregate metrics for revenue/MRR
-  const res = await fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, {
-    headers: rcHeaders(apiKey),
-  });
-  if (!res.ok) throw new Error(`RevenueCat API error ${res.status}: ${await res.text()}`);
+  // Fetch metrics from ALL projects in parallel
+  const projectResults = await Promise.all(
+    RC_PROJECTS
+      .filter((p) => p.apiKey && p.projectId)
+      .map(async (project) => {
+        try {
+          const res = await fetch(
+            `${RC_BASE}/projects/${project.projectId}/metrics/overview`,
+            { headers: rcHeaders(project.apiKey) }
+          );
+          if (!res.ok) return { name: project.name, metrics: {} as Record<string, number> };
+          const json = await res.json();
+          const arr: { id: string; value: number }[] = json.metrics || [];
+          return {
+            name: project.name,
+            metrics: Object.fromEntries(arr.map((x) => [x.id, x.value])),
+          };
+        } catch {
+          return { name: project.name, metrics: {} as Record<string, number> };
+        }
+      })
+  );
 
-  const json = await res.json();
-  const metricsArr: { id: string; value: number }[] = json.metrics || [];
-  const m = Object.fromEntries(metricsArr.map((x) => [x.id, x.value]));
+  // Sum up all projects
+  let totalRevenue = 0;
+  let totalMrr = 0;
+  let totalNewCustomers = 0;
+  let totalActiveUsers = 0;
+  const perApp: { name: string; revenue: number; mrr: number; subs: number; trials: number }[] = [];
 
-  // Get accurate trial/sub counts from DB
+  for (const p of projectResults) {
+    const rev = p.metrics.revenue ?? 0;
+    const mrr = p.metrics.mrr ?? 0;
+    totalRevenue += rev;
+    totalMrr += mrr;
+    totalNewCustomers += p.metrics.new_customers ?? 0;
+    totalActiveUsers += p.metrics.active_users ?? 0;
+    perApp.push({
+      name: p.name,
+      revenue: rev,
+      mrr: mrr,
+      subs: p.metrics.active_subscriptions ?? 0,
+      trials: p.metrics.active_trials ?? 0,
+    });
+  }
+
+  // Get accurate Roomy AI trial/sub counts from DB
   const [trialsResult, subsResult] = await Promise.all([
     supabase
       .from("rc_subscriptions")
@@ -57,13 +107,24 @@ async function fetchOverview(apiKey: string, projectId: string) {
       .gt("revenue_gross", 0),
   ]);
 
+  // Override Roomy AI counts with DB values
+  const roomyApp = perApp.find((p) => p.name === "Roomy AI");
+  if (roomyApp) {
+    roomyApp.trials = trialsResult.count ?? 0;
+    roomyApp.subs = subsResult.count ?? 0;
+  }
+
+  const totalTrials = perApp.reduce((s, p) => s + p.trials, 0);
+  const totalSubs = perApp.reduce((s, p) => s + p.subs, 0);
+
   const data = {
-    active_trials: trialsResult.count ?? 0,
-    active_subs: subsResult.count ?? 0,
-    revenue_30d: m.revenue ?? 0,
-    mrr: m.mrr ?? 0,
-    new_customers: m.new_customers ?? 0,
-    active_users: m.active_users ?? 0,
+    active_trials: totalTrials,
+    active_subs: totalSubs,
+    revenue_30d: totalRevenue,
+    mrr: totalMrr,
+    new_customers: totalNewCustomers,
+    active_users: totalActiveUsers,
+    per_app: perApp,
   };
 
   overviewCache = { data, timestamp: Date.now() };
@@ -86,13 +147,13 @@ interface SubInfo {
 async function fetchSubscribers(filter: string) {
   const statusFilter = filter === "trial" ? "trialing" : "active";
 
+  // Roomy AI subs from DB
   let query = supabase
     .from("rc_subscriptions")
     .select("*")
     .eq("status", statusFilter)
     .eq("environment", "production");
 
-  // Only filter non-cancelled for trials; for active subs exclude $0 (still in trial)
   if (filter === "trial") {
     query = query.eq("auto_renewal", "will_renew");
   } else {
@@ -100,15 +161,12 @@ async function fetchSubscribers(filter: string) {
   }
 
   const { data, error } = await query.order("purchased_at", { ascending: true });
-
-  if (error) {
-    throw new Error(`Database error: ${error.message}`);
-  }
+  if (error) throw new Error(`Database error: ${error.message}`);
 
   const subscribers: SubInfo[] = (data || []).map((row) => ({
     id: row.app_user_id || row.id,
     country: (row.country || "").toUpperCase(),
-    app: row.store || "app_store",
+    app: "Roomy AI",
     plan: planName(row.product_id || ""),
     purchase_date: row.purchased_at || "",
     expiry_date: row.expires_at || "",
@@ -116,6 +174,82 @@ async function fetchSubscribers(filter: string) {
     auto_renewal: row.auto_renewal || "",
     status: row.status || "",
   }));
+
+  // SwipeAway subs from API (iterate customers)
+  const swipeaway = RC_PROJECTS.find((p) => p.name === "SwipeAway");
+  if (swipeaway?.apiKey && swipeaway?.projectId) {
+    try {
+      let cursor: string | undefined;
+      let checked = 0;
+      while (checked < 500) {
+        const url = new URL(`${RC_BASE}/projects/${swipeaway.projectId}/customers`);
+        url.searchParams.set("limit", "50");
+        if (cursor) url.searchParams.set("starting_after", cursor);
+
+        const res = await fetch(url.toString(), { headers: rcHeaders(swipeaway.apiKey) });
+        if (!res.ok) break;
+        const json = await res.json();
+        const items = json.items || [];
+        if (items.length === 0) break;
+
+        for (const c of items) {
+          const encoded = encodeURIComponent(c.id);
+          try {
+            const subRes = await fetch(
+              `${RC_BASE}/projects/${swipeaway.projectId}/customers/${encoded}/subscriptions`,
+              { headers: rcHeaders(swipeaway.apiKey) }
+            );
+            if (!subRes.ok) continue;
+            const subJson = await subRes.json();
+            for (const sub of subJson.items || []) {
+              const status = (sub.status || "").toLowerCase();
+              const autoRenewal = (sub.auto_renewal_status || "").toLowerCase();
+              const env = (sub.environment || "").toLowerCase();
+              const rev = sub.total_revenue_in_usd as
+                { gross?: number; proceeds?: number } | undefined;
+              if (env === "sandbox") continue;
+
+              let matches = false;
+              if (filter === "trial") {
+                matches = status === "trialing" &&
+                  autoRenewal === "will_renew";
+              } else {
+                matches = status === "active" &&
+                  (rev?.gross ?? 0) > 0;
+              }
+
+              if (matches) {
+                subscribers.push({
+                  id: c.id,
+                  country: (sub.country || "").toUpperCase(),
+                  app: "SwipeAway",
+                  plan: planName(sub.product_id || ""),
+                  purchase_date: sub.starts_at
+                    ? new Date(sub.starts_at).toISOString()
+                    : "",
+                  expiry_date: sub.current_period_ends_at
+                    ? new Date(sub.current_period_ends_at).toISOString()
+                    : "",
+                  revenue: rev?.gross ?? 0,
+                  auto_renewal: autoRenewal,
+                  status,
+                });
+              }
+            }
+          } catch { /* skip customer */ }
+        }
+
+        checked += items.length;
+        cursor = items[items.length - 1]?.id;
+        if (!json.next_page) break;
+      }
+    } catch { /* SwipeAway fetch failed, continue with Roomy only */ }
+  }
+
+  // Sort all by purchase date
+  subscribers.sort((a, b) =>
+    new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()
+  );
 
   return { subscribers, total: subscribers.length };
 }
