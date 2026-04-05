@@ -289,7 +289,21 @@ export async function POST(req: Request) {
 
     if (isSusan && POSTBRIDGE_KEY) {
       // Strip metadata from ALL images
-      const stripMeta = async (b64: string) => sharp(Buffer.from(b64, "base64")).png().toBuffer();
+      // Strip ONLY caBX chunk (C2PA AI metadata) — keep everything else intact
+      const stripMeta = async (b64: string) => {
+        const raw = Buffer.from(b64, "base64");
+        const SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+        const parts: Buffer[] = [];
+        let p = 8;
+        while (p < raw.length) {
+          const len = raw.readUInt32BE(p);
+          const type = raw.toString("ascii", p + 4, p + 8);
+          const total = 12 + len;
+          if (type !== "caBX") parts.push(raw.slice(p, p + total));
+          p += total;
+        }
+        return Buffer.concat([SIG, ...parts]);
+      };
       const cleanBase = await stripMeta(baseImageB64);
       const cleanTransforms = await Promise.all(transformImages.map(stripMeta));
       const cleanPromo = promoB64 ? await stripMeta(promoB64) : null;

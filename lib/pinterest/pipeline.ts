@@ -252,8 +252,20 @@ export async function uploadAndPost(
   scheduledAt: Date
 ): Promise<{ imageUrl: string; postId: string }> {
   const rawBuffer = Buffer.from(imageB64, "base64");
-  // Strip AI metadata (C2PA/IPTC) to avoid Pinterest "AI modified" label
-  const imageBuffer = await sharp(rawBuffer).png().toBuffer();
+  // Strip ONLY the caBX chunk (C2PA AI metadata) — keep everything else intact
+  const PNG_SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const chunks: Buffer[] = [];
+  let pos = 8;
+  while (pos < rawBuffer.length) {
+    const len = rawBuffer.readUInt32BE(pos);
+    const type = rawBuffer.toString("ascii", pos + 4, pos + 8);
+    const totalLen = 12 + len;
+    if (type !== "caBX") {
+      chunks.push(rawBuffer.slice(pos, pos + totalLen));
+    }
+    pos += totalLen;
+  }
+  const imageBuffer = Buffer.concat([PNG_SIG, ...chunks]);
   const uploaded = await uploadImage(apiKey, imageBuffer, `pin-${pinId}.png`);
 
   const postId = await schedulePin(apiKey, {
