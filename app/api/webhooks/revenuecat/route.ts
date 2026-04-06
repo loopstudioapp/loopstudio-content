@@ -64,8 +64,11 @@ export async function POST(request: NextRequest) {
 
   // Detect which app based on product_id
   const productId = (event.product_id || "").toLowerCase();
+  const SWIPEAWAY_PRODUCTS = ["prodf03355abc6", "prod6b651edf9a"];
   let appName = "Roomy AI";
-  if (productId.includes("swipe") || productId.includes("com.swipeaway")) {
+  if (SWIPEAWAY_PRODUCTS.includes(productId) ||
+      productId.includes("swipe") ||
+      productId.includes("com.swipeaway")) {
     appName = "SwipeAway";
   }
 
