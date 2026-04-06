@@ -97,9 +97,28 @@ export async function POST(request: NextRequest) {
       upsertData = { ...baseRecord, status: "active", auto_renewal: "will_renew" };
       break;
 
-    case "RENEWAL":
-      upsertData = { ...baseRecord, status: "active", auto_renewal: "will_renew" };
+    case "RENEWAL": {
+      // Renewals: add revenue, extend expiry, but keep original purchased_at
+      const { data: existing } = await supabase
+        .from("rc_subscriptions")
+        .select("revenue_gross")
+        .eq("id", appUserId)
+        .single();
+
+      const prevRevenue = existing?.revenue_gross ?? 0;
+
+      upsertData = {
+        id: appUserId,
+        app_user_id: appUserId,
+        status: "active",
+        auto_renewal: "will_renew",
+        expires_at: msToTimestamp(event.expiration_at_ms),
+        revenue_gross: prevRevenue + (event.price || 0),
+        environment: (event.environment || "PRODUCTION").toLowerCase(),
+        updated_at: new Date().toISOString(),
+      };
       break;
+    }
 
     case "CANCELLATION":
       upsertData = {
