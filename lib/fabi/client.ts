@@ -215,6 +215,13 @@ export function vnDateRange(days: number): string[] {
   return out;
 }
 
+/** Returns {startMs, endMs} for a YYYY-MM-DD date in VN timezone. FABi API uses unix-ms. */
+function vnDayMsRange(dateIso: string): { startMs: number; endMs: number } {
+  const startMs = new Date(`${dateIso}T00:00:00+07:00`).getTime();
+  const endMs = startMs + 86400 * 1000 - 1;
+  return { startMs, endMs };
+}
+
 /* ── Report fetchers ── */
 
 export type DailyOverview = {
@@ -230,13 +237,14 @@ export type DailyOverview = {
  */
 export async function getOverview(date: string): Promise<DailyOverview> {
   const auth = await getValidAuth();
+  const { startMs, endMs } = vnDayMsRange(date);
   const params = {
     brand_uid: auth.brand_uid,
     company_uid: auth.company_uid,
     list_store_uid: auth.store_uids.join(","),
-    start_date: date,
-    end_date: date,
-    store_open_at: "07:00",
+    start_date: startMs,
+    end_date: endMs,
+    store_open_at: 0,
   };
   const json = await authedFetch<OverviewResponse>(
     "/api/v1/reports/sale-summary/overview",

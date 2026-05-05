@@ -22,3 +22,8 @@ create table if not exists fabi_daily_sales (
 );
 
 create index if not exists fabi_daily_sales_date_idx on fabi_daily_sales(date desc);
+
+-- These tables are server-only (no client reads/writes). Disable RLS so
+-- the anon key (used by Vercel functions) can upsert.
+alter table fabi_auth_cache disable row level security;
+alter table fabi_daily_sales disable row level security;
