@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 import {
   getOverview,
   getOverviewRange,
@@ -22,9 +23,14 @@ export const maxDuration = 60;
 async function handle(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const cached = searchParams.get("cached") === "1";
+  const clearAuth = searchParams.get("clearAuth") === "1";
   const backfillDays = parseInt(searchParams.get("backfill") || "0", 10);
 
   try {
+    if (clearAuth) {
+      await supabase.from("fabi_auth_cache").delete().eq("id", "singleton");
+    }
+
     if (!cached) {
       if (backfillDays > 0) {
         const dates = vnDateRange(Math.min(backfillDays, 90));
