@@ -94,9 +94,7 @@ function countryName(code: string): string {
 }
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtVnd(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
-  return n.toLocaleString("vi-VN") + "₫";
+  return n.toLocaleString("en-US") + "₫";
 }
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
