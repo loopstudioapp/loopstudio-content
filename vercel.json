@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/fabi/sync",
-      "schedule": "0 * * * *"
+      "schedule": "0 16 * * *"
     }
   ]
 }
