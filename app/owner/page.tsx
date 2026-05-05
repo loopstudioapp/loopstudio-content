@@ -361,7 +361,7 @@ export default function OwnerDashboard() {
       {/* ═══ REVENUE ═══ */}
       <section className="mb-10">
         <div className="flex items-center gap-3 mb-5">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Revenue</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Loop Studio</h2>
           <button
             onClick={loadRevenueCat}
             disabled={rcLoading}
@@ -421,7 +421,7 @@ export default function OwnerDashboard() {
       <section className="mb-10">
         <div className="flex items-center gap-2 mb-5">
           <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Coffee Shop</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Ket Coffee</h2>
           {fabiLoading && <span className="text-[10px] text-[#525252]">syncing…</span>}
         </div>
 
