@@ -29,7 +29,14 @@ type LoginResponse = {
       stores?: Array<{ id?: string; uid?: string; brand_uid?: string }>;
       company?: { company_id?: string };
     };
+    // Some endpoints flatten by one level
+    token?: string;
+    brands?: Array<{ id: string }>;
+    stores?: Array<{ id?: string; uid?: string; brand_uid?: string }>;
+    company?: { company_id?: string };
   };
+  // Error envelope (FABi returns HTTP 200 on bad creds with an error body)
+  error?: { code?: number; message?: string };
 };
 
 type OverviewResponse = {
@@ -84,14 +91,24 @@ async function login(): Promise<AuthCache> {
   }
 
   const json = (await res.json()) as LoginResponse;
-  const data = json.data?.data;
-  const token = data?.token;
-  const brandUid = data?.brands?.[0]?.id;
-  const companyUid = data?.company?.company_id;
-  const storeUids = (data?.stores || []).map((s) => s.uid || s.id || "").filter(Boolean);
+
+  // FABi returns 200 on auth errors with error in body
+  if (json.error?.message) {
+    throw new Error(`FABi login rejected: ${json.error.message}`);
+  }
+
+  // Try both nested (data.data.*) and flat (data.*) shapes
+  const inner = json.data?.data || json.data || {};
+  const token = inner.token;
+  const brandUid = inner.brands?.[0]?.id;
+  const companyUid = inner.company?.company_id;
+  const storeUids = (inner.stores || []).map((s) => s.uid || s.id || "").filter(Boolean);
 
   if (!token || !brandUid || !companyUid) {
-    throw new Error(`FABi login: malformed response (token/brand/company missing)`);
+    throw new Error(
+      `FABi login: response shape mismatch. Keys: ${Object.keys(inner).join(",")}. ` +
+        `Has token=${!!token}, brand=${!!brandUid}, company=${!!companyUid}`
+    );
   }
 
   // JWT exp is unix seconds; fall back to 7 days from now
