@@ -1,28 +1,49 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Debug-only: probes login + various date formats on overview endpoint.
- * Remove once integration works.
+ * Debug-only: login inline + probe date formats. Bypasses the DB cache
+ * so RLS or schema issues don't get in the way.
  */
 export async function GET() {
   const STATIC_KEY = process.env.FABI_STATIC_ACCESS_TOKEN || "5c885b2ef8c34fb7b1d1fad11eef7bec";
-
-  // Pull cached token + IDs (we already validated login works)
-  const { data: cache } = await supabase
-    .from("fabi_auth_cache")
-    .select("token, brand_uid, company_uid, store_uids")
-    .eq("id", "singleton")
-    .single();
-
-  if (!cache) {
-    return NextResponse.json({ error: "no auth cache — run /api/fabi/sync first" }, { status: 500 });
+  const email = process.env.FABI_EMAIL;
+  const password = process.env.FABI_PASSWORD;
+  if (!email || !password) {
+    return NextResponse.json({ error: "FABI_EMAIL/PASSWORD missing" }, { status: 500 });
   }
 
-  // Today in VN timezone for the request
+  // 1) Login
+  const loginRes = await fetch("https://posapi.ipos.vn/api/accounts/v1/user/login", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      access_token: STATIC_KEY,
+      fabi_type: "pos-cms",
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  const loginJson = (await loginRes.json()) as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = (loginJson as any).data?.data || (loginJson as any).data || {};
+  const token: string | undefined = data.token;
+  const brand_uid: string | undefined = data.brands?.[0]?.id;
+  const company_uid: string | undefined = data.company?.id;
+  const store_uids: string[] = (data.stores || [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((s: any) => s.id || s.uid)
+    .filter(Boolean);
+
+  if (!token || !brand_uid || !company_uid) {
+    return NextResponse.json(
+      { error: "login parse failed", loginStatus: loginRes.status, keys: Object.keys(data) },
+      { status: 500 }
+    );
+  }
+
+  // 2) Probe formats
   const todayIso = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
     year: "numeric",
@@ -30,46 +51,60 @@ export async function GET() {
     day: "2-digit",
   }).format(new Date());
 
-  const startOfDayUtc = new Date(`${todayIso}T00:00:00+07:00`).getTime() / 1000;
-  const endOfDayUtc = startOfDayUtc + 86400 - 1;
+  const startUnix = new Date(`${todayIso}T00:00:00+07:00`).getTime() / 1000;
+  const endUnix = startUnix + 86400 - 1;
 
-  const variants = [
-    { name: "ISO_date", start_date: todayIso, end_date: todayIso, store_open_at: "07:00" },
-    { name: "ISO_date_open0", start_date: todayIso, end_date: todayIso, store_open_at: 0 },
-    { name: "ISO_datetime", start_date: `${todayIso} 00:00:00`, end_date: `${todayIso} 23:59:59`, store_open_at: 0 },
-    { name: "unix_seconds", start_date: startOfDayUtc, end_date: endOfDayUtc, store_open_at: 0 },
-    { name: "unix_ms", start_date: startOfDayUtc * 1000, end_date: endOfDayUtc * 1000, store_open_at: 0 },
-    { name: "DDMMYYYY", start_date: todayIso.split("-").reverse().join("/"), end_date: todayIso.split("-").reverse().join("/"), store_open_at: 0 },
+  const variants: Array<{ name: string; params: Record<string, string | number> }> = [
+    {
+      name: "ISO_open0",
+      params: { start_date: todayIso, end_date: todayIso, store_open_at: 0 },
+    },
+    {
+      name: "ISO_open7",
+      params: { start_date: todayIso, end_date: todayIso, store_open_at: 7 },
+    },
+    {
+      name: "ISO_datetime",
+      params: { start_date: `${todayIso} 00:00:00`, end_date: `${todayIso} 23:59:59`, store_open_at: 0 },
+    },
+    {
+      name: "unix_seconds",
+      params: { start_date: startUnix, end_date: endUnix, store_open_at: 0 },
+    },
+    {
+      name: "unix_ms",
+      params: { start_date: startUnix * 1000, end_date: endUnix * 1000, store_open_at: 0 },
+    },
+    {
+      name: "no_open_at",
+      params: { start_date: todayIso, end_date: todayIso },
+    },
+    {
+      name: "open_25200",
+      params: { start_date: todayIso, end_date: todayIso, store_open_at: 25200 },
+    },
   ];
-
-  const headers = {
-    Authorization: cache.token,
-    access_token: STATIC_KEY,
-    fabi_type: "pos-cms",
-  };
 
   const results: Array<{ name: string; status: number; body: string }> = [];
 
   for (const v of variants) {
     const url = new URL("https://posapi.ipos.vn/api/v1/reports/sale-summary/overview");
-    url.searchParams.set("brand_uid", cache.brand_uid);
-    url.searchParams.set("company_uid", cache.company_uid);
-    url.searchParams.set("list_store_uid", (cache.store_uids || []).join(","));
-    url.searchParams.set("start_date", String(v.start_date));
-    url.searchParams.set("end_date", String(v.end_date));
-    url.searchParams.set("store_open_at", String(v.store_open_at));
-
-    const r = await fetch(url.toString(), { headers });
+    url.searchParams.set("brand_uid", brand_uid);
+    url.searchParams.set("company_uid", company_uid);
+    url.searchParams.set("list_store_uid", store_uids.join(","));
+    for (const [k, val] of Object.entries(v.params)) url.searchParams.set(k, String(val));
+    const r = await fetch(url.toString(), {
+      headers: { Authorization: token, access_token: STATIC_KEY, fabi_type: "pos-cms" },
+    });
     const text = await r.text();
-    results.push({ name: v.name, status: r.status, body: text.slice(0, 300) });
+    results.push({ name: v.name, status: r.status, body: text.slice(0, 250) });
   }
 
   return NextResponse.json({
-    todayIso,
-    startOfDayUtc,
-    brand_uid: cache.brand_uid,
-    company_uid: cache.company_uid,
-    store_uids: cache.store_uids,
+    today: todayIso,
+    brand_uid,
+    company_uid,
+    store_uids,
     results,
   });
 }
