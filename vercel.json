@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/pinterest-retry",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/fabi/sync",
+      "schedule": "0 * * * *"
     }
   ]
 }

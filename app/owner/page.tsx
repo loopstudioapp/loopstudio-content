@@ -10,6 +10,8 @@ type RCOverview = { active_trials: number; active_subs: number; revenue_30d: num
 type Subscriber = { id: string; country: string; app: string; plan: string; purchase_date: string; expiry_date: string; revenue: number };
 type MetricsRow = { account_id: string; date: string; total_likes: number; posts: number; followers: number; lm8_total_likes: number; lm8_posts: number; lm8_followers: number };
 type AnalyticsMetric = { label: string; data: { date: string; total: number }[] };
+type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
+type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: string[]; color: string; label: string; h?: number }) {
@@ -91,6 +93,11 @@ function countryName(code: string): string {
   catch { return code.toUpperCase(); }
 }
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function fmtVnd(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
+  return n.toLocaleString("vi-VN") + "₫";
+}
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
@@ -130,6 +137,11 @@ export default function OwnerDashboard() {
   const [trialsError, setTrialsError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
 
+  // Coffee shop (FABi)
+  const [fabi, setFabi] = useState<FabiData | null>(null);
+  const [fabiLoading, setFabiLoading] = useState(false);
+  const [fabiError, setFabiError] = useState<string | null>(null);
+
   // Load saved RevenueCat data from DB on mount
   useEffect(() => {
     fetch("/api/revenuecat/cache")
@@ -140,6 +152,16 @@ export default function OwnerDashboard() {
           if (d.trials) setTrialSubs(d.trials);
           if (d.active) setActiveSubs(d.active);
         }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load cached coffee shop data on mount (read-only, no fresh API call)
+  useEffect(() => {
+    fetch("/api/fabi/sync?cached=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) setFabi({ today: d.today || null, daily: d.daily || [] });
       })
       .catch(() => {});
   }, []);
@@ -197,6 +219,19 @@ export default function OwnerDashboard() {
         body: JSON.stringify({ overview, trials, active }),
       });
     } catch { /* ignore */ }
+
+    // Coffee shop sync — refreshes today + persists last 30 days
+    setFabiLoading(true); setFabiError(null);
+    try {
+      const r = await fetch("/api/fabi/sync");
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Failed");
+      setFabi({ today: d.today || null, daily: d.daily || [] });
+    } catch (e: unknown) {
+      setFabiError(e instanceof Error ? e.message : "Coffee shop sync failed");
+    } finally {
+      setFabiLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -378,12 +413,51 @@ export default function OwnerDashboard() {
             <div className="mb-4">
               <SubTable items={[...trialSubs, ...activeSubs].filter(s => { const d = new Date(s.purchase_date); const today = new Date(); return d.toDateString() === today.toDateString(); })} loading={trialsLoading || activeLoading} error={trialsError || activeError} label="Today Subscriptions" color="#22c55e" />
             </div>
-
-            {/* Always-visible Active Subscriptions table */}
-            <div>
-              <SubTable items={activeSubs} loading={activeLoading} error={activeError} label="Active Subscriptions" color="#3b82f6" />
-            </div>
           </>
+        )}
+      </section>
+
+      {/* ═══ COFFEE SHOP ═══ */}
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Coffee Shop</h2>
+          {fabiLoading && <span className="text-[10px] text-[#525252]">syncing…</span>}
+        </div>
+
+        {fabiError && (
+          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{fabiError}</div>
+        )}
+
+        {!fabi && !fabiLoading && !fabiError && (
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
+            Click &quot;Refresh&quot; above to load coffee shop data
+          </div>
+        )}
+
+        {fabi && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Today revenue */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
+              <p className="text-white text-3xl font-bold">{fmtVnd(fabi.today?.revenue_net || 0)}</p>
+              <p className="text-[#525252] text-[10px] mt-1">{fabi.today?.invoice_count || 0} invoices</p>
+            </div>
+            {/* 30-day chart */}
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
+                <p className="text-white text-2xl font-bold">{fmtVnd(fabi.daily.reduce((s, d) => s + (d.revenue_net || 0), 0))}</p>
+              </div>
+              <Chart
+                data={fabi.daily.map((d) => d.revenue_net)}
+                dates={fabi.daily.map((d) => d.date)}
+                color="#d97706"
+                label="Coffee Revenue"
+                h={72}
+              />
+            </div>
+          </div>
         )}
       </section>
 
