@@ -94,6 +94,11 @@ function countryName(code: string): string {
 }
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtVnd(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
+  return n.toLocaleString("en-US") + "₫";
+}
+function fmtVndFull(n: number): string {
   return n.toLocaleString("en-US") + "₫";
 }
 function fmtNum(n: number): string {
@@ -438,7 +443,7 @@ export default function OwnerDashboard() {
             {/* Today revenue */}
             <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
               <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
-              <p className="text-white text-3xl font-bold">{fmtVnd(fabi.today?.revenue_net || 0)}</p>
+              <p className="text-white text-3xl font-bold">{fmtVndFull(fabi.today?.revenue_net || 0)}</p>
               <p className="text-[#525252] text-[10px] mt-1">{fabi.today?.invoice_count || 0} invoices</p>
             </div>
             {/* 30-day chart */}
