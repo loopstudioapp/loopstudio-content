@@ -183,6 +183,21 @@ export default function OwnerDashboard() {
     setRcLoading(true); setRcError(null);
     setTrialsLoading(true); setActiveLoading(true);
     setTrialsError(null); setActiveError(null);
+    setFabiLoading(true); setFabiError(null);
+
+    // Kick off coffee shop sync in parallel with RevenueCat fetches
+    const fabiPromise = (async () => {
+      try {
+        const r = await fetch("/api/fabi/sync");
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || "Failed");
+        setFabi({ today: d.today || null, daily: d.daily || [] });
+      } catch (e: unknown) {
+        setFabiError(e instanceof Error ? e.message : "Coffee shop sync failed");
+      } finally {
+        setFabiLoading(false);
+      }
+    })();
 
     let overview: RCOverview | null = null;
     let trials: Subscriber[] = [];
@@ -223,18 +238,8 @@ export default function OwnerDashboard() {
       });
     } catch { /* ignore */ }
 
-    // Coffee shop sync — refreshes today + persists last 30 days
-    setFabiLoading(true); setFabiError(null);
-    try {
-      const r = await fetch("/api/fabi/sync");
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || "Failed");
-      setFabi({ today: d.today || null, daily: d.daily || [] });
-    } catch (e: unknown) {
-      setFabiError(e instanceof Error ? e.message : "Coffee shop sync failed");
-    } finally {
-      setFabiLoading(false);
-    }
+    // Wait for coffee shop sync (already running in parallel)
+    await fabiPromise;
   }, []);
 
   useEffect(() => {
