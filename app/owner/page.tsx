@@ -112,8 +112,11 @@ function fmtDate(iso: string): string {
 }
 // YYYY-MM-DD in UTC-5 (used to bucket Loop Studio subs to "today")
 function utcMinus5Date(input: Date | string): string {
+  if (!input) return "";
   const d = typeof input === "string" ? new Date(input) : input;
-  return new Date(d.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const ms = d.getTime();
+  if (Number.isNaN(ms)) return "";
+  return new Date(ms - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /* ── Metric Card ── */
