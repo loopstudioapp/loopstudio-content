@@ -110,6 +110,11 @@ function fmtDate(iso: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+// YYYY-MM-DD in UTC-5 (used to bucket Loop Studio subs to "today")
+function utcMinus5Date(input: Date | string): string {
+  const d = typeof input === "string" ? new Date(input) : input;
+  return new Date(d.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 /* ── Metric Card ── */
 function MetricCard({ label, value, color, data, dates }: { label: string; value: string; color: string; data: number[]; dates: string[] }) {
@@ -396,7 +401,7 @@ export default function OwnerDashboard() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
                   <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
-                  <p className="text-white text-3xl font-bold">{fmtCur([...trialSubs, ...activeSubs].filter(s => { const d = new Date(s.purchase_date); const today = new Date(); return d.toDateString() === today.toDateString(); }).reduce((sum, s) => sum + (s.revenue || 0), 0))}</p>
+                  <p className="text-white text-3xl font-bold">{fmtCur([...trialSubs, ...activeSubs].filter(s => utcMinus5Date(s.purchase_date) === utcMinus5Date(new Date())).reduce((sum, s) => sum + (s.revenue || 0), 0))}</p>
                   <p className="text-[#525252] text-[10px] mt-1">new today</p>
                 </div>
                 <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -419,7 +424,7 @@ export default function OwnerDashboard() {
 
             {/* Today's Subscriptions table */}
             <div className="mb-4">
-              <SubTable items={[...trialSubs, ...activeSubs].filter(s => { const d = new Date(s.purchase_date); const today = new Date(); return d.toDateString() === today.toDateString(); })} loading={trialsLoading || activeLoading} error={trialsError || activeError} label="Today Subscriptions" color="#22c55e" />
+              <SubTable items={[...trialSubs, ...activeSubs].filter(s => utcMinus5Date(s.purchase_date) === utcMinus5Date(new Date()))} loading={trialsLoading || activeLoading} error={trialsError || activeError} label="Today Subscriptions" color="#22c55e" />
             </div>
           </>
         )}
