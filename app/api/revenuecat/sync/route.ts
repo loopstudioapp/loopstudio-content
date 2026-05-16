@@ -12,9 +12,9 @@ const PROJECTS = [
     projectId: process.env.REVENUECAT_PROJECT_ID || "",
   },
   {
-    name: "SwipeAway",
-    apiKey: process.env.REVENUECAT_SWIPEAWAY_API_KEY || "",
-    projectId: process.env.REVENUECAT_SWIPEAWAY_PROJECT_ID || "",
+    name: "GrailScan",
+    apiKey: process.env.REVENUECAT_GRAILSCAN_API_KEY || "",
+    projectId: process.env.REVENUECAT_GRAILSCAN_PROJECT_ID || "",
   },
 ];
 

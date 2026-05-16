@@ -8,7 +8,9 @@ let overviewCache: { data: unknown; timestamp: number } | null = null;
 
 const RC_BASE = "https://api.revenuecat.com/v2";
 
-// Multiple RevenueCat projects
+// Multiple RevenueCat projects. SwipeAway intentionally omitted —
+// it's hidden from the owner dashboard. Webhook still receives it but
+// it won't appear here.
 const RC_PROJECTS = [
   {
     name: "Roomy AI",
@@ -16,11 +18,15 @@ const RC_PROJECTS = [
     projectId: process.env.REVENUECAT_PROJECT_ID || "",
   },
   {
-    name: "SwipeAway",
-    apiKey: process.env.REVENUECAT_SWIPEAWAY_API_KEY || "",
-    projectId: process.env.REVENUECAT_SWIPEAWAY_PROJECT_ID || "",
+    name: "GrailScan",
+    apiKey: process.env.REVENUECAT_GRAILSCAN_API_KEY || "",
+    projectId: process.env.REVENUECAT_GRAILSCAN_PROJECT_ID || "",
   },
 ];
+
+// Apps that should appear on the dashboard. SwipeAway data stays in DB
+// but never reaches the UI.
+const VISIBLE_APPS = new Set(["Roomy AI", "GrailScan"]);
 
 function getEnv() {
   const apiKey = process.env.REVENUECAT_API_KEY;
@@ -147,7 +153,6 @@ interface SubInfo {
 async function fetchSubscribers(filter: string) {
   const statusFilter = filter === "trial" ? "trialing" : "active";
 
-  // All apps from DB (Roomy AI + SwipeAway)
   let query = supabase
     .from("rc_subscriptions")
     .select("*")
@@ -164,19 +169,167 @@ async function fetchSubscribers(filter: string) {
     .order("purchased_at", { ascending: true });
   if (error) throw new Error(`Database error: ${error.message}`);
 
-  const subscribers: SubInfo[] = (data || []).map((row) => ({
-    id: row.app_user_id || row.id,
-    country: (row.country || "").toUpperCase(),
-    app: row.app_name || "Roomy AI",
-    plan: planName(row.product_id || ""),
-    purchase_date: row.purchased_at || "",
-    expiry_date: row.expires_at || "",
-    revenue: row.revenue_gross || 0,
-    auto_renewal: row.auto_renewal || "",
-    status: row.status || "",
-  }));
+  const subscribers: SubInfo[] = (data || [])
+    .filter((row) => VISIBLE_APPS.has(row.app_name || "Roomy AI"))
+    .map((row) => ({
+      id: row.app_user_id || row.id,
+      country: (row.country || "").toUpperCase(),
+      app: row.app_name || "Roomy AI",
+      plan: planName(row.product_id || ""),
+      purchase_date: row.purchased_at || "",
+      expiry_date: row.expires_at || "",
+      revenue: row.revenue_gross || 0,
+      auto_renewal: row.auto_renewal || "",
+      status: row.status || "",
+    }));
 
   return { subscribers, total: subscribers.length };
+}
+
+/* ── Today's stats (per app: today_revenue, new_revenue, new_subs, mrr) + today transactions ── */
+type TodayTxn = {
+  id: string;
+  country: string;
+  app: string;
+  plan: string;
+  product_id: string;
+  store: string;
+  occurred_at: string;
+  expires_at: string;
+  revenue: number;
+  type: "NEW_SUB" | "RENEWAL";
+};
+type TodayPerApp = {
+  today_revenue: number;
+  new_revenue: number;
+  new_subs: number;
+  mrr: number;
+};
+
+const VN_TZ = "Asia/Ho_Chi_Minh";
+function vnDateIso(d: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: VN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${y}-${m}-${day}`;
+}
+function vnDayBoundsUtc(): { startUtc: string; endUtc: string } {
+  const today = vnDateIso();
+  const startUtc = new Date(`${today}T00:00:00+07:00`).toISOString();
+  const endUtc = new Date(`${today}T23:59:59.999+07:00`).toISOString();
+  return { startUtc, endUtc };
+}
+
+async function fetchTodayStats(): Promise<{
+  today_vn: string;
+  per_app: Record<string, TodayPerApp>;
+  transactions: TodayTxn[];
+}> {
+  const { startUtc, endUtc } = vnDayBoundsUtc();
+
+  // MRR per app from RevenueCat metrics
+  const mrrByApp: Record<string, number> = {};
+  await Promise.all(
+    RC_PROJECTS
+      .filter((p) => p.apiKey && p.projectId)
+      .map(async (project) => {
+        try {
+          const res = await fetch(
+            `${RC_BASE}/projects/${project.projectId}/metrics/overview`,
+            { headers: rcHeaders(project.apiKey) }
+          );
+          if (!res.ok) {
+            mrrByApp[project.name] = 0;
+            return;
+          }
+          const json = await res.json();
+          const arr: { id: string; value: number }[] = json.metrics || [];
+          const map = Object.fromEntries(arr.map((x) => [x.id, x.value]));
+          mrrByApp[project.name] = map.mrr || 0;
+        } catch {
+          mrrByApp[project.name] = 0;
+        }
+      })
+  );
+
+  // New subs today (from rc_subscriptions where purchased_at is today VN)
+  const { data: newSubs } = await supabase
+    .from("rc_subscriptions")
+    .select("app_user_id, app_name, country, product_id, store, purchased_at, expires_at, revenue_gross")
+    .eq("environment", "production")
+    .gte("purchased_at", startUtc)
+    .lte("purchased_at", endUtc);
+
+  // Renewals today (from rc_renewal_events)
+  const { data: renewals } = await supabase
+    .from("rc_renewal_events")
+    .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
+    .gte("occurred_at", startUtc)
+    .lte("occurred_at", endUtc);
+
+  // Aggregate per app
+  const perApp: Record<string, TodayPerApp> = {};
+  for (const appName of VISIBLE_APPS) {
+    perApp[appName] = {
+      today_revenue: 0,
+      new_revenue: 0,
+      new_subs: 0,
+      mrr: mrrByApp[appName] || 0,
+    };
+  }
+
+  const txns: TodayTxn[] = [];
+
+  for (const row of newSubs || []) {
+    const app = row.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app)) continue;
+    const rev = row.revenue_gross || 0;
+    perApp[app].new_revenue += rev;
+    perApp[app].today_revenue += rev;
+    perApp[app].new_subs += 1;
+    txns.push({
+      id: row.app_user_id,
+      country: (row.country || "").toUpperCase(),
+      app,
+      plan: planName(row.product_id || ""),
+      product_id: row.product_id || "",
+      store: row.store || "app_store",
+      occurred_at: row.purchased_at || "",
+      expires_at: row.expires_at || "",
+      revenue: rev,
+      type: "NEW_SUB",
+    });
+  }
+
+  for (const row of renewals || []) {
+    const app = row.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app)) continue;
+    const rev = row.revenue || 0;
+    perApp[app].today_revenue += rev;
+    txns.push({
+      id: row.app_user_id,
+      country: (row.country || "").toUpperCase(),
+      app,
+      plan: planName(row.product_id || ""),
+      product_id: row.product_id || "",
+      store: row.store || "app_store",
+      occurred_at: row.occurred_at || "",
+      expires_at: "",
+      revenue: rev,
+      type: "RENEWAL",
+    });
+  }
+
+  // Most recent first
+  txns.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+
+  return { today_vn: vnDateIso(), per_app: perApp, transactions: txns };
 }
 
 export async function GET(request: NextRequest) {
@@ -206,7 +359,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(data);
     }
 
-    return NextResponse.json({ error: "type must be 'overview' or 'subscribers'" }, { status: 400 });
+    if (type === "today_stats") {
+      const data = await fetchTodayStats();
+      return NextResponse.json(data);
+    }
+
+    return NextResponse.json({ error: "type must be 'overview', 'subscribers', or 'today_stats'" }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

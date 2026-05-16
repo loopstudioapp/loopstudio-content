@@ -62,14 +62,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing app_user_id" }, { status: 400 });
   }
 
-  // Detect which app based on product_id
+  // App detection priority:
+  //   1) ?app= query param on the webhook URL (cleanest, recommended for new projects)
+  //   2) product_id pattern (legacy fallback)
+  // Set each RevenueCat project's webhook URL to:
+  //   /api/webhooks/revenuecat?app=roomy_ai   (or grailscan, swipeaway, …)
+  const url = new URL(request.url);
+  const appParam = (url.searchParams.get("app") || "").toLowerCase();
   const productId = (event.product_id || "").toLowerCase();
   const SWIPEAWAY_PRODUCTS = ["prodf03355abc6", "prod6b651edf9a"];
+
   let appName = "Roomy AI";
-  if (SWIPEAWAY_PRODUCTS.includes(productId) ||
-      productId.includes("swipe") ||
-      productId.includes("com.swipeaway")) {
+  if (appParam === "grailscan") appName = "GrailScan";
+  else if (appParam === "swipeaway") appName = "SwipeAway";
+  else if (appParam === "roomy_ai" || appParam === "roomyai") appName = "Roomy AI";
+  else if (
+    SWIPEAWAY_PRODUCTS.includes(productId) ||
+    productId.includes("swipe") ||
+    productId.includes("com.swipeaway")
+  ) {
     appName = "SwipeAway";
+  } else if (productId.includes("grail") || productId.includes("scan")) {
+    appName = "GrailScan";
   }
 
   const baseRecord = {
@@ -117,6 +131,24 @@ export async function POST(request: NextRequest) {
         environment: (event.environment || "PRODUCTION").toLowerCase(),
         updated_at: new Date().toISOString(),
       };
+
+      // Also log a renewal event row so we can show "today's renewals" on the dashboard.
+      // Build a stable id so retries don't duplicate.
+      const occurredMs = event.purchased_at_ms || Date.now();
+      const eventId = `renewal:${appUserId}:${event.product_id || "unknown"}:${occurredMs}`;
+      await supabase.from("rc_renewal_events").upsert(
+        {
+          id: eventId,
+          app_user_id: appUserId,
+          app_name: appName,
+          product_id: event.product_id || null,
+          country: event.country_code || null,
+          store: (event.store || "APP_STORE").toLowerCase(),
+          revenue: event.price || 0,
+          occurred_at: msToTimestamp(occurredMs),
+        },
+        { onConflict: "id" }
+      );
       break;
     }
 

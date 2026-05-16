@@ -12,6 +12,9 @@ type MetricsRow = { account_id: string; date: string; total_likes: number; posts
 type AnalyticsMetric = { label: string; data: { date: string; total: number }[] };
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
 type FabiData = { today: FabiDay | null; daily: FabiDay[] };
+type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
+type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[] };
 
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: string[]; color: string; label: string; h?: number }) {
@@ -110,13 +113,26 @@ function fmtDate(iso: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
-// YYYY-MM-DD in UTC-5 (used to bucket Loop Studio subs to "today")
-function utcMinus5Date(input: Date | string): string {
+// YYYY-MM-DD in Vietnam timezone (GMT+7) — used to bucket Loop Studio subs to "today"
+function vnDate(input: Date | string): string {
   if (!input) return "";
   const d = typeof input === "string" ? new Date(input) : input;
   const ms = d.getTime();
   if (Number.isNaN(ms)) return "";
-  return new Date(ms - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // GMT+7: add 7h then read UTC calendar date
+  return new Date(ms + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+// Format date+time for the Today Subscriptions table (HH:mm in Vietnam tz)
+function fmtVnTime(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
 }
 
 /* ── Metric Card ── */
@@ -128,6 +144,113 @@ function MetricCard({ label, value, color, data, dates }: { label: string; value
         <p className="text-white text-2xl font-bold">{value}</p>
       </div>
       <Chart data={data} dates={dates} color={color} label={label} h={72} />
+    </div>
+  );
+}
+
+/* ── App Stat Grid (4 boxes: Today Revenue, New Revenue, New Subs, MRR) ── */
+function AppStatGrid({ appName, accent, stats, loading }: { appName: string; accent: string; stats: TodayPerApp | undefined; loading: boolean }) {
+  const tr = stats?.today_revenue ?? 0;
+  const nr = stats?.new_revenue ?? 0;
+  const ns = stats?.new_subs ?? 0;
+  const mrr = stats?.mrr ?? 0;
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: accent }} />
+        <h3 className="text-white text-sm font-semibold">{appName}</h3>
+      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-28 animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
+            <p className="text-white text-3xl font-bold">{fmtCur(tr)}</p>
+            <p className="text-[#525252] text-[10px] mt-1">new + renewal</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#06b6d4] text-[10px] uppercase tracking-wider font-semibold mb-1">New Revenue</p>
+            <p className="text-white text-3xl font-bold">{fmtCur(nr)}</p>
+            <p className="text-[#525252] text-[10px] mt-1">new subs only</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">New Subs</p>
+            <p className="text-white text-3xl font-bold">{ns.toLocaleString()}</p>
+            <p className="text-[#525252] text-[10px] mt-1">new today</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">MRR</p>
+            <p className="text-white text-3xl font-bold">{fmtCur(mrr)}</p>
+            <p className="text-[#525252] text-[10px] mt-1">monthly recurring</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Today Subscriptions table (new + renewals across visible apps) ── */
+function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: boolean; todayVn: string }) {
+  const planFor = (t: TodayTxn) => t.plan || "—";
+  return (
+    <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-[#262626]">
+        <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
+        <h3 className="text-white text-sm font-semibold">Today Subscriptions</h3>
+        <span className="text-[#525252] text-xs">({todayVn} • GMT+7)</span>
+        {!loading && <span className="text-[#525252] text-xs ml-1">· {txns.length}</span>}
+      </div>
+      {loading ? (
+        <div className="p-6 text-center text-[#525252] text-sm">Loading...</div>
+      ) : txns.length === 0 ? (
+        <div className="p-6 text-center text-[#525252] text-sm">None</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px]">
+            <thead>
+              <tr className="border-b border-[#262626]">
+                {["Country", "App", "Plan", "Time", "Revenue", "Type"].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i >= 4 ? "text-right" : "text-left"}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {txns.map((t, i) => (
+                <tr key={`${t.id}-${t.occurred_at}-${i}`} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
+                  <td className="px-5 py-2.5 text-sm">
+                    {countryFlag(t.country)} <span className="text-[#737373] text-xs ml-1">{countryName(t.country)}</span>
+                  </td>
+                  <td className="px-5 py-2.5 text-xs text-[#a3a3a3]">{t.app || "—"}</td>
+                  <td className="px-5 py-2.5 text-sm text-white">{planFor(t)}</td>
+                  <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtVnTime(t.occurred_at)}</td>
+                  <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(t.revenue || 0)}</td>
+                  <td className="px-5 py-2.5 text-right">
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
+                        t.type === "NEW_SUB"
+                          ? "bg-[#3b82f6]/20 text-[#3b82f6]"
+                          : "bg-[#22c55e]/20 text-[#22c55e]"
+                      }`}
+                    >
+                      {t.type === "NEW_SUB" ? "New Sub" : "Renewal"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -153,6 +276,10 @@ export default function OwnerDashboard() {
   const [fabiLoading, setFabiLoading] = useState(false);
   const [fabiError, setFabiError] = useState<string | null>(null);
 
+  // Per-app today stats + today transactions (Loop Studio section)
+  const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
+  const [todayStatsLoading, setTodayStatsLoading] = useState(false);
+
   // Load saved RevenueCat data from DB on mount
   useEffect(() => {
     fetch("/api/revenuecat/cache")
@@ -176,6 +303,16 @@ export default function OwnerDashboard() {
       })
       .catch(() => {});
   }, []);
+
+  // Load today's Loop Studio stats on mount
+  useEffect(() => {
+    fetch("/api/revenuecat?type=today_stats")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && !d.error) setTodayStats(d);
+      })
+      .catch(() => {});
+  }, []);
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [pinterestMetrics, setPinterestMetrics] = useState<AnalyticsMetric[]>([]);
@@ -192,6 +329,7 @@ export default function OwnerDashboard() {
     setTrialsLoading(true); setActiveLoading(true);
     setTrialsError(null); setActiveError(null);
     setFabiLoading(true); setFabiError(null);
+    setTodayStatsLoading(true);
 
     // Kick off coffee shop sync in parallel with RevenueCat fetches
     const fabiPromise = (async () => {
@@ -205,6 +343,16 @@ export default function OwnerDashboard() {
       } finally {
         setFabiLoading(false);
       }
+    })();
+
+    // Per-app today stats — runs in parallel too
+    const todayStatsPromise = (async () => {
+      try {
+        const r = await fetch("/api/revenuecat?type=today_stats");
+        const d = await r.json();
+        if (d && !d.error) setTodayStats(d);
+      } catch { /* ignore */ }
+      finally { setTodayStatsLoading(false); }
     })();
 
     let overview: RCOverview | null = null;
@@ -246,8 +394,8 @@ export default function OwnerDashboard() {
       });
     } catch { /* ignore */ }
 
-    // Wait for coffee shop sync (already running in parallel)
-    await fabiPromise;
+    // Wait for parallel work to settle
+    await Promise.all([fabiPromise, todayStatsPromise]);
   }, []);
 
   useEffect(() => {
@@ -284,47 +432,7 @@ export default function OwnerDashboard() {
       .finally(() => setPinterestLoading(false));
   }, []);
 
-  // Subscriber table renderer
-  const SubTable = ({ items, loading, error, label, color }: { items: Subscriber[]; loading: boolean; error: string | null; label: string; color: string }) => (
-    <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3 border-b border-[#262626]">
-        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-        <h3 className="text-white text-sm font-semibold">{label}</h3>
-        {!loading && !error && <span className="text-[#525252] text-xs">({items.length})</span>}
-      </div>
-      {loading ? (
-        <div className="p-6 text-center text-[#525252] text-sm">Loading...</div>
-      ) : error ? (
-        <div className="p-6 text-center text-[#ef4444] text-sm">{error}</div>
-      ) : items.length === 0 ? (
-        <div className="p-6 text-center text-[#525252] text-sm">None</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[650px]">
-            <thead>
-              <tr className="border-b border-[#262626]">
-                {["Country", "App", "Plan", "Purchased", "Expires", "Revenue"].map((h, i) => (
-                  <th key={h} className={`px-5 py-2.5 text-[10px] text-[#525252] uppercase tracking-wider font-semibold ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((s, i) => (
-                <tr key={i} className="border-b border-[#1a1a1a] hover:bg-[#1a1a1a] transition-colors">
-                  <td className="px-5 py-2.5 text-sm">{countryFlag(s.country)} <span className="text-[#737373] text-xs ml-1">{countryName(s.country)}</span></td>
-                  <td className="px-5 py-2.5 text-xs text-[#a3a3a3]">{s.app || "—"}</td>
-                  <td className="px-5 py-2.5 text-sm text-white">{s.plan || "—"}</td>
-                  <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.purchase_date)}</td>
-                  <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtDate(s.expiry_date)}</td>
-                  <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(s.revenue || 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+  // (SubTable removed — replaced by TodayTxnTable which handles new + renewal types)
 
   // TikTok / Lemon8 computed
   const latestByAccount = new Map<string, MetricsRow>();
@@ -399,36 +507,28 @@ export default function OwnerDashboard() {
 
         {(rcLoaded || rcLoading) && (
           <>
-            {/* Stat Cards */}
-            {rcLoading && !rc ? skeleton(4, "grid-cols-2 sm:grid-cols-4") : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-                  <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
-                  <p className="text-white text-3xl font-bold">{fmtCur([...trialSubs, ...activeSubs].filter(s => utcMinus5Date(s.purchase_date) === utcMinus5Date(new Date())).reduce((sum, s) => sum + (s.revenue || 0), 0))}</p>
-                  <p className="text-[#525252] text-[10px] mt-1">new today</p>
-                </div>
-                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-                  <p className="text-[#3b82f6] text-[10px] uppercase tracking-wider font-semibold mb-1">Active Subs</p>
-                  <p className="text-white text-3xl font-bold">{activeSubs.length || rc?.active_subs || 0}</p>
-                  <p className="text-[#525252] text-[10px] mt-1">all active</p>
-                </div>
-                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-                  <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold mb-1">28-Day Revenue</p>
-                  <p className="text-white text-3xl font-bold">{fmtCur(rc?.revenue_30d ?? 0)}</p>
-                  <p className="text-[#525252] text-[10px] mt-1">last 28 days</p>
-                </div>
-                <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-                  <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Current MRR</p>
-                  <p className="text-white text-3xl font-bold">{fmtCur(rc?.mrr ?? 0)}</p>
-                  <p className="text-[#525252] text-[10px] mt-1">monthly recurring</p>
-                </div>
-              </div>
-            )}
+            {/* ── GrailScan (top) ── */}
+            <AppStatGrid
+              appName="GrailScan"
+              accent="#a855f7"
+              stats={todayStats?.per_app["GrailScan"]}
+              loading={todayStatsLoading && !todayStats}
+            />
 
-            {/* Today's Subscriptions table */}
-            <div className="mb-4">
-              <SubTable items={[...trialSubs, ...activeSubs].filter(s => utcMinus5Date(s.purchase_date) === utcMinus5Date(new Date()))} loading={trialsLoading || activeLoading} error={trialsError || activeError} label="Today Subscriptions" color="#22c55e" />
-            </div>
+            {/* ── Roomy AI (lower) ── */}
+            <AppStatGrid
+              appName="Roomy AI"
+              accent="#3b82f6"
+              stats={todayStats?.per_app["Roomy AI"]}
+              loading={todayStatsLoading && !todayStats}
+            />
+
+            {/* ── Today Subscriptions (both apps, new + renewal) ── */}
+            <TodayTxnTable
+              txns={todayStats?.transactions || []}
+              loading={todayStatsLoading && !todayStats}
+              todayVn={todayStats?.today_vn || vnDate(new Date())}
+            />
           </>
         )}
       </section>
