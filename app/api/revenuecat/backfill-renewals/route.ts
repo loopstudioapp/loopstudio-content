@@ -56,80 +56,88 @@ async function backfillProject(appName: string, apiKey: string, projectId: strin
   let written = 0;
   let errors = 0;
 
-  for (const row of subs || []) {
-    checked++;
-    const encoded = encodeURIComponent(row.app_user_id);
+  // Process in parallel batches of 8 (about 800ms per batch incl. API latency,
+  // ~20s for 200 subs — fits inside Hobby's 60s function cap).
+  const list = subs || [];
+  const BATCH = 8;
 
-    let subData: { items?: Array<Record<string, unknown>> } | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const res = await fetch(
-        `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
-        { headers: rcHeaders(apiKey) }
-      );
-      if (res.status === 429) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map(async (row) => {
+        checked++;
+        const encoded = encodeURIComponent(row.app_user_id);
+        let subData: { items?: Array<Record<string, unknown>> } | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const res = await fetch(
+            `${RC_BASE}/projects/${projectId}/customers/${encoded}/subscriptions`,
+            { headers: rcHeaders(apiKey) }
+          );
+          if (res.status === 429) {
+            await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+            continue;
+          }
+          if (!res.ok) return { error: true, row, items: [] as Array<Record<string, unknown>> };
+          subData = await res.json();
+          break;
+        }
+        return { error: false, row, items: subData?.items || [] };
+      })
+    );
+
+    for (const { error, row, items } of results) {
+      if (error) {
+        errors++;
         continue;
       }
-      if (!res.ok) {
-        errors++;
-        break;
+      for (const sub of items) {
+        const startsAtRaw = sub.starts_at;
+        const periodStartsAtRaw = sub.current_period_starts_at;
+        const env = ((sub.environment as string) || "").toLowerCase();
+        if (env === "sandbox") continue;
+        if (startsAtRaw == null || periodStartsAtRaw == null) continue;
+
+        // Fields come back as unix-ms numbers from V2 API
+        const startsMs = typeof startsAtRaw === "number" ? startsAtRaw : new Date(String(startsAtRaw)).getTime();
+        const periodMs = typeof periodStartsAtRaw === "number" ? periodStartsAtRaw : new Date(String(periodStartsAtRaw)).getTime();
+        if (!Number.isFinite(startsMs) || !Number.isFinite(periodMs)) continue;
+        if (periodMs <= startsMs) continue;
+        if (periodMs < thirtyDaysAgo.getTime()) continue;
+
+        const totalRev =
+          (sub.total_revenue_in_usd as { gross?: number } | undefined)?.gross ?? 0;
+        const periodEndsRaw = sub.current_period_ends_at;
+        let periodDays = 7;
+        if (periodEndsRaw != null) {
+          const periodEndsMs = typeof periodEndsRaw === "number" ? periodEndsRaw : new Date(String(periodEndsRaw)).getTime();
+          const ms = periodEndsMs - periodMs;
+          if (ms > 0) periodDays = Math.max(1, Math.round(ms / 86400000));
+        }
+        const totalDays = Math.max(periodDays, Math.round((periodMs + periodDays * 86400000 - startsMs) / 86400000));
+        const numPeriods = Math.max(1, Math.round(totalDays / periodDays));
+        const perPeriod = numPeriods > 0 ? totalRev / numPeriods : 0;
+
+        const productId = (sub.product_id as string) || row.product_id || "";
+        const occurredIso = new Date(periodMs).toISOString();
+        const eventId = `backfill:${row.app_user_id}:${productId}:${periodMs}`;
+
+        const { error: dbErr } = await supabase.from("rc_renewal_events").upsert(
+          {
+            id: eventId,
+            app_user_id: row.app_user_id,
+            app_name: appName,
+            product_id: productId || null,
+            country: row.country || null,
+            store: (row.store || "app_store").toLowerCase(),
+            revenue: perPeriod,
+            occurred_at: occurredIso,
+          },
+          { onConflict: "id" }
+        );
+        if (dbErr) errors++;
+        else written++;
       }
-      subData = await res.json();
-      break;
     }
-    if (!subData?.items) continue;
-
-    for (const sub of subData.items) {
-      const startsAt = sub.starts_at as string | undefined;
-      const periodStartsAt = sub.current_period_starts_at as string | undefined;
-      const env = ((sub.environment as string) || "").toLowerCase();
-      if (env === "sandbox") continue;
-      if (!startsAt || !periodStartsAt) continue;
-
-      const startsMs = new Date(startsAt).getTime();
-      const periodMs = new Date(periodStartsAt).getTime();
-      // Not renewed yet, or original purchase is the current period
-      if (periodMs <= startsMs) continue;
-      // Only backfill last 30 days
-      if (periodMs < thirtyDaysAgo.getTime()) continue;
-
-      // Estimate per-period revenue
-      const totalRev =
-        (sub.total_revenue_in_usd as { gross?: number } | undefined)?.gross ?? 0;
-      // Period in days ≈ (endsAt - startsAt) for a weekly = 7
-      const periodEnds = sub.current_period_ends_at as string | undefined;
-      let periodDays = 7;
-      if (periodEnds && periodStartsAt) {
-        const ms = new Date(periodEnds).getTime() - periodMs;
-        if (ms > 0) periodDays = Math.max(1, Math.round(ms / 86400000));
-      }
-      const totalDays = Math.max(periodDays, Math.round((periodMs + periodDays * 86400000 - startsMs) / 86400000));
-      const numPeriods = Math.max(1, Math.round(totalDays / periodDays));
-      const perPeriod = numPeriods > 0 ? totalRev / numPeriods : 0;
-
-      const productId = (sub.product_id as string) || row.product_id || "";
-      const eventId = `backfill:${row.app_user_id}:${productId}:${periodStartsAt}`;
-
-      const { error } = await supabase.from("rc_renewal_events").upsert(
-        {
-          id: eventId,
-          app_user_id: row.app_user_id,
-          app_name: appName,
-          product_id: productId || null,
-          country: row.country || null,
-          store: (row.store || "app_store").toLowerCase(),
-          revenue: perPeriod,
-          occurred_at: new Date(periodStartsAt).toISOString(),
-        },
-        { onConflict: "id" }
-      );
-
-      if (error) errors++;
-      else written++;
-    }
-
-    // Gentle pacing
-    await new Promise((r) => setTimeout(r, 100));
   }
 
   return { appName, checked, written, errors };
