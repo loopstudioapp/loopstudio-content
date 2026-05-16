@@ -42,18 +42,14 @@ async function backfillProject(appName: string, apiKey: string, projectId: strin
   // Cutoff: 30 days ago
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400 * 1000);
 
-  // Pull subscriptions we already know about, that were purchased before today.
-  // These are the candidates for "may have renewed in the last 30 days".
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-
+  // Iterate every active sub. We don't pre-filter by purchased_at because
+  // a sub purchased 5–25 days ago could have renewed multiple times in
+  // that window — those renewals are what we want.
   const { data: subs } = await supabase
     .from("rc_subscriptions")
     .select("app_user_id, country, product_id, store, revenue_gross, purchased_at")
     .eq("app_name", appName)
     .eq("environment", "production")
-    .lt("purchased_at", thirtyDaysAgo.toISOString())
-    // Active OR billing_retry — both states can have had renewals recently
     .in("status", ["active", "billing_retry"]);
 
   let checked = 0;
