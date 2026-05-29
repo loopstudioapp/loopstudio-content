@@ -8,15 +8,14 @@ import Link from "next/link";
 /* ── Types ── */
 type RCOverview = { active_trials: number; active_subs: number; revenue_30d: number; mrr: number };
 type Subscriber = { id: string; country: string; app: string; plan: string; purchase_date: string; expiry_date: string; revenue: number };
-type MetricsRow = { account_id: string; date: string; total_likes: number; posts: number; followers: number; lm8_total_likes: number; lm8_posts: number; lm8_followers: number };
-type AnalyticsMetric = { label: string; data: { date: string; total: number }[] };
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
 type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary };
+type DailyPoint = { date: string; revenue: number; profit: number };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: string[]; color: string; label: string; h?: number }) {
@@ -143,21 +142,8 @@ function fmtVnTime(iso: string): string {
   }).format(d);
 }
 
-/* ── Metric Card ── */
-function MetricCard({ label, value, color, data, dates }: { label: string; value: string; color: string; data: number[]; dates: string[] }) {
-  return (
-    <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>{label}</p>
-        <p className="text-white text-2xl font-bold">{value}</p>
-      </div>
-      <Chart data={data} dates={dates} color={color} label={label} h={72} />
-    </div>
-  );
-}
-
 /* ── Profit Grid (combined across apps: Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
-function ProfitGrid({ profit, ads, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; loading: boolean }) {
+function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean }) {
   const totalProfit = profit?.total_profit ?? 0;
   const newProfit = profit?.new_profit ?? 0;
   const cpns = profit?.cost_per_new_sub ?? 0;
@@ -207,6 +193,26 @@ function ProfitGrid({ profit, ads, loading }: { profit: ProfitSummary | undefine
             <p className="text-[#ef4444] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Adspend</p>
             <p className="text-white text-3xl font-bold">{fmtCur2(adspend)}</p>
             <p className="text-[#525252] text-[10px] mt-1 truncate">{adsSub}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 30-day charts */}
+      {!loading && daily && daily.length > 1 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
+              <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.revenue, 0))}</p>
+            </div>
+            <Chart data={daily.map((d) => d.revenue)} dates={daily.map((d) => d.date)} color="#22c55e" label="Revenue" h={80} />
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
+              <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.profit, 0))}</p>
+            </div>
+            <Chart data={daily.map((d) => d.profit)} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} />
           </div>
         </div>
       )}
@@ -379,11 +385,6 @@ export default function OwnerDashboard() {
       })
       .catch(() => {});
   }, []);
-  const [metrics, setMetrics] = useState<MetricsRow[]>([]);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [pinterestMetrics, setPinterestMetrics] = useState<AnalyticsMetric[]>([]);
-  const [pinterestLoading, setPinterestLoading] = useState(true);
-
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
     const hasEmployee = document.cookie.match(/(^| )employee_id=([^;]+)/);
@@ -464,73 +465,9 @@ export default function OwnerDashboard() {
     await Promise.all([fabiPromise, todayStatsPromise]);
   }, []);
 
-  useEffect(() => {
-    fetch("/api/metrics")
-      .then((r) => r.json())
-      .then((data: MetricsRow[]) => setMetrics(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setMetricsLoading(false));
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/pinterest/accounts")
-      .then((r) => r.json())
-      .then(async (accounts: { postiz_integration_id: string }[]) => {
-        if (!accounts?.length) { setPinterestLoading(false); return; }
-        const results = await Promise.all(
-          accounts.map(async (a) => {
-            try {
-              const r = await fetch(`/api/pinterest/analytics?integration_id=${a.postiz_integration_id}&days=7`);
-              return r.ok ? ((await r.json()) as AnalyticsMetric[]) : [];
-            } catch { return []; }
-          })
-        );
-        const merged: Record<string, AnalyticsMetric> = {};
-        for (const arr of results) {
-          for (const m of arr) {
-            if (!merged[m.label]) { merged[m.label] = { ...m, data: m.data.map((d) => ({ ...d })) }; }
-            else { m.data.forEach((d, i) => { if (merged[m.label].data[i]) merged[m.label].data[i].total += d.total; }); }
-          }
-        }
-        setPinterestMetrics(Object.values(merged));
-      })
-      .catch(() => {})
-      .finally(() => setPinterestLoading(false));
-  }, []);
-
   // (SubTable removed — replaced by TodayTxnTable which handles new + renewal types)
 
-  // TikTok / Lemon8 computed
-  const latestByAccount = new Map<string, MetricsRow>();
-  for (const m of metrics) {
-    const existing = latestByAccount.get(m.account_id);
-    if (!existing || m.date > existing.date) latestByAccount.set(m.account_id, m);
-  }
-  const latest = Array.from(latestByAccount.values());
-  const tkLikes = latest.reduce((s, m) => s + (m.total_likes || 0), 0);
-  const tkPosts = latest.reduce((s, m) => s + (m.posts || 0), 0);
-  const lmLikes = latest.reduce((s, m) => s + (m.lm8_total_likes || 0), 0);
-  const lmPosts = latest.reduce((s, m) => s + (m.lm8_posts || 0), 0);
-
-  const sorted = [...metrics].sort((a, b) => a.date.localeCompare(b.date));
-  const dateSet = [...new Set(sorted.map((m) => m.date))].sort();
-  const byDate = (field: keyof MetricsRow) =>
-    dateSet.map((d) => sorted.filter((m) => m.date === d).reduce((s, m) => s + (Number(m[field]) || 0), 0));
-
-  const pinMetric = (key: string) => {
-    const exact: Record<string, string> = { impression: "Impressions", click: "Pin Clicks", save: "Saves" };
-    return pinterestMetrics.find((m) => m.label === exact[key]);
-  };
-  const pinValues = (key: string) => pinMetric(key)?.data.map((d) => d.total) || [];
-  const pinTotal = (key: string) => pinValues(key).reduce((s, v) => s + v, 0);
-  const pinDates = (key: string) => pinMetric(key)?.data.map((d) => d.date) || [];
-
   const btnCls = "px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors";
-  const skeleton = (count: number, cols: string) => (
-    <div className={`grid ${cols} gap-4`}>
-      {Array.from({ length: count }).map((_, i) => <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-44 animate-pulse" />)}
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-4 sm:p-6 max-w-6xl mx-auto">
@@ -577,6 +514,7 @@ export default function OwnerDashboard() {
             <ProfitGrid
               profit={todayStats?.profit}
               ads={todayStats?.ads}
+              daily={todayStats?.daily}
               loading={todayStatsLoading && !todayStats}
             />
 
@@ -649,36 +587,6 @@ export default function OwnerDashboard() {
           </div>
         )}
       </section>
-
-      {/* ═══ TIKTOK ═══ */}
-      <section className="mb-10">
-        <div className="flex items-center gap-2 mb-5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ff0050]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">TikTok</h2>
-        </div>
-        {metricsLoading ? skeleton(2, "grid-cols-1 sm:grid-cols-2") : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <MetricCard label="Total Likes" value={fmtNum(tkLikes)} color="#ff0050" data={byDate("total_likes")} dates={dateSet} />
-            <MetricCard label="Total Posts" value={fmtNum(tkPosts)} color="#f472b6" data={byDate("posts")} dates={dateSet} />
-          </div>
-        )}
-      </section>
-
-      {/* ═══ LEMON8 ═══ */}
-      <section className="mb-10">
-        <div className="flex items-center gap-2 mb-5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Lemon8</h2>
-        </div>
-        {metricsLoading ? skeleton(2, "grid-cols-1 sm:grid-cols-2") : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <MetricCard label="Total Likes" value={fmtNum(lmLikes)} color="#22c55e" data={byDate("lm8_total_likes")} dates={dateSet} />
-            <MetricCard label="Total Posts" value={fmtNum(lmPosts)} color="#4ade80" data={byDate("lm8_posts")} dates={dateSet} />
-          </div>
-        )}
-      </section>
-
-      {/* Pinterest analytics hidden — PostBridge has no analytics API */}
     </div>
   );
 }

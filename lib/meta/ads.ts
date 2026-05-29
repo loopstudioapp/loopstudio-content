@@ -65,6 +65,45 @@ async function getUsdRate(currency: string): Promise<number> {
 }
 
 /**
+ * Daily Meta ad spend (USD) over a date range, keyed by YYYY-MM-DD.
+ * Dates use the ad account's timezone (GMT+7 for this account).
+ */
+export async function getMetaSpendByDay(
+  startIso: string,
+  endIso: string
+): Promise<Record<string, number>> {
+  const token = process.env.META_ACCESS_TOKEN;
+  const rawAccount = process.env.META_AD_ACCOUNT_ID;
+  if (!token || !rawAccount) return {};
+  const accountId = normalizeAccountId(rawAccount);
+
+  try {
+    const acctRes = await fetch(
+      `${GRAPH_BASE}/${accountId}?fields=currency&access_token=${encodeURIComponent(token)}`
+    );
+    const currency: string = (await acctRes.json())?.currency || "USD";
+    const rate = await getUsdRate(currency);
+
+    const timeRange = encodeURIComponent(JSON.stringify({ since: startIso, until: endIso }));
+    const res = await fetch(
+      `${GRAPH_BASE}/${accountId}/insights?fields=spend&time_increment=1&limit=100&time_range=${timeRange}&access_token=${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return {};
+    const json = await res.json();
+
+    const out: Record<string, number> = {};
+    for (const row of json?.data || []) {
+      const date: string = row.date_start;
+      const native = row.spend ? parseFloat(row.spend) : 0;
+      if (date) out[date] = rate > 0 ? native / rate : 0;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Fetch today's (GMT+7) Meta ad spend for the configured account,
  * converted to USD.
  */

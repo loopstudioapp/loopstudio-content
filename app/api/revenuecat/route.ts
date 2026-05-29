@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { getTodayMetaSpend, type MetaSpend } from "@/lib/meta/ads";
+import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
 
 export const maxDuration = 60;
 
@@ -227,6 +227,56 @@ function vnDayBoundsUtc(): { startUtc: string; endUtc: string } {
   return { startUtc, endUtc };
 }
 
+export type DailyPoint = { date: string; revenue: number; profit: number };
+
+/**
+ * Last 30 days of daily GROSS revenue (from RevenueCat revenue chart, both
+ * apps summed) and daily profit (net revenue − VAT-inclusive ad spend).
+ */
+async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyPoint[]> {
+  const today = vnDateIso();
+  const start = vnDateIso(new Date(Date.now() - 29 * 86400 * 1000));
+
+  // Build the 30 date keys (VN calendar)
+  const dates: string[] = [];
+  for (let i = 29; i >= 0; i--) {
+    dates.push(vnDateIso(new Date(Date.now() - i * 86400 * 1000)));
+  }
+
+  // GROSS revenue per day from RevenueCat revenue chart (measure 0 = Revenue)
+  const grossByDate: Record<string, number> = {};
+  await Promise.all(
+    RC_PROJECTS.filter((p) => p.apiKey && p.projectId).map(async (project) => {
+      try {
+        const res = await fetch(
+          `${RC_BASE}/projects/${project.projectId}/charts/revenue?resolution=day&start_date=${start}&end_date=${today}`,
+          { headers: rcHeaders(project.apiKey) }
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        for (const v of json?.values || []) {
+          if (v.measure !== 0) continue; // 0 = Revenue, 1 = Transactions
+          const date = new Date(v.cohort * 1000).toISOString().slice(0, 10);
+          grossByDate[date] = (grossByDate[date] || 0) + (v.value || 0);
+        }
+      } catch {
+        /* ignore a failing project */
+      }
+    })
+  );
+
+  // Daily ad spend (USD) from Meta
+  const spendUsdByDate = await getMetaSpendByDay(start, today);
+
+  return dates.map((date) => {
+    const gross = grossByDate[date] || 0;
+    const net = gross * (1 - appleRate);
+    const adspendUsd = spendUsdByDate[date] || 0;
+    const adspendWithVat = adspendUsd * (1 + metaVat);
+    return { date, revenue: gross, profit: net - adspendWithVat };
+  });
+}
+
 type ProfitSummary = {
   total_revenue: number; // GROSS, all apps, new + renewal
   new_revenue: number; // GROSS, all apps, new subs only
@@ -248,12 +298,17 @@ async function fetchTodayStats(): Promise<{
   transactions: TodayTxn[];
   ads: MetaSpend;
   profit: ProfitSummary;
+  daily: DailyPoint[];
 }> {
   const { startUtc, endUtc } = vnDayBoundsUtc();
 
-  // MRR per app from RevenueCat metrics + Meta ad spend, all in parallel
+  // Apple commission + Meta VAT rates (env-configurable)
+  const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
+  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
+
+  // MRR per app + Meta ad spend + 30-day daily series, all in parallel
   const mrrByApp: Record<string, number> = {};
-  const [, ads] = await Promise.all([
+  const [, ads, daily] = await Promise.all([
     Promise.all(
       RC_PROJECTS
         .filter((p) => p.apiKey && p.projectId)
@@ -277,6 +332,7 @@ async function fetchTodayStats(): Promise<{
         })
     ),
     getTodayMetaSpend(),
+    fetchDaily30d(appleRate, metaVat),
   ]);
 
   // New subs today (from rc_subscriptions where purchased_at is today VN)
@@ -359,12 +415,8 @@ async function fetchTodayStats(): Promise<{
     sumNewRevenue += perApp[appName].new_revenue;
     sumNewSubs += perApp[appName].new_subs;
   }
-  // Apple takes a commission (Small Business Program = 15%); revenue we
-  // actually receive is net of that. Meta ad spend in the API is the media
-  // cost excluding VAT — Vietnam adds VAT on top, so the real cost is higher.
-  const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
-  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
-
+  // Apple takes a commission (net of it = what we receive); Meta ad spend in
+  // the API excludes VAT, which Vietnam adds on top. Rates read above.
   const adspendUsd = ads.spend_usd || 0;
   const adspendWithVat = adspendUsd * (1 + metaVat);
   const netRevenue = sumRevenue * (1 - appleRate);
@@ -385,7 +437,7 @@ async function fetchTodayStats(): Promise<{
     cost_per_new_sub: sumNewSubs > 0 ? adspendWithVat / sumNewSubs : 0,
   };
 
-  return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit };
+  return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit, daily };
 }
 
 export async function GET(request: NextRequest) {
