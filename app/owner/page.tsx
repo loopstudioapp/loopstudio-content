@@ -14,7 +14,9 @@ type FabiDay = { date: string; revenue_net: number; revenue_gross: number; disco
 type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[] };
+type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
+type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; adspend_usd: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary };
 
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: string[]; color: string; label: string; h?: number }) {
@@ -96,6 +98,12 @@ function countryName(code: string): string {
   catch { return code.toUpperCase(); }
 }
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+// Currency with 2 decimals + sign-aware (for profit which can be negative)
+function fmtCur2(n: number): string {
+  const neg = n < 0;
+  const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (neg ? "-$" : "$") + abs;
+}
 function fmtVnd(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
   if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
@@ -144,6 +152,61 @@ function MetricCard({ label, value, color, data, dates }: { label: string; value
         <p className="text-white text-2xl font-bold">{value}</p>
       </div>
       <Chart data={data} dates={dates} color={color} label={label} h={72} />
+    </div>
+  );
+}
+
+/* ── Profit Grid (combined across apps: Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
+function ProfitGrid({ profit, ads, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; loading: boolean }) {
+  const totalProfit = profit?.total_profit ?? 0;
+  const newProfit = profit?.new_profit ?? 0;
+  const cpns = profit?.cost_per_new_sub ?? 0;
+  const adspend = profit?.adspend_usd ?? 0;
+  const profitColor = (n: number) => (n >= 0 ? "text-white" : "text-[#ef4444]");
+  // Subtitle for adspend showing native VND amount + rate
+  const adsSub = ads?.configured
+    ? ads.currency !== "USD"
+      ? `${ads.spend_native.toLocaleString("en-US")}${ads.currency === "VND" ? "₫" : " " + ads.currency} @ ${ads.usd_rate.toLocaleString("en-US")}`
+      : "today's spend"
+    : "Meta not connected";
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-2 h-2 rounded-full bg-[#10b981]" />
+        <h3 className="text-white text-sm font-semibold">Profit</h3>
+        <span className="text-[#525252] text-xs">all apps · today GMT+7</span>
+        {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
+      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-[#141414] border border-[#262626] rounded-xl h-28 animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Profit</p>
+            <p className={`text-3xl font-bold ${profitColor(totalProfit)}`}>{fmtCur2(totalProfit)}</p>
+            <p className="text-[#525252] text-[10px] mt-1">all revenue − adspend</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">New Profit</p>
+            <p className={`text-3xl font-bold ${profitColor(newProfit)}`}>{fmtCur2(newProfit)}</p>
+            <p className="text-[#525252] text-[10px] mt-1">new revenue − adspend</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Cost / New Sub</p>
+            <p className="text-white text-3xl font-bold">{cpns > 0 ? fmtCur2(cpns) : "—"}</p>
+            <p className="text-[#525252] text-[10px] mt-1">adspend ÷ new subs</p>
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <p className="text-[#ef4444] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Adspend</p>
+            <p className="text-white text-3xl font-bold">{fmtCur2(adspend)}</p>
+            <p className="text-[#525252] text-[10px] mt-1 truncate">{adsSub}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -507,7 +570,14 @@ export default function OwnerDashboard() {
 
         {(rcLoaded || rcLoading) && (
           <>
-            {/* ── GrailScan (top) ── */}
+            {/* ── Profit (top, combined across apps) ── */}
+            <ProfitGrid
+              profit={todayStats?.profit}
+              ads={todayStats?.ads}
+              loading={todayStatsLoading && !todayStats}
+            />
+
+            {/* ── GrailScan ── */}
             <AppStatGrid
               appName="GrailScan"
               accent="#a855f7"

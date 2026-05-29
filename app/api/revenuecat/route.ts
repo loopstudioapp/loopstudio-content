@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getTodayMetaSpend, type MetaSpend } from "@/lib/meta/ads";
 
 export const maxDuration = 60;
 
@@ -226,37 +227,52 @@ function vnDayBoundsUtc(): { startUtc: string; endUtc: string } {
   return { startUtc, endUtc };
 }
 
+type ProfitSummary = {
+  total_revenue: number; // all apps, new + renewal
+  new_revenue: number; // all apps, new subs only
+  new_subs: number; // all apps
+  adspend_usd: number;
+  total_profit: number; // total_revenue - adspend
+  new_profit: number; // new_revenue - adspend
+  cost_per_new_sub: number; // adspend / new_subs (0 if no new subs)
+};
+
 async function fetchTodayStats(): Promise<{
   today_vn: string;
   per_app: Record<string, TodayPerApp>;
   transactions: TodayTxn[];
+  ads: MetaSpend;
+  profit: ProfitSummary;
 }> {
   const { startUtc, endUtc } = vnDayBoundsUtc();
 
-  // MRR per app from RevenueCat metrics
+  // MRR per app from RevenueCat metrics + Meta ad spend, all in parallel
   const mrrByApp: Record<string, number> = {};
-  await Promise.all(
-    RC_PROJECTS
-      .filter((p) => p.apiKey && p.projectId)
-      .map(async (project) => {
-        try {
-          const res = await fetch(
-            `${RC_BASE}/projects/${project.projectId}/metrics/overview`,
-            { headers: rcHeaders(project.apiKey) }
-          );
-          if (!res.ok) {
+  const [, ads] = await Promise.all([
+    Promise.all(
+      RC_PROJECTS
+        .filter((p) => p.apiKey && p.projectId)
+        .map(async (project) => {
+          try {
+            const res = await fetch(
+              `${RC_BASE}/projects/${project.projectId}/metrics/overview`,
+              { headers: rcHeaders(project.apiKey) }
+            );
+            if (!res.ok) {
+              mrrByApp[project.name] = 0;
+              return;
+            }
+            const json = await res.json();
+            const arr: { id: string; value: number }[] = json.metrics || [];
+            const map = Object.fromEntries(arr.map((x) => [x.id, x.value]));
+            mrrByApp[project.name] = map.mrr || 0;
+          } catch {
             mrrByApp[project.name] = 0;
-            return;
           }
-          const json = await res.json();
-          const arr: { id: string; value: number }[] = json.metrics || [];
-          const map = Object.fromEntries(arr.map((x) => [x.id, x.value]));
-          mrrByApp[project.name] = map.mrr || 0;
-        } catch {
-          mrrByApp[project.name] = 0;
-        }
-      })
-  );
+        })
+    ),
+    getTodayMetaSpend(),
+  ]);
 
   // New subs today (from rc_subscriptions where purchased_at is today VN)
   const { data: newSubs } = await supabase
@@ -329,7 +345,27 @@ async function fetchTodayStats(): Promise<{
   // Most recent first
   txns.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 
-  return { today_vn: vnDateIso(), per_app: perApp, transactions: txns };
+  // Combined profit summary across all visible apps
+  let sumRevenue = 0;
+  let sumNewRevenue = 0;
+  let sumNewSubs = 0;
+  for (const appName of VISIBLE_APPS) {
+    sumRevenue += perApp[appName].today_revenue;
+    sumNewRevenue += perApp[appName].new_revenue;
+    sumNewSubs += perApp[appName].new_subs;
+  }
+  const adspendUsd = ads.spend_usd || 0;
+  const profit: ProfitSummary = {
+    total_revenue: sumRevenue,
+    new_revenue: sumNewRevenue,
+    new_subs: sumNewSubs,
+    adspend_usd: adspendUsd,
+    total_profit: sumRevenue - adspendUsd,
+    new_profit: sumNewRevenue - adspendUsd,
+    cost_per_new_sub: sumNewSubs > 0 ? adspendUsd / sumNewSubs : 0,
+  };
+
+  return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit };
 }
 
 export async function GET(request: NextRequest) {
