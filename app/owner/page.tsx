@@ -18,7 +18,7 @@ type DailyPoint = { date: string; revenue: number; profit: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 
 /* ── Interactive Chart with Hover Tooltip ── */
-function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: string[]; color: string; label: string; h?: number }) {
+function Chart({ data, dates, color, label, h = 80, zeroLine = false }: { data: number[]; dates: string[]; color: string; label: string; h?: number; zeroLine?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   if (data.length < 2) return <div style={{ height: h }} className="flex items-center justify-center text-[#525252] text-xs">No data</div>;
   const w = 400;
@@ -26,12 +26,14 @@ function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: s
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
   const range = max - min || 1;
+  const yOf = (v: number) => h - pad - ((v - min) / range) * (h - pad * 2);
   const pts = data.map((v, i) => ({
     x: pad + (i / (data.length - 1)) * (w - pad * 2),
-    y: h - pad - ((v - min) / range) * (h - pad * 2),
+    y: yOf(v),
     val: v,
     date: dates[i] || "",
   }));
+  const y0 = yOf(0); // y-coordinate of the $0 baseline
   const line = pts.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(" ");
   const area = `${line} L${pts[pts.length - 1].x},${h} L${pts[0].x},${h} Z`;
   const gid = `g-${color.replace("#", "")}-${label.replace(/\s/g, "")}`;
@@ -59,6 +61,12 @@ function Chart({ data, dates, color, label, h = 80 }: { data: number[]; dates: s
           </linearGradient>
         </defs>
         <path d={area} fill={`url(#${gid})`} />
+        {zeroLine && (
+          <>
+            <line x1={pad} y1={y0} x2={w - pad} y2={y0} stroke="#737373" strokeWidth="1" strokeDasharray="4,3" opacity="0.6" />
+            <text x={pad} y={y0 - 3} fill="#737373" fontSize="9" opacity="0.8">$0</text>
+          </>
+        )}
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         {pts.map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r={hover === i ? 5 : i === pts.length - 1 ? 3 : 0} fill={color} className="transition-all duration-100" />
@@ -212,7 +220,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
               <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.profit, 0))}</p>
             </div>
-            <Chart data={daily.map((d) => d.profit)} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} />
+            <Chart data={daily.map((d) => d.profit)} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
           </div>
         </div>
       )}
