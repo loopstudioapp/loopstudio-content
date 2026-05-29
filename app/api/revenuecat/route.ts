@@ -228,13 +228,18 @@ function vnDayBoundsUtc(): { startUtc: string; endUtc: string } {
 }
 
 type ProfitSummary = {
-  total_revenue: number; // all apps, new + renewal
-  new_revenue: number; // all apps, new subs only
+  total_revenue: number; // GROSS, all apps, new + renewal
+  new_revenue: number; // GROSS, all apps, new subs only
   new_subs: number; // all apps
-  adspend_usd: number;
-  total_profit: number; // total_revenue - adspend
-  new_profit: number; // new_revenue - adspend
-  cost_per_new_sub: number; // adspend / new_subs (0 if no new subs)
+  apple_commission_rate: number; // e.g. 0.15
+  meta_vat_rate: number; // e.g. 0.05
+  net_revenue: number; // total_revenue after Apple cut
+  net_new_revenue: number; // new_revenue after Apple cut
+  adspend_usd: number; // raw media spend (excl. VAT)
+  adspend_with_vat: number; // media spend incl. VAT — the real cost
+  total_profit: number; // net_revenue - adspend_with_vat
+  new_profit: number; // net_new_revenue - adspend_with_vat
+  cost_per_new_sub: number; // adspend_with_vat / new_subs (0 if no new subs)
 };
 
 async function fetchTodayStats(): Promise<{
@@ -354,15 +359,30 @@ async function fetchTodayStats(): Promise<{
     sumNewRevenue += perApp[appName].new_revenue;
     sumNewSubs += perApp[appName].new_subs;
   }
+  // Apple takes a commission (Small Business Program = 15%); revenue we
+  // actually receive is net of that. Meta ad spend in the API is the media
+  // cost excluding VAT — Vietnam adds VAT on top, so the real cost is higher.
+  const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
+  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
+
   const adspendUsd = ads.spend_usd || 0;
+  const adspendWithVat = adspendUsd * (1 + metaVat);
+  const netRevenue = sumRevenue * (1 - appleRate);
+  const netNewRevenue = sumNewRevenue * (1 - appleRate);
+
   const profit: ProfitSummary = {
     total_revenue: sumRevenue,
     new_revenue: sumNewRevenue,
     new_subs: sumNewSubs,
+    apple_commission_rate: appleRate,
+    meta_vat_rate: metaVat,
+    net_revenue: netRevenue,
+    net_new_revenue: netNewRevenue,
     adspend_usd: adspendUsd,
-    total_profit: sumRevenue - adspendUsd,
-    new_profit: sumNewRevenue - adspendUsd,
-    cost_per_new_sub: sumNewSubs > 0 ? adspendUsd / sumNewSubs : 0,
+    adspend_with_vat: adspendWithVat,
+    total_profit: netRevenue - adspendWithVat,
+    new_profit: netNewRevenue - adspendWithVat,
+    cost_per_new_sub: sumNewSubs > 0 ? adspendWithVat / sumNewSubs : 0,
   };
 
   return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit };

@@ -15,7 +15,7 @@ type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
-type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; adspend_usd: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
+type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary };
 
 /* ── Interactive Chart with Hover Tooltip ── */
@@ -161,20 +161,23 @@ function ProfitGrid({ profit, ads, loading }: { profit: ProfitSummary | undefine
   const totalProfit = profit?.total_profit ?? 0;
   const newProfit = profit?.new_profit ?? 0;
   const cpns = profit?.cost_per_new_sub ?? 0;
-  const adspend = profit?.adspend_usd ?? 0;
+  const adspend = profit?.adspend_with_vat ?? 0;
+  const applePct = Math.round((profit?.apple_commission_rate ?? 0.15) * 100);
+  const vatPct = Math.round((profit?.meta_vat_rate ?? 0.05) * 100);
   const profitColor = (n: number) => (n >= 0 ? "text-white" : "text-[#ef4444]");
-  // Subtitle for adspend showing native VND amount + rate
+  // Subtitle for adspend showing native VND (incl VAT) + rate
+  const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? 0.05)) : 0;
   const adsSub = ads?.configured
     ? ads.currency !== "USD"
-      ? `${ads.spend_native.toLocaleString("en-US")}${ads.currency === "VND" ? "₫" : " " + ads.currency} @ ${ads.usd_rate.toLocaleString("en-US")}`
-      : "today's spend"
+      ? `${Math.round(nativeWithVat).toLocaleString("en-US")}${ads.currency === "VND" ? "₫" : " " + ads.currency} incl ${vatPct}% VAT`
+      : `incl ${vatPct}% VAT`
     : "Meta not connected";
   return (
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-3">
         <span className="w-2 h-2 rounded-full bg-[#10b981]" />
         <h3 className="text-white text-sm font-semibold">Profit</h3>
-        <span className="text-[#525252] text-xs">all apps · today GMT+7</span>
+        <span className="text-[#525252] text-xs">all apps · today GMT+7 · net of {applePct}% Apple</span>
         {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
       </div>
       {loading ? (
@@ -188,12 +191,12 @@ function ProfitGrid({ profit, ads, loading }: { profit: ProfitSummary | undefine
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Profit</p>
             <p className={`text-3xl font-bold ${profitColor(totalProfit)}`}>{fmtCur2(totalProfit)}</p>
-            <p className="text-[#525252] text-[10px] mt-1">all revenue − adspend</p>
+            <p className="text-[#525252] text-[10px] mt-1">net rev − adspend</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">New Profit</p>
             <p className={`text-3xl font-bold ${profitColor(newProfit)}`}>{fmtCur2(newProfit)}</p>
-            <p className="text-[#525252] text-[10px] mt-1">new revenue − adspend</p>
+            <p className="text-[#525252] text-[10px] mt-1">net new rev − adspend</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Cost / New Sub</p>
