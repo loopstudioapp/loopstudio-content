@@ -437,6 +437,17 @@ async function fetchTodayStats(): Promise<{
     cost_per_new_sub: sumNewSubs > 0 ? adspendWithVat / sumNewSubs : 0,
   };
 
+  // The RC revenue chart buckets by UTC and marks the current day incomplete,
+  // so its last point undercounts "today". Override today's daily point with
+  // the accurate DB-based numbers (same source as the profit boxes) so the
+  // chart's last point matches the boxes above it.
+  const todayKey = vnDateIso();
+  const todayPoint = daily.find((p) => p.date === todayKey);
+  if (todayPoint) {
+    todayPoint.revenue = sumRevenue;
+    todayPoint.profit = profit.total_profit;
+  }
+
   return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit, daily };
 }
 
