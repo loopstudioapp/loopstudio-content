@@ -5,10 +5,16 @@ let _supabase: SupabaseClient | null = null;
 export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
   get(_, prop) {
     if (!_supabase) {
-      _supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
+      // On the server, use the service-role key (bypasses RLS) so locked-down
+      // tables stay accessible to API routes. In the browser this env var is
+      // undefined (not NEXT_PUBLIC), so it falls back to the anon key and any
+      // RLS-protected table is correctly off-limits to the public.
+      const key =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      _supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (_supabase as any)[prop as string];
