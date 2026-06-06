@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
+import { getTodayMetaSpend, getMetaSpendByDayUtc, type MetaSpend } from "@/lib/meta/ads";
 
 export const maxDuration = 60;
 
@@ -234,22 +234,24 @@ export type DailyPoint = { date: string; revenue: number; profit: number };
  * apps summed) and daily profit (net revenue − VAT-inclusive ad spend).
  */
 async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyPoint[]> {
-  const today = vnDateIso();
-  const start = vnDateIso(new Date(Date.now() - 29 * 86400 * 1000));
+  // RevenueCat revenue charts bucket by UTC, so the whole series uses UTC days.
+  // Meta spend is re-bucketed to UTC too (see getMetaSpendByDayUtc) so revenue
+  // and spend line up on the same day boundary.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const startUtc = new Date(Date.now() - 29 * 86400 * 1000).toISOString().slice(0, 10);
 
-  // Build the 30 date keys (VN calendar)
   const dates: string[] = [];
   for (let i = 29; i >= 0; i--) {
-    dates.push(vnDateIso(new Date(Date.now() - i * 86400 * 1000)));
+    dates.push(new Date(Date.now() - i * 86400 * 1000).toISOString().slice(0, 10));
   }
 
-  // GROSS revenue per day from RevenueCat revenue chart (measure 0 = Revenue)
+  // GROSS revenue per UTC day from RevenueCat revenue chart (measure 0 = Revenue)
   const grossByDate: Record<string, number> = {};
   await Promise.all(
     RC_PROJECTS.filter((p) => p.apiKey && p.projectId).map(async (project) => {
       try {
         const res = await fetch(
-          `${RC_BASE}/projects/${project.projectId}/charts/revenue?resolution=day&start_date=${start}&end_date=${today}`,
+          `${RC_BASE}/projects/${project.projectId}/charts/revenue?resolution=day&start_date=${startUtc}&end_date=${todayUtc}`,
           { headers: rcHeaders(project.apiKey) }
         );
         if (!res.ok) return;
@@ -265,8 +267,8 @@ async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyP
     })
   );
 
-  // Daily ad spend (USD) from Meta
-  const spendUsdByDate = await getMetaSpendByDay(start, today);
+  // Daily ad spend (USD), re-bucketed to UTC days to match revenue
+  const spendUsdByDate = await getMetaSpendByDayUtc(startUtc, todayUtc);
 
   return dates.map((date) => {
     const gross = grossByDate[date] || 0;
@@ -437,15 +439,14 @@ async function fetchTodayStats(): Promise<{
     cost_per_new_sub: sumNewSubs > 0 ? adspendWithVat / sumNewSubs : 0,
   };
 
-  // The RC revenue chart buckets by UTC and marks the current day incomplete,
-  // so its last point undercounts "today". Override today's daily point with
-  // the accurate DB-based numbers (same source as the profit boxes) so the
-  // chart's last point matches the boxes above it.
-  const todayKey = vnDateIso();
-  const todayPoint = daily.find((p) => p.date === todayKey);
-  if (todayPoint) {
-    todayPoint.revenue = sumRevenue;
-    todayPoint.profit = profit.total_profit;
+  // The current UTC day is incomplete in the RC chart (and UTC lags GMT+7 by
+  // 7h, so it's barely started), which undercounts "today". Override the most
+  // recent daily point with the accurate DB-based numbers (same source as the
+  // profit boxes) so the chart's last point matches the boxes above it.
+  if (daily.length) {
+    const last = daily[daily.length - 1];
+    last.revenue = sumRevenue;
+    last.profit = profit.total_profit;
   }
 
   return { today_vn: vnDateIso(), per_app: perApp, transactions: txns, ads, profit, daily };

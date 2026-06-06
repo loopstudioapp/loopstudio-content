@@ -65,10 +65,14 @@ async function getUsdRate(currency: string): Promise<number> {
 }
 
 /**
- * Daily Meta ad spend (USD) over a date range, keyed by YYYY-MM-DD.
- * Dates use the ad account's timezone (GMT+7 for this account).
+ * Daily Meta ad spend (USD) over a UTC date range, keyed by UTC YYYY-MM-DD.
+ *
+ * Meta reports spend in the ad account's timezone (GMT+7 here), but our
+ * revenue source (RevenueCat charts) buckets by UTC days. To make daily
+ * profit accurate, we fetch hourly spend (GMT+7) and re-bucket each hour
+ * into the UTC day it actually falls in, so revenue and spend line up.
  */
-export async function getMetaSpendByDay(
+export async function getMetaSpendByDayUtc(
   startIso: string,
   endIso: string
 ): Promise<Record<string, number>> {
@@ -84,18 +88,30 @@ export async function getMetaSpendByDay(
     const currency: string = (await acctRes.json())?.currency || "USD";
     const rate = await getUsdRate(currency);
 
+    // Fetch GMT+7 hourly rows over the window (one page covers ~30 days).
     const timeRange = encodeURIComponent(JSON.stringify({ since: startIso, until: endIso }));
-    const res = await fetch(
-      `${GRAPH_BASE}/${accountId}/insights?fields=spend&time_increment=1&limit=100&time_range=${timeRange}&access_token=${encodeURIComponent(token)}`
-    );
-    if (!res.ok) return {};
-    const json = await res.json();
+    let url: string | null =
+      `${GRAPH_BASE}/${accountId}/insights?fields=spend&time_increment=1` +
+      `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone&limit=2000` +
+      `&time_range=${timeRange}&access_token=${encodeURIComponent(token)}`;
 
     const out: Record<string, number> = {};
-    for (const row of json?.data || []) {
-      const date: string = row.date_start;
-      const native = row.spend ? parseFloat(row.spend) : 0;
-      if (date) out[date] = rate > 0 ? native / rate : 0;
+    for (let page = 0; page < 6 && url; page++) {
+      const res: Response = await fetch(url);
+      if (!res.ok) break;
+      const json = await res.json();
+      for (const row of json?.data || []) {
+        const d: string = row.date_start; // GMT+7 calendar date
+        const hourRange: string = row.hourly_stats_aggregated_by_advertiser_time_zone || "";
+        const hh = hourRange.slice(0, 2);
+        const native = row.spend ? parseFloat(row.spend) : 0;
+        if (!d || hh.length < 2) continue;
+        // Account tz is Asia/Jakarta (+07:00, no DST). Map this GMT+7 hour to
+        // the UTC calendar day it belongs to.
+        const utcDate = new Date(`${d}T${hh}:00:00+07:00`).toISOString().slice(0, 10);
+        out[utcDate] = (out[utcDate] || 0) + (rate > 0 ? native / rate : 0);
+      }
+      url = json?.paging?.next || null;
     }
     return out;
   } catch {
