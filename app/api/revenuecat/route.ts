@@ -234,58 +234,90 @@ export type DailyPoint = { date: string; revenue: number; profit: number };
  * apps summed) and daily profit (net revenue − VAT-inclusive ad spend).
  */
 async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyPoint[]> {
-  // Everything is bucketed by GMT+7 (Vietnam) days — matching the rest of the
-  // dashboard and how the owner thinks about "today"/"yesterday".
-  //
-  // Revenue comes from the DB (RevenueCat's chart only buckets by UTC, which
-  // mis-attributes evening sales to the next day). Each transaction is counted
-  // once: a sub's initial payment on its purchase day + each renewal on its
-  // own day. Spend comes from Meta's native GMT+7 daily totals.
+  // Revenue source = RevenueCat's revenue chart (accurate + complete). RC only
+  // buckets by UTC, but the owner thinks in GMT+7 (Vietnam) days, so we convert:
+  // each UTC day's accurate total is split across the 7-hour boundary using the
+  // intraday timing of new-sub purchases (which the DB has at full precision):
+  //   GMT+7 day D = RC[UTC D] * earlyFraction(D)  +  RC[UTC D-1] * lateFraction(D-1)
+  // where "early" = UTC 00:00–16:59 (same Vietnam day) and "late" = 17:00–23:59
+  // (rolls into the next Vietnam day). Spend is Meta's native GMT+7 daily total.
   const today = vnDateIso();
   const start = vnDateIso(new Date(Date.now() - 29 * 86400 * 1000));
+  // RC fetched one extra UTC day back so the earliest GMT+7 day has its D-1.
+  const rcStart = new Date(Date.now() - 31 * 86400 * 1000).toISOString().slice(0, 10);
+  const rcEnd = new Date().toISOString().slice(0, 10);
 
   const dates: string[] = [];
   for (let i = 29; i >= 0; i--) {
     dates.push(vnDateIso(new Date(Date.now() - i * 86400 * 1000)));
   }
 
-  // Pull all subs + renewal events for the visible apps (small tables)
-  const [{ data: subs }, { data: renewals }, spendUsdByDate] = await Promise.all([
+  const [rcResults, subsResult, spendUsdByDate] = await Promise.all([
+    Promise.all(
+      RC_PROJECTS.filter((p) => p.apiKey && p.projectId).map(async (project) => {
+        try {
+          const res = await fetch(
+            `${RC_BASE}/projects/${project.projectId}/charts/revenue?resolution=day&start_date=${rcStart}&end_date=${rcEnd}`,
+            { headers: rcHeaders(project.apiKey) }
+          );
+          if (!res.ok) return [] as { cohort: number; value: number; measure: number }[];
+          const json = await res.json();
+          return (json?.values || []) as { cohort: number; value: number; measure: number }[];
+        } catch {
+          return [] as { cohort: number; value: number; measure: number }[];
+        }
+      })
+    ),
     supabase
       .from("rc_subscriptions")
-      .select("app_user_id, app_name, purchased_at, revenue_gross")
+      .select("app_name, purchased_at, revenue_gross")
       .eq("environment", "production"),
-    supabase
-      .from("rc_renewal_events")
-      .select("app_user_id, app_name, occurred_at, revenue"),
     getMetaSpendByDay(start, today),
   ]);
 
-  // Total renewal revenue per user, so we can back out each sub's initial payment
-  const renewalByUser: Record<string, number> = {};
-  for (const r of renewals || []) {
-    renewalByUser[r.app_user_id] = (renewalByUser[r.app_user_id] || 0) + (r.revenue || 0);
+  // Accurate revenue per UTC day (sum both projects, measure 0 = Revenue)
+  const rcByUtc: Record<string, number> = {};
+  for (const values of rcResults) {
+    for (const v of values) {
+      if (v.measure !== 0) continue;
+      const utcDate = new Date(v.cohort * 1000).toISOString().slice(0, 10);
+      rcByUtc[utcDate] = (rcByUtc[utcDate] || 0) + (v.value || 0);
+    }
   }
 
-  const revByDate: Record<string, number> = {};
-  // Initial payment = lifetime gross − tracked renewals, attributed to purchase day
-  for (const s of subs || []) {
+  // Intraday split per UTC day from new-sub purchase times (full-precision shape)
+  const early: Record<string, number> = {};
+  const late: Record<string, number> = {};
+  for (const s of subsResult.data || []) {
     if (!VISIBLE_APPS.has(s.app_name || "Roomy AI")) continue;
     if (!s.purchased_at) continue;
-    const initial = Math.max((s.revenue_gross || 0) - (renewalByUser[s.app_user_id] || 0), 0);
-    const d = vnDateIso(new Date(s.purchased_at));
-    revByDate[d] = (revByDate[d] || 0) + initial;
+    const dt = new Date(s.purchased_at);
+    const utcDate = dt.toISOString().slice(0, 10);
+    const amt = s.revenue_gross || 0;
+    if (dt.getUTCHours() < 17) early[utcDate] = (early[utcDate] || 0) + amt;
+    else late[utcDate] = (late[utcDate] || 0) + amt;
   }
-  // Each renewal on its own day
-  for (const r of renewals || []) {
-    if (!VISIBLE_APPS.has(r.app_name || "Roomy AI")) continue;
-    if (!r.occurred_at) continue;
-    const d = vnDateIso(new Date(r.occurred_at));
-    revByDate[d] = (revByDate[d] || 0) + (r.revenue || 0);
+  const earlyFrac = (utcDate: string): number => {
+    const e = early[utcDate] || 0;
+    const l = late[utcDate] || 0;
+    return e + l > 0 ? e / (e + l) : 17 / 24; // even split fallback
+  };
+
+  // Redistribute accurate UTC totals into GMT+7 days
+  const revByVnDate: Record<string, number> = {};
+  const addDay = (dateStr: string, n: number) =>
+    new Date(new Date(`${dateStr}T00:00:00Z`).getTime() + n * 86400 * 1000)
+      .toISOString()
+      .slice(0, 10);
+  for (const [utcDate, total] of Object.entries(rcByUtc)) {
+    const ef = earlyFrac(utcDate);
+    revByVnDate[utcDate] = (revByVnDate[utcDate] || 0) + total * ef; // early → same VN day
+    const next = addDay(utcDate, 1);
+    revByVnDate[next] = (revByVnDate[next] || 0) + total * (1 - ef); // late → next VN day
   }
 
   return dates.map((date) => {
-    const gross = revByDate[date] || 0;
+    const gross = revByVnDate[date] || 0;
     const net = gross * (1 - appleRate);
     const adspendUsd = spendUsdByDate[date] || 0;
     const adspendWithVat = adspendUsd * (1 + metaVat);
