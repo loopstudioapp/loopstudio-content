@@ -156,14 +156,34 @@ function fmtVnTime(iso: string): string {
 }
 
 /* ── Profit Grid (combined across apps: Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
+type TaxMode = "normal" | "personal" | "corporate";
 function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean }) {
-  const totalProfit = profit?.total_profit ?? 0;
-  const newProfit = profit?.new_profit ?? 0;
+  const [taxMode, setTaxMode] = useState<TaxMode>("normal");
+  // Apply the selected tax to a profit figure given its revenue base.
+  // - personal: 7% of revenue is taxed (deducted from profit)
+  // - corporate: 20% of profit (only when profitable; no tax on a loss)
+  const applyTax = (profitVal: number, revenueVal: number): number => {
+    if (taxMode === "personal") return profitVal - 0.07 * revenueVal;
+    if (taxMode === "corporate") return profitVal > 0 ? profitVal * 0.8 : profitVal;
+    return profitVal;
+  };
+
+  const totalProfit = applyTax(profit?.total_profit ?? 0, profit?.total_revenue ?? 0);
+  const newProfit = applyTax(profit?.new_profit ?? 0, profit?.new_revenue ?? 0);
   const cpns = profit?.cost_per_new_sub ?? 0;
   const adspend = profit?.adspend_with_vat ?? 0;
   const applePct = Math.round((profit?.apple_commission_rate ?? 0.15) * 100);
   const vatPct = Math.round((profit?.meta_vat_rate ?? 0.05) * 100);
   const profitColor = (n: number) => (n >= 0 ? "text-[#22c55e]" : "text-[#ef4444]");
+  const taxNote =
+    taxMode === "personal" ? " · −7% personal tax" : taxMode === "corporate" ? " · −20% corporate tax" : "";
+  const taxBtns: { key: TaxMode; label: string }[] = [
+    { key: "normal", label: "Normal" },
+    { key: "personal", label: "Personal 7%" },
+    { key: "corporate", label: "Corporate 20%" },
+  ];
+  // Per-day profit with tax applied (for the 30-day profit chart)
+  const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
   // Subtitle for adspend showing native VND (incl VAT) + rate
   const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? 0.05)) : 0;
   const adsSub = ads?.configured
@@ -173,11 +193,28 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
     : "Meta not connected";
   return (
     <div className="mb-6">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-        <h3 className="text-white text-sm font-semibold">Profit</h3>
-        <span className="text-[#525252] text-xs">all apps · today GMT+7 · net of {applePct}% Apple</span>
-        {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="w-2 h-2 rounded-full bg-[#10b981]" />
+          <h3 className="text-white text-sm font-semibold">Profit</h3>
+          <span className="text-[#525252] text-xs">all apps · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
+          {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
+        </div>
+        <div className="flex items-center gap-1">
+          {taxBtns.map((b) => (
+            <button
+              key={b.key}
+              onClick={() => setTaxMode(b.key)}
+              className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
+                taxMode === b.key
+                  ? "text-white border-[#10b981] bg-[#10b981]/10"
+                  : "text-[#737373] border-[#262626] hover:text-white hover:border-[#404040]"
+              }`}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
       </div>
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -223,9 +260,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
-              <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.profit, 0))}</p>
+              <p className="text-white text-2xl font-bold">{fmtCur2(taxedProfit.reduce((s, v) => s + v, 0))}</p>
             </div>
-            <Chart data={daily.map((d) => d.profit)} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
+            <Chart data={taxedProfit} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
           </div>
         </div>
       )}
