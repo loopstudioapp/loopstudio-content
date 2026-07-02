@@ -124,6 +124,10 @@ export async function POST(request: NextRequest) {
       upsertData = {
         id: appUserId,
         app_user_id: appUserId,
+        app_name: appName,
+        country: event.country_code || null,
+        store: (event.store || "APP_STORE").toLowerCase(),
+        product_id: event.product_id || null,
         status: "active",
         auto_renewal: "will_renew",
         expires_at: msToTimestamp(event.expiration_at_ms),

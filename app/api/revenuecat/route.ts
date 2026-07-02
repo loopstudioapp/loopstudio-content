@@ -410,33 +410,55 @@ async function fetchTodayStats(): Promise<{
   }
 
   const txns: TodayTxn[] = [];
+  const sameDayNewSubRenewalIds = new Set<string>();
+  const renewalRows = (renewals || []).filter((row) => VISIBLE_APPS.has(row.app_name || "Roomy AI"));
 
   for (const row of newSubs || []) {
     const app = row.app_name || "Roomy AI";
     if (!VISIBLE_APPS.has(app)) continue;
-    const rev = row.revenue_gross || 0;
+
+    // rc_subscriptions is a customer summary, not an event ledger. If someone
+    // starts weekly and upgrades to yearly minutes later, revenue_gross can
+    // contain the later plan's/lifetime value and double-count today's renewal.
+    const sameDayRenewals = renewalRows.filter((r) => {
+      if (r.app_user_id !== row.app_user_id) return false;
+      if ((r.app_name || "Roomy AI") !== app) return false;
+      if (!row.purchased_at || !r.occurred_at) return false;
+      return new Date(r.occurred_at).getTime() >= new Date(row.purchased_at).getTime();
+    });
+    const hasSameDayUpgrade = sameDayRenewals.length > 0;
+    for (const renewal of sameDayRenewals) {
+      sameDayNewSubRenewalIds.add(renewal.id);
+    }
+
+    const rev = hasSameDayUpgrade ? 0 : row.revenue_gross || 0;
     perApp[app].new_revenue += rev;
     perApp[app].today_revenue += rev;
     perApp[app].new_subs += 1;
-    txns.push({
-      id: row.app_user_id,
-      country: (row.country || "").toUpperCase(),
-      app,
-      plan: planName(row.product_id || ""),
-      product_id: row.product_id || "",
-      store: row.store || "app_store",
-      occurred_at: row.purchased_at || "",
-      expires_at: row.expires_at || "",
-      revenue: rev,
-      type: "NEW_SUB",
-    });
+
+    if (!hasSameDayUpgrade) {
+      txns.push({
+        id: row.app_user_id,
+        country: (row.country || "").toUpperCase(),
+        app,
+        plan: planName(row.product_id || ""),
+        product_id: row.product_id || "",
+        store: row.store || "app_store",
+        occurred_at: row.purchased_at || "",
+        expires_at: row.expires_at || "",
+        revenue: rev,
+        type: "NEW_SUB",
+      });
+    }
   }
 
-  for (const row of renewals || []) {
+  for (const row of renewalRows) {
     const app = row.app_name || "Roomy AI";
-    if (!VISIBLE_APPS.has(app)) continue;
     const rev = row.revenue || 0;
     perApp[app].today_revenue += rev;
+    if (sameDayNewSubRenewalIds.has(row.id)) {
+      perApp[app].new_revenue += rev;
+    }
     txns.push({
       id: row.app_user_id,
       country: (row.country || "").toUpperCase(),
