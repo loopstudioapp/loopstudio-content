@@ -251,8 +251,12 @@ async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyP
   for (let i = 29; i >= 0; i--) {
     dates.push(vnDateIso(new Date(Date.now() - i * 86400 * 1000)));
   }
+  const addDay = (dateStr: string, n: number) =>
+    new Date(new Date(`${dateStr}T00:00:00Z`).getTime() + n * 86400 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
-  const [rcResults, subsResult, spendUsdByDate] = await Promise.all([
+  const [rcResults, subsResult, renewalsResult, spendUsdByDate] = await Promise.all([
     Promise.all(
       RC_PROJECTS.filter((p) => p.apiKey && p.projectId).map(async (project) => {
         try {
@@ -270,8 +274,13 @@ async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyP
     ),
     supabase
       .from("rc_subscriptions")
-      .select("app_name, purchased_at, revenue_gross")
+      .select("app_user_id, app_name, purchased_at, revenue_gross")
       .eq("environment", "production"),
+    supabase
+      .from("rc_renewal_events")
+      .select("app_user_id, app_name, occurred_at, revenue")
+      .gte("occurred_at", `${rcStart}T00:00:00Z`)
+      .lt("occurred_at", `${addDay(rcEnd, 1)}T00:00:00Z`),
     getMetaSpendByDay(start, today),
   ]);
 
@@ -285,17 +294,38 @@ async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyP
     }
   }
 
-  // Intraday split per UTC day from new-sub purchase times (full-precision shape)
+  // Intraday split per UTC day from full-precision DB event times. The exact
+  // UTC totals still come from RevenueCat charts; these weights only decide how
+  // much of each UTC day belongs to the same Vietnam day vs the next one.
   const early: Record<string, number> = {};
   const late: Record<string, number> = {};
+  const sameUtcDayRenewalKeys = new Set<string>();
+  const utcDateOf = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+  const addSplitWeight = (iso: string | null | undefined, rawAmount: number | null | undefined) => {
+    if (!iso) return;
+    const dt = new Date(iso);
+    if (!Number.isFinite(dt.getTime())) return;
+    const utcDate = dt.toISOString().slice(0, 10);
+    const amount = rawAmount && rawAmount > 0 ? rawAmount : 1;
+    if (dt.getUTCHours() < 17) early[utcDate] = (early[utcDate] || 0) + amount;
+    else late[utcDate] = (late[utcDate] || 0) + amount;
+  };
+
+  for (const r of renewalsResult.data || []) {
+    const app = r.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app)) continue;
+    if (!r.occurred_at) continue;
+    sameUtcDayRenewalKeys.add(`${app}:${r.app_user_id}:${utcDateOf(r.occurred_at)}`);
+    addSplitWeight(r.occurred_at, r.revenue || 0);
+  }
+
   for (const s of subsResult.data || []) {
     if (!VISIBLE_APPS.has(s.app_name || "Roomy AI")) continue;
     if (!s.purchased_at) continue;
-    const dt = new Date(s.purchased_at);
-    const utcDate = dt.toISOString().slice(0, 10);
-    const amt = s.revenue_gross || 0;
-    if (dt.getUTCHours() < 17) early[utcDate] = (early[utcDate] || 0) + amt;
-    else late[utcDate] = (late[utcDate] || 0) + amt;
+    const app = s.app_name || "Roomy AI";
+    const key = `${app}:${s.app_user_id}:${utcDateOf(s.purchased_at)}`;
+    if (sameUtcDayRenewalKeys.has(key)) continue;
+    addSplitWeight(s.purchased_at, s.revenue_gross || 0);
   }
   const earlyFrac = (utcDate: string): number => {
     const e = early[utcDate] || 0;
@@ -305,10 +335,6 @@ async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyP
 
   // Redistribute accurate UTC totals into GMT+7 days
   const revByVnDate: Record<string, number> = {};
-  const addDay = (dateStr: string, n: number) =>
-    new Date(new Date(`${dateStr}T00:00:00Z`).getTime() + n * 86400 * 1000)
-      .toISOString()
-      .slice(0, 10);
   for (const [utcDate, total] of Object.entries(rcByUtc)) {
     const ef = earlyFrac(utcDate);
     revByVnDate[utcDate] = (revByVnDate[utcDate] || 0) + total * ef; // early → same VN day
