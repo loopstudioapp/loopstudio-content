@@ -398,6 +398,28 @@ async function fetchTodayStats(): Promise<{
     .gte("occurred_at", startUtc)
     .lte("occurred_at", endUtc);
 
+  const renewalRows = (renewals || []).filter((row) => VISIBLE_APPS.has(row.app_name || "Roomy AI"));
+  const renewalUserIds = Array.from(new Set(renewalRows.map((row) => row.app_user_id).filter(Boolean)));
+  const { data: renewalSubs } = renewalUserIds.length > 0
+    ? await supabase
+        .from("rc_subscriptions")
+        .select("app_user_id, app_name, purchased_at")
+        .in("app_user_id", renewalUserIds)
+    : { data: [] };
+
+  const keyFor = (app: string, userId: string) => `${app}:${userId}`;
+  const utcDay = (iso: string | null | undefined) => {
+    if (!iso) return "";
+    const time = new Date(iso).getTime();
+    return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
+  };
+  const subscriptionStartByKey = new Map<string, string>();
+  for (const row of renewalSubs || []) {
+    const app = row.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app) || !row.app_user_id || !row.purchased_at) continue;
+    subscriptionStartByKey.set(keyFor(app, row.app_user_id), row.purchased_at);
+  }
+
   // Aggregate per app
   const perApp: Record<string, TodayPerApp> = {};
   for (const appName of VISIBLE_APPS) {
@@ -411,11 +433,12 @@ async function fetchTodayStats(): Promise<{
 
   const txns: TodayTxn[] = [];
   const sameDayNewSubRenewalIds = new Set<string>();
-  const renewalRows = (renewals || []).filter((row) => VISIBLE_APPS.has(row.app_name || "Roomy AI"));
+  const countedNewSubKeys = new Set<string>();
 
   for (const row of newSubs || []) {
     const app = row.app_name || "Roomy AI";
     if (!VISIBLE_APPS.has(app)) continue;
+    const customerKey = keyFor(app, row.app_user_id);
 
     // rc_subscriptions is a customer summary, not an event ledger. If someone
     // starts weekly and upgrades to yearly minutes later, revenue_gross can
@@ -435,6 +458,7 @@ async function fetchTodayStats(): Promise<{
     perApp[app].new_revenue += rev;
     perApp[app].today_revenue += rev;
     perApp[app].new_subs += 1;
+    countedNewSubKeys.add(customerKey);
 
     if (!hasSameDayUpgrade) {
       txns.push({
@@ -454,10 +478,20 @@ async function fetchTodayStats(): Promise<{
 
   for (const row of renewalRows) {
     const app = row.app_name || "Roomy AI";
+    const customerKey = keyFor(app, row.app_user_id);
     const rev = row.revenue || 0;
+    const subscriptionStartedAt = subscriptionStartByKey.get(customerKey);
+    const isSameRevenueCatDayUpgrade =
+      sameDayNewSubRenewalIds.has(row.id) ||
+      (!!subscriptionStartedAt && utcDay(subscriptionStartedAt) === utcDay(row.occurred_at));
+
     perApp[app].today_revenue += rev;
-    if (sameDayNewSubRenewalIds.has(row.id)) {
+    if (isSameRevenueCatDayUpgrade) {
       perApp[app].new_revenue += rev;
+      if (!countedNewSubKeys.has(customerKey)) {
+        perApp[app].new_subs += 1;
+        countedNewSubKeys.add(customerKey);
+      }
     }
     txns.push({
       id: row.app_user_id,
@@ -469,7 +503,7 @@ async function fetchTodayStats(): Promise<{
       occurred_at: row.occurred_at || "",
       expires_at: "",
       revenue: rev,
-      type: "RENEWAL",
+      type: isSameRevenueCatDayUpgrade ? "NEW_SUB" : "RENEWAL",
     });
   }
 
