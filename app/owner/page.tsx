@@ -400,7 +400,7 @@ export default function OwnerDashboard() {
 
   // Per-app today stats + today transactions (Loop Studio section)
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
-  const [todayStatsLoading, setTodayStatsLoading] = useState(false);
+  const [todayStatsLoading, setTodayStatsLoading] = useState(true);
 
   // Load saved RevenueCat data from DB on mount
   useEffect(() => {
@@ -428,12 +428,14 @@ export default function OwnerDashboard() {
 
   // Load today's Loop Studio stats on mount
   useEffect(() => {
+    setTodayStatsLoading(true);
     fetch("/api/revenuecat?type=today_stats")
       .then((r) => r.json())
       .then((d) => {
         if (d && !d.error) setTodayStats(d);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setTodayStatsLoading(false));
   }, []);
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);

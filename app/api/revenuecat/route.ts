@@ -737,6 +737,10 @@ async function fetchTodayStats(): Promise<{
     fetchTransactionLedger(start, endExclusive),
   ]);
 
+  if (ads.configured && !ads.error && ads.date === today) {
+    spendUsdByDate[today] = ads.spend_usd || 0;
+  }
+
   const daily = buildDailyPointsFromLedger(dates, ledger.events, spendUsdByDate, appleRate, metaVat);
   const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp);
   const perApp = todayLedger.perApp;
