@@ -563,11 +563,21 @@ async function fetchTransactionLedger(startDate: string, endExclusiveDate: strin
   const events: TransactionEvent[] = [];
 
   for (const project of configuredProjects()) {
-    let seeds = dbSeeds.seedsByApp.get(project.name) || [];
-    if (seeds.length === 0) {
-      seeds = await fetchRevenueCatCustomerSeeds(project);
+    const seedMap = new Map<string, CustomerSeed>();
+
+    for (const seed of dbSeeds.seedsByApp.get(project.name) || []) {
+      seedMap.set(seed.userId, seed);
     }
 
+    for (const seed of await fetchRevenueCatCustomerSeeds(project)) {
+      const existing = seedMap.get(seed.userId);
+      seedMap.set(seed.userId, {
+        ...seed,
+        country: existing?.country || seed.country,
+      });
+    }
+
+    const seeds = Array.from(seedMap.values());
     const results = await mapLimit(seeds, TRANSACTION_CONCURRENCY, (seed) =>
       fetchCustomerTransactionEvents(project, seed, startMs, endMs)
     );
