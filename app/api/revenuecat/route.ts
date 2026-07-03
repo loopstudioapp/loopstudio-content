@@ -234,62 +234,133 @@ export type DailyPoint = { date: string; revenue: number; profit: number };
  * apps summed) and daily profit (net revenue − VAT-inclusive ad spend).
  */
 async function fetchDaily30d(appleRate: number, metaVat: number): Promise<DailyPoint[]> {
+  // RevenueCat's chart is the authoritative complete revenue source for the
+  // 30-day total. DB event rows are used only as timing hints/corrections.
   const today = vnDateIso();
   const start = vnDateIso(new Date(Date.now() - 29 * 86400 * 1000));
+  const rcStart = new Date(Date.now() - 31 * 86400 * 1000).toISOString().slice(0, 10);
+  const rcEnd = new Date().toISOString().slice(0, 10);
 
   const dates: string[] = [];
   for (let i = 29; i >= 0; i--) {
     dates.push(vnDateIso(new Date(Date.now() - i * 86400 * 1000)));
   }
-  const startUtc = new Date(`${start}T00:00:00+07:00`).toISOString();
-  const endUtc = new Date(`${today}T23:59:59.999+07:00`).toISOString();
+  const addDay = (dateStr: string, n: number) =>
+    new Date(new Date(`${dateStr}T00:00:00Z`).getTime() + n * 86400 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
-  const [subsResult, renewalsResult, spendUsdByDate] = await Promise.all([
+  const [rcResults, subsResult, renewalsResult, spendUsdByDate] = await Promise.all([
+    Promise.all(
+      RC_PROJECTS.filter((p) => p.apiKey && p.projectId).map(async (project) => {
+        try {
+          const res = await fetch(
+            `${RC_BASE}/projects/${project.projectId}/charts/revenue?resolution=day&start_date=${rcStart}&end_date=${rcEnd}`,
+            { headers: rcHeaders(project.apiKey) }
+          );
+          if (!res.ok) return [] as { cohort: number; value: number; measure: number }[];
+          const json = await res.json();
+          return (json?.values || []) as { cohort: number; value: number; measure: number }[];
+        } catch {
+          return [] as { cohort: number; value: number; measure: number }[];
+        }
+      })
+    ),
     supabase
       .from("rc_subscriptions")
       .select("app_user_id, app_name, purchased_at, revenue_gross")
-      .eq("environment", "production")
-      .gte("purchased_at", startUtc)
-      .lte("purchased_at", endUtc),
+      .eq("environment", "production"),
     supabase
       .from("rc_renewal_events")
       .select("app_user_id, app_name, occurred_at, revenue")
-      .gte("occurred_at", startUtc)
-      .lte("occurred_at", endUtc),
+      .gte("occurred_at", `${rcStart}T00:00:00Z`)
+      .lt("occurred_at", `${addDay(rcEnd, 1)}T00:00:00Z`),
     getMetaSpendByDay(start, today),
   ]);
 
-  const revenueByDate: Record<string, number> = {};
-  const vnDate = (iso: string | null | undefined): string => {
-    if (!iso) return "";
-    return vnDateIso(new Date(iso));
+  const rcByUtc: Record<string, number> = {};
+  for (const values of rcResults) {
+    for (const v of values) {
+      if (v.measure !== 0) continue;
+      const utcDate = new Date(v.cohort * 1000).toISOString().slice(0, 10);
+      rcByUtc[utcDate] = (rcByUtc[utcDate] || 0) + (v.value || 0);
+    }
+  }
+
+  const early: Record<string, number> = {};
+  const late: Record<string, number> = {};
+  const sameUtcDayRenewalKeys = new Set<string>();
+  const utcDateOf = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+  const addSplitWeight = (iso: string | null | undefined, rawAmount: number | null | undefined) => {
+    if (!iso) return;
+    const dt = new Date(iso);
+    if (!Number.isFinite(dt.getTime())) return;
+    const utcDate = dt.toISOString().slice(0, 10);
+    const amount = rawAmount && rawAmount > 0 ? rawAmount : 1;
+    if (dt.getUTCHours() < 17) early[utcDate] = (early[utcDate] || 0) + amount;
+    else late[utcDate] = (late[utcDate] || 0) + amount;
   };
 
-  const renewalByUser = new Map<string, number>();
   for (const r of renewalsResult.data || []) {
     const app = r.app_name || "Roomy AI";
     if (!VISIBLE_APPS.has(app)) continue;
-    const date = vnDate(r.occurred_at);
-    if (!date) continue;
-    const revenue = r.revenue || 0;
-    revenueByDate[date] = (revenueByDate[date] || 0) + revenue;
-    const key = `${app}:${r.app_user_id}`;
-    renewalByUser.set(key, (renewalByUser.get(key) || 0) + revenue);
+    if (!r.occurred_at) continue;
+    sameUtcDayRenewalKeys.add(`${app}:${r.app_user_id}:${utcDateOf(r.occurred_at)}`);
+    addSplitWeight(r.occurred_at, r.revenue || 0);
   }
 
   for (const s of subsResult.data || []) {
     if (!VISIBLE_APPS.has(s.app_name || "Roomy AI")) continue;
     if (!s.purchased_at) continue;
     const app = s.app_name || "Roomy AI";
-    const date = vnDate(s.purchased_at);
-    if (!date) continue;
+    const key = `${app}:${s.app_user_id}:${utcDateOf(s.purchased_at)}`;
+    if (sameUtcDayRenewalKeys.has(key)) continue;
+    addSplitWeight(s.purchased_at, s.revenue_gross || 0);
+  }
+  const earlyFrac = (utcDate: string): number => {
+    const e = early[utcDate] || 0;
+    const l = late[utcDate] || 0;
+    return e + l > 0 ? e / (e + l) : 17 / 24;
+  };
+
+  const revByVnDate: Record<string, number> = {};
+  for (const [utcDate, total] of Object.entries(rcByUtc)) {
+    const ef = earlyFrac(utcDate);
+    revByVnDate[utcDate] = (revByVnDate[utcDate] || 0) + total * ef;
+    const next = addDay(utcDate, 1);
+    revByVnDate[next] = (revByVnDate[next] || 0) + total * (1 - ef);
+  }
+
+  // The most recent completed VN day should match the same event-ledger logic
+  // that powered the live "today" card before midnight. Older days keep the
+  // complete RevenueCat chart totals so the 30-day total does not undercount.
+  const yesterday = vnDateIso(new Date(Date.now() - 86400 * 1000));
+  const yesterdayStartUtc = new Date(`${yesterday}T00:00:00+07:00`).toISOString();
+  const yesterdayEndUtc = new Date(`${yesterday}T23:59:59.999+07:00`).toISOString();
+  const renewalByUser = new Map<string, number>();
+  let correctedYesterdayRevenue = 0;
+  for (const r of renewalsResult.data || []) {
+    const app = r.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app) || !r.occurred_at) continue;
+    if (r.occurred_at < yesterdayStartUtc || r.occurred_at > yesterdayEndUtc) continue;
+    const revenue = r.revenue || 0;
+    correctedYesterdayRevenue += revenue;
+    const key = `${app}:${r.app_user_id}`;
+    renewalByUser.set(key, (renewalByUser.get(key) || 0) + revenue);
+  }
+  for (const s of subsResult.data || []) {
+    const app = s.app_name || "Roomy AI";
+    if (!VISIBLE_APPS.has(app) || !s.purchased_at) continue;
+    if (s.purchased_at < yesterdayStartUtc || s.purchased_at > yesterdayEndUtc) continue;
     const key = `${app}:${s.app_user_id}`;
-    const initialRevenue = Math.max(0, (s.revenue_gross || 0) - (renewalByUser.get(key) || 0));
-    revenueByDate[date] = (revenueByDate[date] || 0) + initialRevenue;
+    correctedYesterdayRevenue += Math.max(0, (s.revenue_gross || 0) - (renewalByUser.get(key) || 0));
+  }
+  if (correctedYesterdayRevenue > 0) {
+    revByVnDate[yesterday] = correctedYesterdayRevenue;
   }
 
   return dates.map((date) => {
-    const gross = revenueByDate[date] || 0;
+    const gross = revByVnDate[date] || 0;
     const net = gross * (1 - appleRate);
     const adspendUsd = spendUsdByDate[date] || 0;
     const adspendWithVat = adspendUsd * (1 + metaVat);
