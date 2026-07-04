@@ -766,6 +766,77 @@ async function writeTodayStatsCache(data: TodayStatsResponse) {
   );
 }
 
+function sumTodayRevenue(perApp: Record<string, TodayPerApp>): {
+  totalRevenue: number;
+  newRevenue: number;
+  newSubs: number;
+} {
+  let totalRevenue = 0;
+  let newRevenue = 0;
+  let newSubs = 0;
+  for (const appName of VISIBLE_APPS) {
+    totalRevenue += perApp[appName]?.today_revenue || 0;
+    newRevenue += perApp[appName]?.new_revenue || 0;
+    newSubs += perApp[appName]?.new_subs || 0;
+  }
+  return { totalRevenue, newRevenue, newSubs };
+}
+
+function profitSummaryFromRevenue({
+  totalRevenue,
+  newRevenue,
+  newSubs,
+  ads,
+  appleRate,
+  metaVat,
+}: {
+  totalRevenue: number;
+  newRevenue: number;
+  newSubs: number;
+  ads: MetaSpend;
+  appleRate: number;
+  metaVat: number;
+}): ProfitSummary {
+  const adspendUsd = ads.spend_usd || 0;
+  const adspendWithVat = adspendUsd * (1 + metaVat);
+  const netRevenue = totalRevenue * (1 - appleRate);
+  const netNewRevenue = newRevenue * (1 - appleRate);
+
+  return {
+    total_revenue: totalRevenue,
+    new_revenue: newRevenue,
+    new_subs: newSubs,
+    apple_commission_rate: appleRate,
+    meta_vat_rate: metaVat,
+    net_revenue: netRevenue,
+    net_new_revenue: netNewRevenue,
+    adspend_usd: adspendUsd,
+    adspend_with_vat: adspendWithVat,
+    total_profit: netRevenue - adspendWithVat,
+    new_profit: netNewRevenue - adspendWithVat,
+    cost_per_new_sub: newSubs > 0 ? adspendWithVat / newSubs : 0,
+  };
+}
+
+async function refreshFastProfitCardsFromCache(): Promise<TodayStatsResponse | null> {
+  const cached = await readTodayStatsCache();
+  const today = vnDateIso();
+  if (cached?.data?.today_vn !== today) return null;
+
+  const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
+  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
+  const ads = await getTodayMetaSpend();
+  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(cached.data.per_app || {});
+  const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
+  const daily = (cached.data.daily || []).map((point) =>
+    point.date === today ? { ...point, revenue: totalRevenue, profit: profit.total_profit } : point
+  );
+
+  const data = { ...cached.data, ads, profit, daily };
+  await writeTodayStatsCache(data);
+  return data;
+}
+
 async function fetchTodayStats(): Promise<TodayStatsResponse> {
   const today = vnDateIso();
   const dates = vnDateWindow(today, 30);
@@ -792,36 +863,8 @@ async function fetchTodayStats(): Promise<TodayStatsResponse> {
   const perApp = todayLedger.perApp;
   const txns = todayLedger.transactions;
 
-  // Combined profit summary across all visible apps
-  let sumRevenue = 0;
-  let sumNewRevenue = 0;
-  let sumNewSubs = 0;
-  for (const appName of VISIBLE_APPS) {
-    sumRevenue += perApp[appName].today_revenue;
-    sumNewRevenue += perApp[appName].new_revenue;
-    sumNewSubs += perApp[appName].new_subs;
-  }
-  // Apple takes a commission (net of it = what we receive); Meta ad spend in
-  // the API excludes VAT, which Vietnam adds on top. Rates read above.
-  const adspendUsd = ads.spend_usd || 0;
-  const adspendWithVat = adspendUsd * (1 + metaVat);
-  const netRevenue = sumRevenue * (1 - appleRate);
-  const netNewRevenue = sumNewRevenue * (1 - appleRate);
-
-  const profit: ProfitSummary = {
-    total_revenue: sumRevenue,
-    new_revenue: sumNewRevenue,
-    new_subs: sumNewSubs,
-    apple_commission_rate: appleRate,
-    meta_vat_rate: metaVat,
-    net_revenue: netRevenue,
-    net_new_revenue: netNewRevenue,
-    adspend_usd: adspendUsd,
-    adspend_with_vat: adspendWithVat,
-    total_profit: netRevenue - adspendWithVat,
-    new_profit: netNewRevenue - adspendWithVat,
-    cost_per_new_sub: sumNewSubs > 0 ? adspendWithVat / sumNewSubs : 0,
-  };
+  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp);
+  const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
 
   return { today_vn: today, per_app: perApp, transactions: txns, ads, profit, daily };
 }
@@ -856,6 +899,13 @@ export async function GET(request: NextRequest) {
     if (type === "today_stats") {
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
+      const fastProfitOnly = searchParams.get("fast") === "1";
+      if (fastProfitOnly) {
+        const data = await refreshFastProfitCardsFromCache();
+        if (!data) return NextResponse.json({ error: "today_stats cache is missing or stale" }, { status: 404 });
+        return NextResponse.json({ ...data, cached: true, fast: true, updated_at: new Date().toISOString() });
+      }
+
       if (!forceRefresh) {
         const cached = await readTodayStatsCache();
         if (cached?.data?.today_vn === vnDateIso()) {

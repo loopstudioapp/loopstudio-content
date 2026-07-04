@@ -479,8 +479,16 @@ export default function OwnerDashboard() {
     // Per-app today stats — runs in parallel too
     const todayStatsPromise = (async () => {
       try {
-        const r = await fetch("/api/revenuecat?type=today_stats&refresh=1");
-        const d = await r.json();
+        const fast = await fetch("/api/revenuecat?type=today_stats&fast=1");
+        if (fast.ok) {
+          const d = await fast.json();
+          if (d && !d.error) setTodayStats(d);
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const full = await fetch("/api/revenuecat?type=today_stats&refresh=1");
+        const d = await full.json();
         if (d && !d.error) setTodayStats(d);
       } catch { /* ignore */ }
       finally { setTodayStatsLoading(false); }
