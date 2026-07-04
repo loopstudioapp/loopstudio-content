@@ -5,6 +5,7 @@ import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta
 export const maxDuration = 300;
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const TODAY_STATS_CACHE_KEY = "__rc_today_stats_cache__";
 let overviewCache: { data: unknown; timestamp: number } | null = null;
 let transactionLedgerCache: { key: string; data: TransactionLedger; timestamp: number } | null = null;
 
@@ -723,14 +724,49 @@ type ProfitSummary = {
   cost_per_new_sub: number; // adspend_with_vat / new_subs (0 if no new subs)
 };
 
-async function fetchTodayStats(): Promise<{
+type TodayStatsResponse = {
   today_vn: string;
   per_app: Record<string, TodayPerApp>;
   transactions: TodayTxn[];
   ads: MetaSpend;
   profit: ProfitSummary;
   daily: DailyPoint[];
-}> {
+};
+
+async function readTodayStatsCache(): Promise<{ data: TodayStatsResponse; updatedAt: string } | null> {
+  const { data } = await supabase
+    .from("pinterest_topics")
+    .select("description_template, prompt_seed")
+    .eq("id", TODAY_STATS_CACHE_KEY)
+    .single();
+
+  if (!data) return null;
+
+  try {
+    return {
+      data: JSON.parse(data.description_template || "{}") as TodayStatsResponse,
+      updatedAt: data.prompt_seed || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeTodayStatsCache(data: TodayStatsResponse) {
+  await supabase.from("pinterest_topics").upsert(
+    {
+      id: TODAY_STATS_CACHE_KEY,
+      category: "system",
+      title_template: "RC Today Stats Cache",
+      description_template: JSON.stringify(data),
+      prompt_seed: new Date().toISOString(),
+      times_used: 0,
+    },
+    { onConflict: "id" }
+  );
+}
+
+async function fetchTodayStats(): Promise<TodayStatsResponse> {
   const today = vnDateIso();
   const dates = vnDateWindow(today, 30);
   const start = dates[0];
@@ -818,8 +854,21 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "today_stats") {
+      const cachedOnly = searchParams.get("cached") === "1";
+      const forceRefresh = searchParams.get("refresh") === "1";
+      if (!forceRefresh) {
+        const cached = await readTodayStatsCache();
+        if (cached?.data?.today_vn === vnDateIso()) {
+          return NextResponse.json({ ...cached.data, cached: true, updated_at: cached.updatedAt });
+        }
+        if (cachedOnly && cached?.data?.today_vn !== vnDateIso()) {
+          return NextResponse.json({ error: "cached today_stats is stale" }, { status: 404 });
+        }
+      }
+
       const data = await fetchTodayStats();
-      return NextResponse.json(data);
+      await writeTodayStatsCache(data);
+      return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
     }
 
     return NextResponse.json({ error: "type must be 'overview', 'subscribers', or 'today_stats'" }, { status: 400 });

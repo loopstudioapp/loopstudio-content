@@ -428,14 +428,26 @@ export default function OwnerDashboard() {
 
   // Load today's Loop Studio stats on mount
   useEffect(() => {
-    setTodayStatsLoading(true);
-    fetch("/api/revenuecat?type=today_stats")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && !d.error) setTodayStats(d);
-      })
-      .catch(() => {})
-      .finally(() => setTodayStatsLoading(false));
+    let cancelled = false;
+
+    async function loadInitialTodayStats() {
+      setTodayStatsLoading(true);
+      try {
+        let r = await fetch("/api/revenuecat?type=today_stats&cached=1");
+        if (!r.ok) r = await fetch("/api/revenuecat?type=today_stats&refresh=1");
+        const d = await r.json();
+        if (!cancelled && d && !d.error) setTodayStats(d);
+      } catch {
+        // Keep the dashboard usable even if this section cannot refresh.
+      } finally {
+        if (!cancelled) setTodayStatsLoading(false);
+      }
+    }
+
+    loadInitialTodayStats();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
@@ -467,7 +479,7 @@ export default function OwnerDashboard() {
     // Per-app today stats — runs in parallel too
     const todayStatsPromise = (async () => {
       try {
-        const r = await fetch("/api/revenuecat?type=today_stats");
+        const r = await fetch("/api/revenuecat?type=today_stats&refresh=1");
         const d = await r.json();
         if (d && !d.error) setTodayStats(d);
       } catch { /* ignore */ }
