@@ -287,6 +287,28 @@ function dateKeyFor(app: string, userId: string, date: string) {
   return `${app}:${userId}:${date}`;
 }
 
+type SubscriptionSummaryRow = {
+  app_user_id?: string | null;
+  app_name?: string | null;
+  country?: string | null;
+  product_id?: string | null;
+  store?: string | null;
+  purchased_at?: string | null;
+  expires_at?: string | null;
+  revenue_gross?: number | string | null;
+};
+
+type RenewalEventRow = {
+  id?: string | null;
+  app_user_id?: string | null;
+  app_name?: string | null;
+  country?: string | null;
+  product_id?: string | null;
+  store?: string | null;
+  occurred_at?: string | null;
+  revenue?: number | string | null;
+};
+
 function emptyPerApp(mrrByApp: Record<string, number> = {}): Record<string, TodayPerApp> {
   const perApp: Record<string, TodayPerApp> = {};
   for (const appName of VISIBLE_APPS) {
@@ -298,6 +320,188 @@ function emptyPerApp(mrrByApp: Record<string, number> = {}): Record<string, Toda
     };
   }
   return perApp;
+}
+
+function buildDbTodayLedger({
+  newSubs,
+  renewals,
+  mrrByApp = {},
+  today,
+  subscriptionStartByKey: providedSubscriptionStartByKey,
+}: {
+  newSubs: SubscriptionSummaryRow[];
+  renewals: RenewalEventRow[];
+  mrrByApp?: Record<string, number>;
+  today: string;
+  subscriptionStartByKey?: Map<string, string>;
+}): { perApp: Record<string, TodayPerApp>; transactions: TodayTxn[] } {
+  const perApp = emptyPerApp(mrrByApp);
+  const transactions: TodayTxn[] = [];
+  const subscriptionStartByKey = new Map(providedSubscriptionStartByKey || []);
+
+  type NormalizedSub = {
+    app: string;
+    userId: string;
+    date: string;
+    customerKey: string;
+    customerDateKey: string;
+    purchasedAt: string;
+    purchasedMs: number;
+    country: string;
+    productId: string;
+    store: string;
+    expiresAt: string;
+    revenueGross: number;
+  };
+  type NormalizedRenewal = {
+    id: string;
+    app: string;
+    userId: string;
+    date: string;
+    customerKey: string;
+    customerDateKey: string;
+    occurredAt: string;
+    occurredMs: number;
+    country: string;
+    productId: string;
+    store: string;
+    revenue: number;
+  };
+
+  const normalizedSubs: NormalizedSub[] = [];
+  for (const row of newSubs) {
+    const app = visibleAppName(row.app_name);
+    const userId = row.app_user_id || "";
+    const purchasedMs = dateMs(row.purchased_at);
+    if (!app || !userId || purchasedMs == null || !row.purchased_at) continue;
+
+    const date = vnDateIso(new Date(purchasedMs));
+    if (date !== today) continue;
+
+    const customerKey = keyFor(app, userId);
+    const existingStartMs = dateMs(subscriptionStartByKey.get(customerKey));
+    if (existingStartMs == null || purchasedMs < existingStartMs) {
+      subscriptionStartByKey.set(customerKey, row.purchased_at);
+    }
+
+    normalizedSubs.push({
+      app,
+      userId,
+      date,
+      customerKey,
+      customerDateKey: dateKeyFor(app, userId, date),
+      purchasedAt: row.purchased_at,
+      purchasedMs,
+      country: (row.country || "").toUpperCase(),
+      productId: row.product_id || "",
+      store: row.store || "app_store",
+      expiresAt: row.expires_at || "",
+      revenueGross: money(row.revenue_gross),
+    });
+  }
+
+  const normalizedRenewals: NormalizedRenewal[] = [];
+  for (const row of renewals) {
+    const app = visibleAppName(row.app_name);
+    const userId = row.app_user_id || "";
+    const occurredMs = dateMs(row.occurred_at);
+    if (!app || !userId || occurredMs == null || !row.occurred_at) continue;
+
+    const date = vnDateIso(new Date(occurredMs));
+    if (date !== today) continue;
+
+    normalizedRenewals.push({
+      id: row.id || `renewal:${app}:${userId}:${row.product_id || ""}:${row.occurred_at}:${row.revenue || 0}`,
+      app,
+      userId,
+      date,
+      customerKey: keyFor(app, userId),
+      customerDateKey: dateKeyFor(app, userId, date),
+      occurredAt: row.occurred_at,
+      occurredMs,
+      country: (row.country || "").toUpperCase(),
+      productId: row.product_id || "",
+      store: row.store || "app_store",
+      revenue: money(row.revenue),
+    });
+  }
+
+  const renewalsByCustomerDate = new Map<string, NormalizedRenewal[]>();
+  for (const renewal of normalizedRenewals) {
+    const list = renewalsByCustomerDate.get(renewal.customerDateKey) || [];
+    list.push(renewal);
+    renewalsByCustomerDate.set(renewal.customerDateKey, list);
+  }
+
+  const sameDayNewSubRenewalIds = new Set<string>();
+  const countedNewSubDateKeys = new Set<string>();
+
+  for (const sub of normalizedSubs) {
+    // rc_subscriptions is a mutable customer summary. If a same-day renewal
+    // or upgrade exists, use that event row as the money event instead.
+    const sameDayMoneyEvents = (renewalsByCustomerDate.get(sub.customerDateKey) || []).filter(
+      (renewal) => renewal.occurredMs >= sub.purchasedMs
+    );
+    const hasSameDayMoneyEvent = sameDayMoneyEvents.length > 0;
+    for (const renewal of sameDayMoneyEvents) {
+      sameDayNewSubRenewalIds.add(renewal.id);
+    }
+
+    const revenue = hasSameDayMoneyEvent ? 0 : sub.revenueGross;
+    perApp[sub.app].today_revenue += revenue;
+    perApp[sub.app].new_revenue += revenue;
+    if (!countedNewSubDateKeys.has(sub.customerDateKey)) {
+      perApp[sub.app].new_subs += 1;
+      countedNewSubDateKeys.add(sub.customerDateKey);
+    }
+
+    if (!hasSameDayMoneyEvent) {
+      transactions.push({
+        id: sub.userId,
+        country: sub.country,
+        app: sub.app,
+        plan: planName(sub.productId),
+        product_id: sub.productId,
+        store: sub.store,
+        occurred_at: sub.purchasedAt,
+        expires_at: sub.expiresAt,
+        revenue,
+        type: "NEW_SUB",
+      });
+    }
+  }
+
+  for (const renewal of normalizedRenewals) {
+    const subscriptionStartedAt = subscriptionStartByKey.get(renewal.customerKey);
+    const isSameVnDayUpgrade =
+      sameDayNewSubRenewalIds.has(renewal.id) ||
+      sameVnDayOrLater(subscriptionStartedAt, renewal.occurredAt);
+
+    perApp[renewal.app].today_revenue += renewal.revenue;
+    if (isSameVnDayUpgrade) {
+      perApp[renewal.app].new_revenue += renewal.revenue;
+      if (!countedNewSubDateKeys.has(renewal.customerDateKey)) {
+        perApp[renewal.app].new_subs += 1;
+        countedNewSubDateKeys.add(renewal.customerDateKey);
+      }
+    }
+
+    transactions.push({
+      id: renewal.userId,
+      country: renewal.country,
+      app: renewal.app,
+      plan: planName(renewal.productId),
+      product_id: renewal.productId,
+      store: renewal.store,
+      occurred_at: renewal.occurredAt,
+      expires_at: "",
+      revenue: renewal.revenue,
+      type: isSameVnDayUpgrade ? "NEW_SUB" : "RENEWAL",
+    });
+  }
+
+  transactions.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+  return { perApp, transactions };
 }
 
 export type DailyPoint = { date: string; revenue: number; profit: number };
@@ -818,23 +1022,69 @@ function profitSummaryFromRevenue({
   };
 }
 
-async function refreshFastProfitCardsFromCache(): Promise<TodayStatsResponse | null> {
-  const cached = await readTodayStatsCache();
+async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null = null): Promise<TodayStatsResponse> {
   const today = vnDateIso();
-  if (cached?.data?.today_vn !== today) return null;
+  const { startUtc, endUtc } = vnDayBoundsUtc(today);
 
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
   const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
-  const ads = await getTodayMetaSpend();
-  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(cached.data.per_app || {});
+
+  const [mrrByApp, ads, newSubsResult, renewalsResult] = await Promise.all([
+    fetchMrrByApp(),
+    getTodayMetaSpend(),
+    supabase
+      .from("rc_subscriptions")
+      .select("app_user_id, app_name, country, product_id, store, purchased_at, expires_at, revenue_gross")
+      .eq("environment", "production")
+      .gte("purchased_at", startUtc)
+      .lt("purchased_at", endUtc),
+    supabase
+      .from("rc_renewal_events")
+      .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
+      .gte("occurred_at", startUtc)
+      .lt("occurred_at", endUtc),
+  ]);
+
+  if (newSubsResult.error) throw new Error(`Database error: ${newSubsResult.error.message}`);
+  if (renewalsResult.error) throw new Error(`Database error: ${renewalsResult.error.message}`);
+
+  const renewalRows = ((renewalsResult.data || []) as RenewalEventRow[]).filter((row) =>
+    Boolean(visibleAppName(row.app_name))
+  );
+  const renewalUserIds = Array.from(new Set(renewalRows.map((row) => row.app_user_id).filter(Boolean))) as string[];
+  const renewalSubsResult = renewalUserIds.length > 0
+    ? await supabase
+        .from("rc_subscriptions")
+        .select("app_user_id, app_name, purchased_at")
+        .eq("environment", "production")
+        .in("app_user_id", renewalUserIds)
+    : { data: [], error: null };
+
+  if (renewalSubsResult.error) throw new Error(`Database error: ${renewalSubsResult.error.message}`);
+
+  const subscriptionStartByKey = new Map<string, string>();
+  for (const row of renewalSubsResult.data || []) {
+    const app = visibleAppName(row.app_name);
+    if (!app || !row.app_user_id || !row.purchased_at) continue;
+    subscriptionStartByKey.set(keyFor(app, row.app_user_id), row.purchased_at);
+  }
+
+  const todayLedger = buildDbTodayLedger({
+    newSubs: (newSubsResult.data || []) as SubscriptionSummaryRow[],
+    renewals: renewalRows,
+    mrrByApp,
+    today,
+    subscriptionStartByKey,
+  });
+  const { perApp, transactions } = todayLedger;
+  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
-  const daily = (cached.data.daily || []).map((point) =>
+  const cachedDaily = cachedData?.today_vn === today ? cachedData.daily || [] : [];
+  const daily = cachedDaily.map((point) =>
     point.date === today ? { ...point, revenue: totalRevenue, profit: profit.total_profit } : point
   );
 
-  const data = { ...cached.data, ads, profit, daily };
-  await writeTodayStatsCache(data);
-  return data;
+  return { today_vn: today, per_app: perApp, transactions, ads, profit, daily };
 }
 
 async function fetchTodayStats(): Promise<TodayStatsResponse> {
@@ -899,11 +1149,12 @@ export async function GET(request: NextRequest) {
     if (type === "today_stats") {
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
-      const fastProfitOnly = searchParams.get("fast") === "1";
-      if (fastProfitOnly) {
-        const data = await refreshFastProfitCardsFromCache();
-        if (!data) return NextResponse.json({ error: "today_stats cache is missing or stale" }, { status: 404 });
-        return NextResponse.json({ ...data, cached: true, fast: true, updated_at: new Date().toISOString() });
+      const fastTodayStats = searchParams.get("fast") === "1";
+      if (fastTodayStats) {
+        const cached = await readTodayStatsCache();
+        const data = await fetchFastTodayStatsFromDb(cached?.data || null);
+        await writeTodayStatsCache(data);
+        return NextResponse.json({ ...data, cached: false, fast: true, updated_at: new Date().toISOString() });
       }
 
       if (!forceRefresh) {

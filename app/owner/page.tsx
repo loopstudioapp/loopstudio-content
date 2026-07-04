@@ -17,6 +17,11 @@ type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: num
 type DailyPoint = { date: string; revenue: number; profit: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 
+function mergeChartStats(prev: TodayStats | null, next: TodayStats): TodayStats {
+  if (!prev) return next;
+  return { ...prev, daily: next.daily || prev.daily };
+}
+
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80, zeroLine = false }: { data: number[]; dates: string[]; color: string; label: string; h?: number; zeroLine?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -432,15 +437,34 @@ export default function OwnerDashboard() {
 
     async function loadInitialTodayStats() {
       setTodayStatsLoading(true);
+      let fastLoaded = false;
       try {
-        let r = await fetch("/api/revenuecat?type=today_stats&cached=1");
-        if (!r.ok) r = await fetch("/api/revenuecat?type=today_stats&refresh=1");
-        const d = await r.json();
-        if (!cancelled && d && !d.error) setTodayStats(d);
+        const cached = await fetch("/api/revenuecat?type=today_stats&cached=1");
+        if (cached.ok) {
+          const d = await cached.json();
+          if (!cancelled && d && !d.error) setTodayStats(d);
+          return;
+        }
+
+        const fast = await fetch("/api/revenuecat?type=today_stats&fast=1");
+        if (fast.ok) {
+          const d = await fast.json();
+          if (!cancelled && d && !d.error) {
+            setTodayStats(d);
+            fastLoaded = true;
+            setTodayStatsLoading(false);
+          }
+        }
+
+        const full = await fetch("/api/revenuecat?type=today_stats&refresh=1");
+        if (full.ok) {
+          const d = await full.json();
+          if (!cancelled && d && !d.error) setTodayStats((prev) => mergeChartStats(prev, d));
+        }
       } catch {
         // Keep the dashboard usable even if this section cannot refresh.
       } finally {
-        if (!cancelled) setTodayStatsLoading(false);
+        if (!cancelled && !fastLoaded) setTodayStatsLoading(false);
       }
     }
 
@@ -478,20 +502,27 @@ export default function OwnerDashboard() {
 
     // Per-app today stats — runs in parallel too
     const todayStatsPromise = (async () => {
+      let fastLoaded = false;
       try {
         const fast = await fetch("/api/revenuecat?type=today_stats&fast=1");
         if (fast.ok) {
           const d = await fast.json();
-          if (d && !d.error) setTodayStats(d);
+          if (d && !d.error) {
+            setTodayStats(d);
+            fastLoaded = true;
+            setTodayStatsLoading(false);
+          }
         }
       } catch { /* ignore */ }
 
       try {
         const full = await fetch("/api/revenuecat?type=today_stats&refresh=1");
         const d = await full.json();
-        if (d && !d.error) setTodayStats(d);
+        if (d && !d.error) setTodayStats((prev) => mergeChartStats(prev, d));
       } catch { /* ignore */ }
-      finally { setTodayStatsLoading(false); }
+      finally {
+        if (!fastLoaded) setTodayStatsLoading(false);
+      }
     })();
 
     let overview: RCOverview | null = null;
