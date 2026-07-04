@@ -1167,7 +1167,11 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const data = await fetchTodayStats();
+      const refreshed = await fetchTodayStats();
+      const cached = await readTodayStatsCache();
+      const data = cached?.data?.today_vn === refreshed.today_vn
+        ? { ...cached.data, daily: refreshed.daily }
+        : refreshed;
       await writeTodayStatsCache(data);
       return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
     }
