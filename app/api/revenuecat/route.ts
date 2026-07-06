@@ -213,6 +213,7 @@ const VN_TZ = "Asia/Ho_Chi_Minh";
 const VN_UTC_OFFSET = "+07:00";
 const MS_PER_DAY = 86_400_000;
 const TRANSACTION_CONCURRENCY = 6;
+const META_VAT_RATE = 0.10;
 
 function vnDateIso(d: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -918,7 +919,7 @@ type ProfitSummary = {
   new_revenue: number; // GROSS, all apps, new subs only
   new_subs: number; // all apps
   apple_commission_rate: number; // e.g. 0.15
-  meta_vat_rate: number; // e.g. 0.05
+  meta_vat_rate: number; // e.g. 0.10
   net_revenue: number; // total_revenue after Apple cut
   net_new_revenue: number; // new_revenue after Apple cut
   adspend_usd: number; // raw media spend (excl. VAT)
@@ -1027,7 +1028,7 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   const { startUtc, endUtc } = vnDayBoundsUtc(today);
 
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
-  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
+  const metaVat = META_VAT_RATE;
 
   const [mrrByApp, ads, newSubsResult, renewalsResult] = await Promise.all([
     fetchMrrByApp(),
@@ -1093,9 +1094,9 @@ async function fetchTodayStats(): Promise<TodayStatsResponse> {
   const start = dates[0];
   const endExclusive = addVnDays(today, 1);
 
-  // Apple commission + Meta VAT rates (env-configurable)
+  // Apple commission is env-configurable; Meta VAT is Vietnam's 10% VAT.
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
-  const metaVat = parseFloat(process.env.META_VAT_RATE || "0.05");
+  const metaVat = META_VAT_RATE;
 
   const [mrrByApp, ads, spendUsdByDate, ledger] = await Promise.all([
     fetchMrrByApp(),

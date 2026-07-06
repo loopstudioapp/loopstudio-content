@@ -16,6 +16,7 @@ type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number;
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
 type DailyPoint = { date: string; revenue: number; profit: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
+const META_VAT_RATE = 0.10;
 
 function mergeChartStats(prev: TodayStats | null, next: TodayStats): TodayStats {
   if (!prev) return next;
@@ -178,7 +179,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const cpns = profit?.cost_per_new_sub ?? 0;
   const adspend = profit?.adspend_with_vat ?? 0;
   const applePct = Math.round((profit?.apple_commission_rate ?? 0.15) * 100);
-  const vatPct = Math.round((profit?.meta_vat_rate ?? 0.05) * 100);
+  const vatPct = Math.round((profit?.meta_vat_rate ?? META_VAT_RATE) * 100);
   const profitColor = (n: number) => (n >= 0 ? "text-[#22c55e]" : "text-[#ef4444]");
   const taxNote =
     taxMode === "personal" ? " · −7% personal tax" : taxMode === "corporate" ? " · −20% corporate tax" : "";
@@ -190,7 +191,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   // Per-day profit with tax applied (for the 30-day profit chart)
   const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
   // Subtitle for adspend showing native VND (incl VAT) + rate
-  const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? 0.05)) : 0;
+  const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? META_VAT_RATE)) : 0;
   const adsSub = ads?.configured
     ? ads.currency !== "USD"
       ? `${Math.round(nativeWithVat).toLocaleString("en-US")}${ads.currency === "VND" ? "₫" : " " + ads.currency} incl ${vatPct}% VAT`
