@@ -35,14 +35,6 @@
   position: relative;
   z-index: 1;
   width: min(100vw - 48px, 860px);
-  border: 1px solid #262626;
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
-    #141414;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 18px 70px rgba(0, 0, 0, 0.28);
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 46px;
@@ -56,13 +48,7 @@
 }
 
 .timer::before {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgba(34, 197, 94, 0.34), transparent 18%, transparent 82%, rgba(168, 85, 247, 0.26));
-  content: "";
-  opacity: 0.13;
-  pointer-events: none;
+  content: none;
 }
 
 .button {
