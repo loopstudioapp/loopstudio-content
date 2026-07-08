@@ -1,0 +1,90 @@
+.page {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  justify-items: center;
+  gap: 40px;
+  overflow: hidden;
+  padding: 20px;
+  background:
+    radial-gradient(circle at 50% 32%, rgba(34, 211, 238, 0.24), transparent 32%),
+    radial-gradient(circle at 42% 68%, rgba(245, 158, 11, 0.16), transparent 28%),
+    linear-gradient(145deg, #060606 0%, #111111 48%, #070707 100%);
+  color: #fff;
+}
+
+.page::before {
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 72px 72px;
+  content: "";
+  mask-image: radial-gradient(circle at center, black, transparent 72%);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.timer {
+  position: relative;
+  width: min(100vw - 40px, 1120px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 48px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 0 42px rgba(34, 211, 238, 0.24);
+  white-space: nowrap;
+}
+
+.button {
+  position: relative;
+  min-width: 144px;
+  height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 22px 60px rgba(255, 255, 255, 0.16);
+  color: #050505;
+  cursor: pointer;
+  font: 700 16px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  transition:
+    background 220ms ease,
+    box-shadow 220ms ease,
+    color 220ms ease,
+    transform 220ms ease;
+}
+
+.button:hover:not(:disabled) {
+  background: #dffcff;
+  box-shadow: 0 24px 72px rgba(34, 211, 238, 0.24);
+  transform: translateY(-2px);
+}
+
+.button:disabled {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.64);
+  cursor: default;
+}
+
+@media (min-width: 640px) {
+  .timer {
+    font-size: 72px;
+  }
+}
+
+@media (min-width: 880px) {
+  .timer {
+    font-size: 112px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .timer {
+    font-size: 128px;
+  }
+}
