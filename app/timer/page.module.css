@@ -4,7 +4,7 @@
   min-height: 100vh;
   place-content: center;
   justify-items: center;
-  gap: 22px;
+  gap: 18px;
   overflow: hidden;
   padding: 24px;
   background: #0a0a0a;
@@ -13,75 +13,120 @@
 
 .page::before {
   position: absolute;
-  width: min(100vw - 32px, 1120px);
+  width: min(100vw - 48px, 920px);
   height: 1px;
-  top: calc(50% - 112px);
-  background: linear-gradient(90deg, transparent, #262626, transparent);
+  top: calc(50% - 98px);
+  background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.22), #262626, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.page::after {
+  position: absolute;
+  width: 1px;
+  height: min(100vh - 48px, 560px);
+  left: 50%;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.08), transparent);
   content: "";
   pointer-events: none;
 }
 
 .timer {
   position: relative;
-  width: min(100vw - 48px, 920px);
+  z-index: 1;
+  width: min(100vw - 48px, 860px);
   border: 1px solid #262626;
-  border-radius: 12px;
-  background: #141414;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    #141414;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 70px rgba(0, 0, 0, 0.28);
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 48px;
+  font-size: 46px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   line-height: 1;
-  padding: 32px 20px 36px;
+  padding: 30px 18px 34px;
   text-align: center;
   white-space: nowrap;
 }
 
+.timer::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.34), transparent 18%, transparent 82%, rgba(168, 85, 247, 0.26));
+  content: "";
+  opacity: 0.13;
+  pointer-events: none;
+}
+
 .button {
   position: relative;
-  min-width: 116px;
-  height: 36px;
+  z-index: 1;
+  min-width: 104px;
+  height: 34px;
   border: 1px solid #262626;
   border-radius: 8px;
-  background: transparent;
-  color: #737373;
+  background: #101010;
+  color: #a3a3a3;
   cursor: pointer;
   font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   transition:
     background 220ms ease,
     border-color 220ms ease,
+    box-shadow 220ms ease,
     color 220ms ease,
     transform 220ms ease;
 }
 
-.button:hover:not(:disabled) {
-  border-color: #404040;
+.button:hover {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.08);
   color: #fff;
 }
 
-.button:disabled {
-  border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.08);
+.button:active {
+  transform: translateY(1px);
+}
+
+.stopButton {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+}
+
+.stopButton:hover {
+  border-color: rgba(239, 68, 68, 0.62);
+  background: rgba(239, 68, 68, 0.12);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.06);
+  color: #fff;
+}
+
+.button:not(.stopButton):hover {
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.06);
   color: #22c55e;
-  cursor: default;
 }
 
 @media (min-width: 640px) {
   .timer {
-    font-size: 76px;
-    padding: 40px 28px 46px;
+    font-size: 74px;
+    padding: 38px 26px 44px;
   }
 }
 
 @media (min-width: 880px) {
   .timer {
-    font-size: 108px;
+    font-size: 106px;
   }
 }
 
 @media (min-width: 1200px) {
   .timer {
-    font-size: 124px;
+    font-size: 120px;
   }
 }

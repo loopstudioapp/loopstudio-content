@@ -46,15 +46,20 @@ export default function TimerPage() {
         {time}
       </time>
       <button
-        className={styles.button}
+        className={`${styles.button} ${isRunning ? styles.stopButton : ""}`}
         type="button"
-        disabled={isRunning}
+        aria-label={isRunning ? "Stop timer" : "Start timer"}
         onClick={() => {
-          startedAt.current = performance.now();
+          if (isRunning) {
+            setIsRunning(false);
+            return;
+          }
+
+          startedAt.current = performance.now() - elapsed;
           setIsRunning(true);
         }}
       >
-        {isRunning ? "Running" : "Start"}
+        {isRunning ? "Stop" : "Start"}
       </button>
     </main>
   );
