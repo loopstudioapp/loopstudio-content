@@ -100,6 +100,107 @@ function Chart({ data, dates, color, label, h = 80, zeroLine = false }: { data: 
   );
 }
 
+/* ── Labeled daily bars for metrics that need exact day-by-day scanning ── */
+function DailyBarChart({
+  data,
+  dates,
+  color,
+  label,
+  valueLabel,
+  tooltipValue,
+}: {
+  data: number[];
+  dates: string[];
+  color: string;
+  label: string;
+  valueLabel: (value: number) => string;
+  tooltipValue: (value: number) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
+
+  const w = 960;
+  const h = 150;
+  const pad = { top: 25, right: 8, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const rawMax = Math.max(...data, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
+  const niceMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
+  const slot = plotW / data.length;
+  const barW = Math.max(8, Math.min(22, slot * 0.62));
+  const yOf = (value: number) => pad.top + plotH - (value / niceMax) * plotH;
+  const gridValues = [niceMax, niceMax / 2, 0];
+
+  return (
+    <div className="relative overflow-x-auto pb-1">
+      <div className="relative min-w-[960px]">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          className="block w-full cursor-crosshair"
+          role="img"
+          aria-label={`${label} by day for the last 30 days`}
+          onMouseLeave={() => setHover(null)}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * w;
+            const index = Math.floor((x - pad.left) / slot);
+            setHover(Math.max(0, Math.min(data.length - 1, index)));
+          }}
+        >
+          {gridValues.map((value) => {
+            const y = yOf(value);
+            return (
+              <g key={value}>
+                <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke="#2f2f2f" strokeWidth="1" />
+                <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{valueLabel(value)}</text>
+              </g>
+            );
+          })}
+          {data.map((value, i) => {
+            const x = pad.left + i * slot + slot / 2;
+            const y = yOf(value);
+            const barHeight = Math.max(2, pad.top + plotH - y);
+            const active = hover === i;
+            return (
+              <g key={`${dates[i]}-${i}`}>
+                {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill={color} opacity="0.08" />}
+                <rect
+                  x={x - barW / 2}
+                  y={value === 0 ? pad.top + plotH - 2 : y}
+                  width={barW}
+                  height={barHeight}
+                  rx="2"
+                  fill={color}
+                  opacity={active ? 1 : 0.78}
+                />
+                <text x={x} y={Math.max(10, y - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
+                  {valueLabel(value)}
+                </text>
+                <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">
+                  {dates[i]?.slice(5)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+        {hover !== null && (
+          <div
+            className="absolute top-0 pointer-events-none bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-1.5 shadow-xl z-10"
+            style={{
+              left: `${((pad.left + hover * slot + slot / 2) / w) * 100}%`,
+              transform: hover < 2 ? "translateX(0)" : hover > data.length - 3 ? "translateX(-100%)" : "translateX(-50%)",
+            }}
+          >
+            <p className="text-white text-sm font-bold whitespace-nowrap">{tooltipValue(data[hover])}</p>
+            <p className="text-[#737373] text-[10px] whitespace-nowrap">{dates[hover]}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Helpers ── */
 function countryFlag(code: string): string {
   if (!code || code.length !== 2) return "🌍";
@@ -276,19 +377,33 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
             </div>
             <Chart data={taxedProfit} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
           </div>
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
               <p className="text-white text-2xl font-bold">{fmtNum(totalNewSubs30)}</p>
             </div>
-            <Chart data={daily.map((d) => d.new_subs || 0)} dates={daily.map((d) => d.date)} color="#8b5cf6" label="New Subs" h={80} />
+            <DailyBarChart
+              data={daily.map((d) => d.new_subs || 0)}
+              dates={daily.map((d) => d.date)}
+              color="#8b5cf6"
+              label="New subscriptions"
+              valueLabel={(value) => value.toFixed(0)}
+              tooltipValue={(value) => `${value.toFixed(0)} new ${value === 1 ? "sub" : "subs"}`}
+            />
           </div>
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Subs Cost</p>
               <p className="text-white text-2xl font-bold">{costPerSub30 > 0 ? fmtCur2(costPerSub30) : "—"}</p>
             </div>
-            <Chart data={daily.map((d) => d.cost_per_sub || 0)} dates={daily.map((d) => d.date)} color="#f59e0b" label="Subs Cost" h={80} />
+            <DailyBarChart
+              data={daily.map((d) => d.cost_per_sub || 0)}
+              dates={daily.map((d) => d.date)}
+              color="#f59e0b"
+              label="Cost per subscription"
+              valueLabel={(value) => `$${value.toFixed(1)}`}
+              tooltipValue={(value) => fmtCur2(value)}
+            />
           </div>
         </div>
       )}
