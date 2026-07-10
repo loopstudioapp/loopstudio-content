@@ -105,6 +105,7 @@ function DailyBarChart({
   data,
   dates,
   color,
+  negativeColor,
   label,
   valueLabel,
   tooltipValue,
@@ -112,6 +113,7 @@ function DailyBarChart({
   data: number[];
   dates: string[];
   color: string;
+  negativeColor?: string;
   label: string;
   valueLabel: (value: number) => string;
   tooltipValue: (value: number) => string;
@@ -124,13 +126,21 @@ function DailyBarChart({
   const pad = { top: 25, right: 8, bottom: 26, left: 38 };
   const plotW = w - pad.left - pad.right;
   const plotH = h - pad.top - pad.bottom;
-  const rawMax = Math.max(...data, 1);
-  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
-  const niceMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
+  const niceCeil = (value: number) => {
+    const safeValue = Math.max(value, 1);
+    const magnitude = 10 ** Math.floor(Math.log10(safeValue));
+    return (Math.ceil((safeValue / magnitude) * 2) / 2) * magnitude;
+  };
+  const rawMin = Math.min(...data, 0);
+  const rawMax = Math.max(...data, 0);
+  const chartMin = rawMin < 0 ? -niceCeil(Math.abs(rawMin)) : 0;
+  const chartMax = niceCeil(rawMax);
+  const chartRange = chartMax - chartMin || 1;
   const slot = plotW / data.length;
   const barW = Math.max(8, Math.min(22, slot * 0.62));
-  const yOf = (value: number) => pad.top + plotH - (value / niceMax) * plotH;
-  const gridValues = [niceMax, niceMax / 2, 0];
+  const yOf = (value: number) => pad.top + ((chartMax - value) / chartRange) * plotH;
+  const zeroY = yOf(0);
+  const gridValues = chartMin < 0 ? [chartMax, 0, chartMin] : [chartMax, chartMax / 2, 0];
 
   return (
     <div className="relative overflow-x-auto pb-1">
@@ -150,31 +160,43 @@ function DailyBarChart({
         >
           {gridValues.map((value) => {
             const y = yOf(value);
+            const isZeroLine = value === 0 && chartMin < 0;
             return (
               <g key={value}>
-                <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke="#2f2f2f" strokeWidth="1" />
+                <line
+                  x1={pad.left}
+                  y1={y}
+                  x2={w - pad.right}
+                  y2={y}
+                  stroke={isZeroLine ? "#737373" : "#2f2f2f"}
+                  strokeWidth="1"
+                  strokeDasharray={isZeroLine ? "4,3" : undefined}
+                />
                 <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{valueLabel(value)}</text>
               </g>
             );
           })}
           {data.map((value, i) => {
             const x = pad.left + i * slot + slot / 2;
-            const y = yOf(value);
-            const barHeight = Math.max(2, pad.top + plotH - y);
+            const valueY = yOf(value);
+            const barY = value === 0 ? zeroY - 2 : Math.min(valueY, zeroY);
+            const barHeight = Math.max(2, Math.abs(zeroY - valueY));
+            const labelY = value < 0 ? Math.min(h - 17, valueY + 11) : Math.max(10, valueY - 5);
             const active = hover === i;
+            const barColor = value < 0 ? negativeColor || color : color;
             return (
               <g key={`${dates[i]}-${i}`}>
                 {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill={color} opacity="0.08" />}
                 <rect
                   x={x - barW / 2}
-                  y={value === 0 ? pad.top + plotH - 2 : y}
+                  y={barY}
                   width={barW}
                   height={barHeight}
                   rx="2"
-                  fill={color}
+                  fill={barColor}
                   opacity={active ? 1 : 0.78}
                 />
-                <text x={x} y={Math.max(10, y - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
+                <text x={x} y={labelY} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
                   {valueLabel(value)}
                 </text>
                 <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">
@@ -212,6 +234,10 @@ function countryName(code: string): string {
   catch { return code.toUpperCase(); }
 }
 function fmtCur(n: number): string { return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function fmtCompactCur(n: number): string {
+  const rounded = Math.round(n);
+  return `${rounded < 0 ? "-" : ""}$${Math.abs(rounded).toLocaleString("en-US")}`;
+}
 // Currency with 2 decimals + sign-aware (for profit which can be negative)
 function fmtCur2(n: number): string {
   const neg = n < 0;
@@ -363,19 +389,34 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
       {/* 30-day charts */}
       {!loading && daily && daily.length > 1 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
               <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.revenue, 0))}</p>
             </div>
-            <Chart data={daily.map((d) => d.revenue)} dates={daily.map((d) => d.date)} color="#22c55e" label="Revenue" h={80} />
+            <DailyBarChart
+              data={daily.map((d) => d.revenue)}
+              dates={daily.map((d) => d.date)}
+              color="#22c55e"
+              label="Revenue"
+              valueLabel={fmtCompactCur}
+              tooltipValue={fmtCur2}
+            />
           </div>
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
               <p className="text-white text-2xl font-bold">{fmtCur2(taxedProfit.reduce((s, v) => s + v, 0))}</p>
             </div>
-            <Chart data={taxedProfit} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
+            <DailyBarChart
+              data={taxedProfit}
+              dates={daily.map((d) => d.date)}
+              color="#10b981"
+              negativeColor="#ef4444"
+              label="Profit"
+              valueLabel={fmtCompactCur}
+              tooltipValue={fmtCur2}
+            />
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
