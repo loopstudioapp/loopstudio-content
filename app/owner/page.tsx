@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 /* ── Types ── */
+type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
+type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
@@ -220,6 +222,14 @@ function fmtCur2(n: number): string {
 function fmtSignedCur(n: number): string {
   const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (n < 0 ? "-$" : "+$") + abs;
+}
+function fmtVnd(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
+  return n.toLocaleString("en-US") + "₫";
+}
+function fmtVndFull(n: number): string {
+  return n.toLocaleString("en-US") + "₫";
 }
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -517,6 +527,19 @@ export default function OwnerDashboard() {
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
   const [todayStatsLoading, setTodayStatsLoading] = useState(true);
   const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
+  const [fabi, setFabi] = useState<FabiData | null>(null);
+  const [fabiLoading, setFabiLoading] = useState(false);
+  const [fabiError, setFabiError] = useState<string | null>(null);
+
+  // Ket Coffee stays independent from the GrailScan-only app metrics.
+  useEffect(() => {
+    fetch("/api/fabi/sync?cached=1")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.ok) setFabi({ today: data.today || null, daily: data.daily || [] });
+      })
+      .catch(() => {});
+  }, []);
 
   // Load today's GrailScan stats on mount.
   useEffect(() => {
@@ -569,6 +592,22 @@ export default function OwnerDashboard() {
   const loadRevenueCat = useCallback(async () => {
     setTodayStatsLoading(true);
     setTodayStatsError(null);
+    setFabiLoading(true);
+    setFabiError(null);
+
+    const fabiPromise = (async () => {
+      try {
+        const response = await fetch("/api/fabi/sync");
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Coffee shop sync failed");
+        setFabi({ today: data.today || null, daily: data.daily || [] });
+      } catch (error) {
+        setFabiError(error instanceof Error ? error.message : "Coffee shop sync failed");
+      } finally {
+        setFabiLoading(false);
+      }
+    })();
+
     let fastLoaded = false;
     try {
       const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
@@ -592,6 +631,7 @@ export default function OwnerDashboard() {
     } finally {
       if (!fastLoaded) setTodayStatsLoading(false);
     }
+    await fabiPromise;
   }, []);
 
   // (SubTable removed — replaced by TodayTxnTable which handles new + renewal types)
@@ -650,6 +690,47 @@ export default function OwnerDashboard() {
           loading={todayStatsLoading && !todayStats}
           todayVn={todayStats?.today_vn || vnDate(new Date())}
         />
+      </section>
+
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Ket Coffee</h2>
+          {fabiLoading && <span className="text-[10px] text-[#525252]">syncing…</span>}
+        </div>
+
+        {fabiError && (
+          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{fabiError}</div>
+        )}
+
+        {!fabi && !fabiLoading && !fabiError && (
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
+            Click &quot;Refresh&quot; above to load coffee shop data
+          </div>
+        )}
+
+        {fabi && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
+              <p className="text-white text-3xl font-bold">{fmtVndFull(fabi.today?.revenue_net || 0)}</p>
+              <p className="text-[#525252] text-[10px] mt-1">{fabi.today?.invoice_count || 0} invoices</p>
+            </div>
+            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
+                <p className="text-white text-2xl font-bold">{fmtVnd(fabi.daily.reduce((sum, day) => sum + (day.revenue_net || 0), 0))}</p>
+              </div>
+              <Chart
+                data={fabi.daily.map((day) => day.revenue_net)}
+                dates={fabi.daily.map((day) => day.date)}
+                color="#d97706"
+                label="Coffee Revenue"
+                h={72}
+              />
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
