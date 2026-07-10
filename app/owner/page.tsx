@@ -6,10 +6,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 /* ── Types ── */
-type RCOverview = { active_trials: number; active_subs: number; revenue_30d: number; mrr: number };
-type Subscriber = { id: string; country: string; app: string; plan: string; purchase_date: string; expiry_date: string; revenue: number };
-type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
-type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
@@ -17,6 +13,8 @@ type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: num
 type DailyPoint = { date: string; revenue: number; profit: number; new_subs?: number; adspend_with_vat?: number; cost_per_sub?: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 const META_VAT_RATE = 0.10;
+const OWNER_APP = "GrailScan";
+const TODAY_STATS_URL = `/api/revenuecat?type=today_stats&app=${encodeURIComponent(OWNER_APP)}`;
 
 function mergeChartStats(prev: TodayStats | null, next: TodayStats): TodayStats {
   if (!prev) return next;
@@ -223,14 +221,6 @@ function fmtSignedCur(n: number): string {
   const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (n < 0 ? "-$" : "+$") + abs;
 }
-function fmtVnd(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
-  return n.toLocaleString("en-US") + "₫";
-}
-function fmtVndFull(n: number): string {
-  return n.toLocaleString("en-US") + "₫";
-}
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
@@ -240,7 +230,7 @@ function fmtDate(iso: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
-// YYYY-MM-DD in Vietnam timezone (GMT+7) — used to bucket Loop Studio subs to "today"
+// YYYY-MM-DD in Vietnam timezone (GMT+7) — used to bucket GrailScan subs to "today"
 function vnDate(input: Date | string): string {
   if (!input) return "";
   const d = typeof input === "string" ? new Date(input) : input;
@@ -262,7 +252,7 @@ function fmtVnTime(iso: string): string {
   }).format(d);
 }
 
-/* ── Profit Grid (combined across apps: Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
+/* ── Profit Grid (Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
 type TaxMode = "normal" | "personal" | "corporate";
 function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("normal");
@@ -310,7 +300,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
         <div className="flex items-center gap-2 flex-wrap">
           <span className="w-2 h-2 rounded-full bg-[#10b981]" />
           <h3 className="text-white text-sm font-semibold">Profit</h3>
-          <span className="text-[#525252] text-xs">all apps · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
+          <span className="text-[#525252] text-xs">GrailScan · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
           {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
         </div>
         <div className="flex items-center gap-1">
@@ -457,7 +447,7 @@ function AppStatGrid({ appName, accent, stats, loading }: { appName: string; acc
   );
 }
 
-/* ── Today Subscriptions table (new + renewals across visible apps) ── */
+/* ── Today Subscriptions table (new + renewals) ── */
 function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: boolean; todayVn: string }) {
   const planFor = (t: TodayTxn) => t.plan || "—";
   return (
@@ -523,66 +513,28 @@ export default function OwnerDashboard() {
   const { lang, setLang, t } = useLang();
   const router = useRouter();
 
-  const [rc, setRc] = useState<RCOverview | null>(null);
-  const [rcLoading, setRcLoading] = useState(false);
-  const [rcLoaded, setRcLoaded] = useState(false);
-  const [rcError, setRcError] = useState<string | null>(null);
-  const [trialSubs, setTrialSubs] = useState<Subscriber[]>([]);
-  const [activeSubs, setActiveSubs] = useState<Subscriber[]>([]);
-  const [trialsLoading, setTrialsLoading] = useState(false);
-  const [activeLoading, setActiveLoading] = useState(false);
-  const [trialsError, setTrialsError] = useState<string | null>(null);
-  const [activeError, setActiveError] = useState<string | null>(null);
-
-  // Coffee shop (FABi)
-  const [fabi, setFabi] = useState<FabiData | null>(null);
-  const [fabiLoading, setFabiLoading] = useState(false);
-  const [fabiError, setFabiError] = useState<string | null>(null);
-
-  // Per-app today stats + today transactions (Loop Studio section)
+  // GrailScan-only stats and transactions for the owner dashboard.
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
   const [todayStatsLoading, setTodayStatsLoading] = useState(true);
+  const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
 
-  // Load saved RevenueCat data from DB on mount
-  useEffect(() => {
-    fetch("/api/revenuecat/cache")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.cached) {
-          if (d.overview) { setRc(d.overview); setRcLoaded(true); }
-          if (d.trials) setTrialSubs(d.trials);
-          if (d.active) setActiveSubs(d.active);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Load cached coffee shop data on mount (read-only, no fresh API call)
-  useEffect(() => {
-    fetch("/api/fabi/sync?cached=1")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.ok) setFabi({ today: d.today || null, daily: d.daily || [] });
-      })
-      .catch(() => {});
-  }, []);
-
-  // Load today's Loop Studio stats on mount
+  // Load today's GrailScan stats on mount.
   useEffect(() => {
     let cancelled = false;
 
     async function loadInitialTodayStats() {
       setTodayStatsLoading(true);
+      setTodayStatsError(null);
       let fastLoaded = false;
       try {
-        const cached = await fetch("/api/revenuecat?type=today_stats&cached=1");
+        const cached = await fetch(`${TODAY_STATS_URL}&cached=1`);
         if (cached.ok) {
           const d = await cached.json();
           if (!cancelled && d && !d.error) setTodayStats(d);
           return;
         }
 
-        const fast = await fetch("/api/revenuecat?type=today_stats&fast=1");
+        const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
         if (fast.ok) {
           const d = await fast.json();
           if (!cancelled && d && !d.error) {
@@ -592,13 +544,12 @@ export default function OwnerDashboard() {
           }
         }
 
-        const full = await fetch("/api/revenuecat?type=today_stats&refresh=1");
-        if (full.ok) {
-          const d = await full.json();
-          if (!cancelled && d && !d.error) setTodayStats((prev) => mergeChartStats(prev, d));
-        }
-      } catch {
-        // Keep the dashboard usable even if this section cannot refresh.
+        const full = await fetch(`${TODAY_STATS_URL}&refresh=1`);
+        const d = await full.json();
+        if (!full.ok || d.error) throw new Error(d.error || "Failed to rebuild GrailScan charts");
+        if (!cancelled) setTodayStats((prev) => mergeChartStats(prev, d));
+      } catch (error) {
+        if (!cancelled) setTodayStatsError(error instanceof Error ? error.message : "Failed to load GrailScan data");
       } finally {
         if (!cancelled && !fastLoaded) setTodayStatsLoading(false);
       }
@@ -616,92 +567,31 @@ export default function OwnerDashboard() {
   }, [router]);
 
   const loadRevenueCat = useCallback(async () => {
-    setRcLoading(true); setRcError(null);
-    setTrialsLoading(true); setActiveLoading(true);
-    setTrialsError(null); setActiveError(null);
-    setFabiLoading(true); setFabiError(null);
     setTodayStatsLoading(true);
-
-    // Kick off coffee shop sync in parallel with RevenueCat fetches
-    const fabiPromise = (async () => {
-      try {
-        const r = await fetch("/api/fabi/sync");
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || "Failed");
-        setFabi({ today: d.today || null, daily: d.daily || [] });
-      } catch (e: unknown) {
-        setFabiError(e instanceof Error ? e.message : "Coffee shop sync failed");
-      } finally {
-        setFabiLoading(false);
-      }
-    })();
-
-    // Per-app today stats — runs in parallel too
-    const todayStatsPromise = (async () => {
-      let fastLoaded = false;
-      try {
-        const fast = await fetch("/api/revenuecat?type=today_stats&fast=1");
-        if (fast.ok) {
-          const d = await fast.json();
-          if (d && !d.error) {
-            setTodayStats(d);
-            fastLoaded = true;
-            setTodayStatsLoading(false);
-          }
-        }
-      } catch { /* ignore */ }
-
-      try {
-        const full = await fetch("/api/revenuecat?type=today_stats&refresh=1");
-        const d = await full.json();
-        if (d && !d.error) setTodayStats((prev) => mergeChartStats(prev, d));
-      } catch { /* ignore */ }
-      finally {
-        if (!fastLoaded) setTodayStatsLoading(false);
-      }
-    })();
-
-    let overview: RCOverview | null = null;
-    let trials: Subscriber[] = [];
-    let active: Subscriber[] = [];
+    setTodayStatsError(null);
+    let fastLoaded = false;
+    try {
+      const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
+      const data = await fast.json();
+      if (!fast.ok || data.error) throw new Error(data.error || "Fast refresh failed");
+      setTodayStats(data);
+      fastLoaded = true;
+      setTodayStatsLoading(false);
+    } catch (error) {
+      setTodayStatsError(error instanceof Error ? error.message : "Failed to refresh GrailScan data");
+    }
 
     try {
-      const r = await fetch("/api/revenuecat?type=overview");
-      const d = await r.json();
-      if (d.error) throw new Error(d.error);
-      overview = d;
-      setRc(d);
-      setRcLoaded(true);
-    } catch (e: unknown) { setRcError(e instanceof Error ? e.message : "Failed"); }
-    finally { setRcLoading(false); }
-
-    try {
-      const r = await fetch("/api/revenuecat?type=subscribers&filter=trial");
-      const d = await r.json();
-      if (!d.error) { trials = (d.subscribers || []).sort((a: Subscriber, b: Subscriber) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()); setTrialSubs(trials); }
-      else setTrialsError(d.error);
-    } catch { setTrialsError("Failed to load"); }
-    finally { setTrialsLoading(false); }
-
-    try {
-      const r = await fetch("/api/revenuecat?type=subscribers&filter=active");
-      const d = await r.json();
-      if (!d.error) { active = (d.subscribers || []).sort((a: Subscriber, b: Subscriber) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()); setActiveSubs(active); }
-      else setActiveError(d.error);
-    } catch { setActiveError("Failed to load"); }
-    finally { setActiveLoading(false); }
-
-    // Save to DB (accessible across all devices)
-    try {
-      await fetch("/api/revenuecat/cache", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overview, trials, active }),
-      });
-    } catch { /* ignore */ }
-
-    // Wait for parallel work to settle
-    await Promise.all([fabiPromise, todayStatsPromise]);
+      const full = await fetch(`${TODAY_STATS_URL}&refresh=1`);
+      const data = await full.json();
+      if (!full.ok || data.error) throw new Error(data.error || "Chart refresh failed");
+      setTodayStats((prev) => mergeChartStats(prev, data));
+      setTodayStatsError(null);
+    } catch (error) {
+      setTodayStatsError(error instanceof Error ? error.message : "Failed to rebuild GrailScan charts");
+    } finally {
+      if (!fastLoaded) setTodayStatsLoading(false);
+    }
   }, []);
 
   // (SubTable removed — replaced by TodayTxnTable which handles new + renewal types)
@@ -727,104 +617,39 @@ export default function OwnerDashboard() {
       {/* ═══ REVENUE ═══ */}
       <section className="mb-10">
         <div className="flex items-center gap-3 mb-5">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Loop Studio</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">GrailScan</h2>
           <button
             onClick={loadRevenueCat}
-            disabled={rcLoading}
+            disabled={todayStatsLoading}
             className="px-3 py-1 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50"
           >
-            {rcLoading ? "Loading..." : rcLoaded ? "↻ Refresh" : "Load Data"}
+            {todayStatsLoading ? "Loading..." : todayStats ? "↻ Refresh" : "Load Data"}
           </button>
         </div>
 
-        {!rcLoaded && !rcLoading && !rcError && (
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
-            Click &quot;Load Data&quot; to fetch RevenueCat metrics
-          </div>
+        {todayStatsError && (
+          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{todayStatsError}</div>
         )}
 
-        {rcError && (
-          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{rcError}</div>
-        )}
+        <ProfitGrid
+          profit={todayStats?.profit}
+          ads={todayStats?.ads}
+          daily={todayStats?.daily}
+          loading={todayStatsLoading && !todayStats}
+        />
 
-        {(rcLoaded || rcLoading) && (
-          <>
-            {/* ── Profit (top, combined across apps) ── */}
-            <ProfitGrid
-              profit={todayStats?.profit}
-              ads={todayStats?.ads}
-              daily={todayStats?.daily}
-              loading={todayStatsLoading && !todayStats}
-            />
+        <AppStatGrid
+          appName={OWNER_APP}
+          accent="#a855f7"
+          stats={todayStats?.per_app[OWNER_APP]}
+          loading={todayStatsLoading && !todayStats}
+        />
 
-            {/* ── GrailScan ── */}
-            <AppStatGrid
-              appName="GrailScan"
-              accent="#a855f7"
-              stats={todayStats?.per_app["GrailScan"]}
-              loading={todayStatsLoading && !todayStats}
-            />
-
-            {/* ── Roomy AI (lower) ── */}
-            <AppStatGrid
-              appName="Roomy AI"
-              accent="#3b82f6"
-              stats={todayStats?.per_app["Roomy AI"]}
-              loading={todayStatsLoading && !todayStats}
-            />
-
-            {/* ── Today Subscriptions (both apps, new + renewal) ── */}
-            <TodayTxnTable
-              txns={todayStats?.transactions || []}
-              loading={todayStatsLoading && !todayStats}
-              todayVn={todayStats?.today_vn || vnDate(new Date())}
-            />
-          </>
-        )}
-      </section>
-
-      {/* ═══ COFFEE SHOP ═══ */}
-      <section className="mb-10">
-        <div className="flex items-center gap-2 mb-5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Ket Coffee</h2>
-          {fabiLoading && <span className="text-[10px] text-[#525252]">syncing…</span>}
-        </div>
-
-        {fabiError && (
-          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{fabiError}</div>
-        )}
-
-        {!fabi && !fabiLoading && !fabiError && (
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
-            Click &quot;Refresh&quot; above to load coffee shop data
-          </div>
-        )}
-
-        {fabi && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Today revenue */}
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
-              <p className="text-white text-3xl font-bold">{fmtVndFull(fabi.today?.revenue_net || 0)}</p>
-              <p className="text-[#525252] text-[10px] mt-1">{fabi.today?.invoice_count || 0} invoices</p>
-            </div>
-            {/* 30-day chart */}
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
-                <p className="text-white text-2xl font-bold">{fmtVnd(fabi.daily.reduce((s, d) => s + (d.revenue_net || 0), 0))}</p>
-              </div>
-              <Chart
-                data={fabi.daily.map((d) => d.revenue_net)}
-                dates={fabi.daily.map((d) => d.date)}
-                color="#d97706"
-                label="Coffee Revenue"
-                h={72}
-              />
-            </div>
-          </div>
-        )}
+        <TodayTxnTable
+          txns={(todayStats?.transactions || []).filter((transaction) => transaction.app === OWNER_APP)}
+          loading={todayStatsLoading && !todayStats}
+          todayVn={todayStats?.today_vn || vnDate(new Date())}
+        />
       </section>
     </div>
   );

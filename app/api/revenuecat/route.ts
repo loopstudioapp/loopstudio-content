@@ -27,8 +27,8 @@ const RC_PROJECTS = [
   },
 ];
 
-// Apps that should appear on the dashboard. SwipeAway data stays in DB
-// but never reaches the UI.
+// Apps available to the owner stats API. The dashboard can request one app
+// without changing the existing unfiltered endpoint behavior.
 const VISIBLE_APPS = new Set(["Roomy AI", "GrailScan"]);
 
 function getEnv() {
@@ -310,14 +310,18 @@ type RenewalEventRow = {
   revenue?: number | string | null;
 };
 
-function emptyPerApp(mrrByApp: Record<string, number> = {}): Record<string, TodayPerApp> {
+function emptyPerApp(
+  mrrByApp: Record<string, number> = {},
+  appName?: string
+): Record<string, TodayPerApp> {
   const perApp: Record<string, TodayPerApp> = {};
-  for (const appName of VISIBLE_APPS) {
-    perApp[appName] = {
+  const appNames = appName ? [appName] : Array.from(VISIBLE_APPS);
+  for (const name of appNames) {
+    perApp[name] = {
       today_revenue: 0,
       new_revenue: 0,
       new_subs: 0,
-      mrr: mrrByApp[appName] || 0,
+      mrr: mrrByApp[name] || 0,
     };
   }
   return perApp;
@@ -329,14 +333,16 @@ function buildDbTodayLedger({
   mrrByApp = {},
   today,
   subscriptionStartByKey: providedSubscriptionStartByKey,
+  appName,
 }: {
   newSubs: SubscriptionSummaryRow[];
   renewals: RenewalEventRow[];
   mrrByApp?: Record<string, number>;
   today: string;
   subscriptionStartByKey?: Map<string, string>;
+  appName?: string;
 }): { perApp: Record<string, TodayPerApp>; transactions: TodayTxn[] } {
-  const perApp = emptyPerApp(mrrByApp);
+  const perApp = emptyPerApp(mrrByApp, appName);
   const transactions: TodayTxn[] = [];
   const subscriptionStartByKey = new Map(providedSubscriptionStartByKey || []);
 
@@ -374,7 +380,7 @@ function buildDbTodayLedger({
     const app = visibleAppName(row.app_name);
     const userId = row.app_user_id || "";
     const purchasedMs = dateMs(row.purchased_at);
-    if (!app || !userId || purchasedMs == null || !row.purchased_at) continue;
+    if (!app || (appName && app !== appName) || !userId || purchasedMs == null || !row.purchased_at) continue;
 
     const date = vnDateIso(new Date(purchasedMs));
     if (date !== today) continue;
@@ -406,7 +412,7 @@ function buildDbTodayLedger({
     const app = visibleAppName(row.app_name);
     const userId = row.app_user_id || "";
     const occurredMs = dateMs(row.occurred_at);
-    if (!app || !userId || occurredMs == null || !row.occurred_at) continue;
+    if (!app || (appName && app !== appName) || !userId || occurredMs == null || !row.occurred_at) continue;
 
     const date = vnDateIso(new Date(occurredMs));
     if (date !== today) continue;
@@ -561,8 +567,14 @@ class RevenueCatApiError extends Error {
   }
 }
 
-function configuredProjects(): RcProject[] {
-  return RC_PROJECTS.filter((p) => p.apiKey && p.projectId && VISIBLE_APPS.has(p.name));
+function configuredProjects(appName?: string): RcProject[] {
+  return RC_PROJECTS.filter(
+    (project) =>
+      project.apiKey &&
+      project.projectId &&
+      VISIBLE_APPS.has(project.name) &&
+      (!appName || project.name === appName)
+  );
 }
 
 function sleep(ms: number) {
@@ -759,12 +771,17 @@ async function fetchCustomerTransactionEvents(
   return { events, firstPaidAt: msToIso(firstPaidMs) || null };
 }
 
-async function fetchTransactionLedger(startDate: string, endExclusiveDate: string): Promise<TransactionLedger> {
+async function fetchTransactionLedger(
+  startDate: string,
+  endExclusiveDate: string,
+  appName?: string
+): Promise<TransactionLedger> {
   const { startUtc } = vnDayBoundsUtc(startDate);
   const { startUtc: endUtc } = vnDayBoundsUtc(endExclusiveDate);
   const startMs = new Date(startUtc).getTime();
   const endMs = new Date(endUtc).getTime();
-  const projectKey = configuredProjects().map((project) => `${project.name}:${project.projectId}`).join("|");
+  const projects = configuredProjects(appName);
+  const projectKey = projects.map((project) => `${project.name}:${project.projectId}`).join("|");
   const cacheKey = `${projectKey}:${startUtc}:${endUtc}`;
 
   if (transactionLedgerCache && transactionLedgerCache.key === cacheKey && Date.now() - transactionLedgerCache.timestamp < CACHE_TTL) {
@@ -775,7 +792,7 @@ async function fetchTransactionLedger(startDate: string, endExclusiveDate: strin
   const firstPaidAtByCustomer = new Map(dbSeeds.firstPaidAtByCustomer);
   const events: TransactionEvent[] = [];
 
-  for (const project of configuredProjects()) {
+  for (const project of projects) {
     const seedMap = new Map<string, CustomerSeed>();
 
     for (const seed of dbSeeds.seedsByApp.get(project.name) || []) {
@@ -825,13 +842,15 @@ function buildDailyPointsFromLedger(
   ledger: TransactionLedger,
   spendUsdByDate: Record<string, number>,
   appleRate: number,
-  metaVat: number
+  metaVat: number,
+  appName?: string
 ): DailyPoint[] {
   const revenueByDate: Record<string, number> = {};
   const newSubsByDate: Record<string, number> = {};
   const countedNewSubs = new Set<string>();
 
   for (const event of ledger.events) {
+    if (appName && event.app !== appName) continue;
     revenueByDate[event.date] = (revenueByDate[event.date] || 0) + event.gross;
     if (isNewSubEvent(event, ledger)) {
       const countKey = dateKeyFor(event.app, event.userId, event.date);
@@ -861,14 +880,15 @@ function buildDailyPointsFromLedger(
 function buildTodayLedgerFromTransactions(
   ledger: TransactionLedger,
   today: string,
-  mrrByApp: Record<string, number>
+  mrrByApp: Record<string, number>,
+  appName?: string
 ): { perApp: Record<string, TodayPerApp>; transactions: TodayTxn[] } {
-  const perApp = emptyPerApp(mrrByApp);
+  const perApp = emptyPerApp(mrrByApp, appName);
   const countedNewSubs = new Set<string>();
   const groups = new Map<string, { type: "NEW_SUB" | "RENEWAL"; latest: TransactionEvent; revenue: number }>();
 
   for (const event of ledger.events) {
-    if (event.date !== today) continue;
+    if (event.date !== today || (appName && event.app !== appName)) continue;
 
     const type = isNewSubEvent(event, ledger) ? "NEW_SUB" : "RENEWAL";
     const appStats = perApp[event.app];
@@ -912,11 +932,11 @@ function buildTodayLedgerFromTransactions(
   return { perApp, transactions };
 }
 
-async function fetchMrrByApp(): Promise<Record<string, number>> {
+async function fetchMrrByApp(appName?: string): Promise<Record<string, number>> {
   const mrrByApp: Record<string, number> = {};
 
   await Promise.all(
-    configuredProjects().map(async (project) => {
+    configuredProjects(appName).map(async (project) => {
       try {
         const res = await fetch(
           `${RC_BASE}/projects/${project.projectId}/metrics/overview`,
@@ -940,9 +960,9 @@ async function fetchMrrByApp(): Promise<Record<string, number>> {
 }
 
 type ProfitSummary = {
-  total_revenue: number; // GROSS, all apps, new + renewal
-  new_revenue: number; // GROSS, all apps, new subs only
-  new_subs: number; // all apps
+  total_revenue: number; // GROSS, selected app(s), new + renewal
+  new_revenue: number; // GROSS, selected app(s), new subs only
+  new_subs: number; // selected app(s)
   apple_commission_rate: number; // e.g. 0.15
   meta_vat_rate: number; // e.g. 0.10
   net_revenue: number; // total_revenue after Apple cut
@@ -963,11 +983,15 @@ type TodayStatsResponse = {
   daily: DailyPoint[];
 };
 
-async function readTodayStatsCache(): Promise<{ data: TodayStatsResponse; updatedAt: string } | null> {
+function todayStatsCacheKey(appName?: string): string {
+  return appName ? `${TODAY_STATS_CACHE_KEY}:${appName}` : TODAY_STATS_CACHE_KEY;
+}
+
+async function readTodayStatsCache(appName?: string): Promise<{ data: TodayStatsResponse; updatedAt: string } | null> {
   const { data } = await supabase
     .from("pinterest_topics")
     .select("description_template, prompt_seed")
-    .eq("id", TODAY_STATS_CACHE_KEY)
+    .eq("id", todayStatsCacheKey(appName))
     .single();
 
   if (!data) return null;
@@ -982,10 +1006,10 @@ async function readTodayStatsCache(): Promise<{ data: TodayStatsResponse; update
   }
 }
 
-async function writeTodayStatsCache(data: TodayStatsResponse) {
+async function writeTodayStatsCache(data: TodayStatsResponse, appName?: string) {
   await supabase.from("pinterest_topics").upsert(
     {
-      id: TODAY_STATS_CACHE_KEY,
+      id: todayStatsCacheKey(appName),
       category: "system",
       title_template: "RC Today Stats Cache",
       description_template: JSON.stringify(data),
@@ -996,7 +1020,7 @@ async function writeTodayStatsCache(data: TodayStatsResponse) {
   );
 }
 
-function sumTodayRevenue(perApp: Record<string, TodayPerApp>): {
+function sumTodayRevenue(perApp: Record<string, TodayPerApp>, appName?: string): {
   totalRevenue: number;
   newRevenue: number;
   newSubs: number;
@@ -1004,10 +1028,11 @@ function sumTodayRevenue(perApp: Record<string, TodayPerApp>): {
   let totalRevenue = 0;
   let newRevenue = 0;
   let newSubs = 0;
-  for (const appName of VISIBLE_APPS) {
-    totalRevenue += perApp[appName]?.today_revenue || 0;
-    newRevenue += perApp[appName]?.new_revenue || 0;
-    newSubs += perApp[appName]?.new_subs || 0;
+  const appNames = appName ? [appName] : Array.from(VISIBLE_APPS);
+  for (const name of appNames) {
+    totalRevenue += perApp[name]?.today_revenue || 0;
+    newRevenue += perApp[name]?.new_revenue || 0;
+    newSubs += perApp[name]?.new_subs || 0;
   }
   return { totalRevenue, newRevenue, newSubs };
 }
@@ -1048,7 +1073,10 @@ function profitSummaryFromRevenue({
   };
 }
 
-async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null = null): Promise<TodayStatsResponse> {
+async function fetchFastTodayStatsFromDb(
+  cachedData: TodayStatsResponse | null = null,
+  appName?: string
+): Promise<TodayStatsResponse> {
   const today = vnDateIso();
   const { startUtc, endUtc } = vnDayBoundsUtc(today);
 
@@ -1056,7 +1084,7 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   const metaVat = META_VAT_RATE;
 
   const [mrrByApp, ads, newSubsResult, renewalsResult] = await Promise.all([
-    fetchMrrByApp(),
+    fetchMrrByApp(appName),
     getTodayMetaSpend(),
     supabase
       .from("rc_subscriptions")
@@ -1074,9 +1102,10 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   if (newSubsResult.error) throw new Error(`Database error: ${newSubsResult.error.message}`);
   if (renewalsResult.error) throw new Error(`Database error: ${renewalsResult.error.message}`);
 
-  const renewalRows = ((renewalsResult.data || []) as RenewalEventRow[]).filter((row) =>
-    Boolean(visibleAppName(row.app_name))
-  );
+  const renewalRows = ((renewalsResult.data || []) as RenewalEventRow[]).filter((row) => {
+    const app = visibleAppName(row.app_name);
+    return Boolean(app && (!appName || app === appName));
+  });
   const renewalUserIds = Array.from(new Set(renewalRows.map((row) => row.app_user_id).filter(Boolean))) as string[];
   const renewalSubsResult = renewalUserIds.length > 0
     ? await supabase
@@ -1091,7 +1120,7 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   const subscriptionStartByKey = new Map<string, string>();
   for (const row of renewalSubsResult.data || []) {
     const app = visibleAppName(row.app_name);
-    if (!app || !row.app_user_id || !row.purchased_at) continue;
+    if (!app || (appName && app !== appName) || !row.app_user_id || !row.purchased_at) continue;
     subscriptionStartByKey.set(keyFor(app, row.app_user_id), row.purchased_at);
   }
 
@@ -1101,9 +1130,10 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
     mrrByApp,
     today,
     subscriptionStartByKey,
+    appName,
   });
   const { perApp, transactions } = todayLedger;
-  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp);
+  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
   const cachedDaily = cachedData?.today_vn === today ? cachedData.daily || [] : [];
   const daily = cachedDaily.map((point) => ({
@@ -1125,7 +1155,7 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   return { today_vn: today, per_app: perApp, transactions, ads, profit, daily };
 }
 
-async function fetchTodayStats(): Promise<TodayStatsResponse> {
+async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
   const today = vnDateIso();
   const dates = vnDateWindow(today, 30);
   const start = dates[0];
@@ -1136,22 +1166,22 @@ async function fetchTodayStats(): Promise<TodayStatsResponse> {
   const metaVat = META_VAT_RATE;
 
   const [mrrByApp, ads, spendUsdByDate, ledger] = await Promise.all([
-    fetchMrrByApp(),
+    fetchMrrByApp(appName),
     getTodayMetaSpend(),
     getMetaSpendByDay(start, today),
-    fetchTransactionLedger(start, endExclusive),
+    fetchTransactionLedger(start, endExclusive, appName),
   ]);
 
   if (ads.configured && !ads.error && ads.date === today) {
     spendUsdByDate[today] = ads.spend_usd || 0;
   }
 
-  const daily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat);
-  const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp);
+  const daily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat, appName);
+  const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp, appName);
   const perApp = todayLedger.perApp;
   const txns = todayLedger.transactions;
 
-  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp);
+  const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
 
   return { today_vn: today, per_app: perApp, transactions: txns, ads, profit, daily };
@@ -1185,18 +1215,22 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "today_stats") {
+      const requestedApp = searchParams.get("app") || undefined;
+      if (requestedApp && !VISIBLE_APPS.has(requestedApp)) {
+        return NextResponse.json({ error: "app is not configured" }, { status: 400 });
+      }
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
       const fastTodayStats = searchParams.get("fast") === "1";
       if (fastTodayStats) {
-        const cached = await readTodayStatsCache();
-        const data = await fetchFastTodayStatsFromDb(cached?.data || null);
-        await writeTodayStatsCache(data);
+        const cached = await readTodayStatsCache(requestedApp);
+        const data = await fetchFastTodayStatsFromDb(cached?.data || null, requestedApp);
+        await writeTodayStatsCache(data, requestedApp);
         return NextResponse.json({ ...data, cached: false, fast: true, updated_at: new Date().toISOString() });
       }
 
       if (!forceRefresh) {
-        const cached = await readTodayStatsCache();
+        const cached = await readTodayStatsCache(requestedApp);
         if (cached?.data?.today_vn === vnDateIso()) {
           return NextResponse.json({ ...cached.data, cached: true, updated_at: cached.updatedAt });
         }
@@ -1205,12 +1239,12 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const refreshed = await fetchTodayStats();
-      const cached = await readTodayStatsCache();
+      const refreshed = await fetchTodayStats(requestedApp);
+      const cached = await readTodayStatsCache(requestedApp);
       const data = cached?.data?.today_vn === refreshed.today_vn
         ? { ...cached.data, daily: refreshed.daily }
         : refreshed;
-      await writeTodayStatsCache(data);
+      await writeTodayStatsCache(data, requestedApp);
       return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
     }
 
