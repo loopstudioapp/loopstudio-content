@@ -14,7 +14,7 @@ type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: numbe
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
-type DailyPoint = { date: string; revenue: number; profit: number };
+type DailyPoint = { date: string; revenue: number; profit: number; new_subs?: number; adspend_with_vat?: number; cost_per_sub?: number };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 const META_VAT_RATE = 0.10;
 
@@ -190,6 +190,12 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   ];
   // Per-day profit with tax applied (for the 30-day profit chart)
   const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
+  const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
+  const totalSubCost30 = (daily || []).reduce(
+    (s, d) => s + (d.adspend_with_vat ?? ((d.cost_per_sub || 0) * (d.new_subs || 0))),
+    0
+  );
+  const costPerSub30 = totalNewSubs30 > 0 ? totalSubCost30 / totalNewSubs30 : 0;
   // Subtitle for adspend showing native VND (incl VAT) + rate
   const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? META_VAT_RATE)) : 0;
   const adsSub = ads?.configured
@@ -269,6 +275,20 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               <p className="text-white text-2xl font-bold">{fmtCur2(taxedProfit.reduce((s, v) => s + v, 0))}</p>
             </div>
             <Chart data={taxedProfit} dates={daily.map((d) => d.date)} color="#10b981" label="Profit" h={80} zeroLine />
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
+              <p className="text-white text-2xl font-bold">{fmtNum(totalNewSubs30)}</p>
+            </div>
+            <Chart data={daily.map((d) => d.new_subs || 0)} dates={daily.map((d) => d.date)} color="#8b5cf6" label="New Subs" h={80} />
+          </div>
+          <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Subs Cost</p>
+              <p className="text-white text-2xl font-bold">{costPerSub30 > 0 ? fmtCur2(costPerSub30) : "—"}</p>
+            </div>
+            <Chart data={daily.map((d) => d.cost_per_sub || 0)} dates={daily.map((d) => d.date)} color="#f59e0b" label="Subs Cost" h={80} />
           </div>
         </div>
       )}

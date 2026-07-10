@@ -505,7 +505,14 @@ function buildDbTodayLedger({
   return { perApp, transactions };
 }
 
-export type DailyPoint = { date: string; revenue: number; profit: number };
+export type DailyPoint = {
+  date: string;
+  revenue: number;
+  profit: number;
+  new_subs: number;
+  adspend_with_vat: number;
+  cost_per_sub: number;
+};
 
 type RcProject = (typeof RC_PROJECTS)[number];
 type RcList<T> = { items?: T[]; next_page?: string | null };
@@ -815,21 +822,39 @@ function isNewSubEvent(event: TransactionEvent, ledger: TransactionLedger): bool
 
 function buildDailyPointsFromLedger(
   dates: string[],
-  events: TransactionEvent[],
+  ledger: TransactionLedger,
   spendUsdByDate: Record<string, number>,
   appleRate: number,
   metaVat: number
 ): DailyPoint[] {
   const revenueByDate: Record<string, number> = {};
-  for (const event of events) {
+  const newSubsByDate: Record<string, number> = {};
+  const countedNewSubs = new Set<string>();
+
+  for (const event of ledger.events) {
     revenueByDate[event.date] = (revenueByDate[event.date] || 0) + event.gross;
+    if (isNewSubEvent(event, ledger)) {
+      const countKey = dateKeyFor(event.app, event.userId, event.date);
+      if (!countedNewSubs.has(countKey)) {
+        newSubsByDate[event.date] = (newSubsByDate[event.date] || 0) + 1;
+        countedNewSubs.add(countKey);
+      }
+    }
   }
 
   return dates.map((date) => {
     const gross = revenueByDate[date] || 0;
+    const newSubs = newSubsByDate[date] || 0;
     const net = gross * (1 - appleRate);
     const adspendWithVat = (spendUsdByDate[date] || 0) * (1 + metaVat);
-    return { date, revenue: gross, profit: net - adspendWithVat };
+    return {
+      date,
+      revenue: gross,
+      profit: net - adspendWithVat,
+      new_subs: newSubs,
+      adspend_with_vat: adspendWithVat,
+      cost_per_sub: newSubs > 0 ? adspendWithVat / newSubs : 0,
+    };
   });
 }
 
@@ -1081,9 +1106,21 @@ async function fetchFastTodayStatsFromDb(cachedData: TodayStatsResponse | null =
   const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
   const cachedDaily = cachedData?.today_vn === today ? cachedData.daily || [] : [];
-  const daily = cachedDaily.map((point) =>
-    point.date === today ? { ...point, revenue: totalRevenue, profit: profit.total_profit } : point
-  );
+  const daily = cachedDaily.map((point) => ({
+    ...point,
+    new_subs: point.new_subs || 0,
+    adspend_with_vat: point.adspend_with_vat || 0,
+    cost_per_sub: point.cost_per_sub || 0,
+    ...(point.date === today
+      ? {
+          revenue: totalRevenue,
+          profit: profit.total_profit,
+          new_subs: newSubs,
+          adspend_with_vat: profit.adspend_with_vat,
+          cost_per_sub: profit.cost_per_new_sub,
+        }
+      : {}),
+  }));
 
   return { today_vn: today, per_app: perApp, transactions, ads, profit, daily };
 }
@@ -1109,7 +1146,7 @@ async function fetchTodayStats(): Promise<TodayStatsResponse> {
     spendUsdByDate[today] = ads.spend_usd || 0;
   }
 
-  const daily = buildDailyPointsFromLedger(dates, ledger.events, spendUsdByDate, appleRate, metaVat);
+  const daily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat);
   const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp);
   const perApp = todayLedger.perApp;
   const txns = todayLedger.transactions;
