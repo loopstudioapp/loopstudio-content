@@ -143,8 +143,8 @@ function DailyBarChart({
   const gridValues = chartMin < 0 ? [chartMax, 0, chartMin] : [chartMax, chartMax / 2, 0];
 
   return (
-    <div className="relative overflow-x-auto pb-1">
-      <div className="relative min-w-[960px]">
+    <div className="relative overflow-x-auto pb-1 [direction:rtl] sm:[direction:ltr]">
+      <div dir="ltr" className="relative min-w-[960px]">
         <svg
           viewBox={`0 0 ${w} ${h}`}
           className="block w-full cursor-crosshair"
