@@ -317,6 +317,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   ];
   // Per-day profit with tax applied (for the 30-day profit chart)
   const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
+  const totalRevenue30 = (daily || []).reduce((sum, day) => sum + day.revenue, 0);
+  const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
+  const usdToVnd = ads?.usd_rate ?? 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
   const totalSubCost30 = (daily || []).reduce(
     (s, d) => s + (d.adspend_with_vat ?? ((d.cost_per_sub || 0) * (d.new_subs || 0))),
@@ -392,7 +395,12 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
-              <p className="text-white text-2xl font-bold">{fmtCur2(daily.reduce((s, d) => s + d.revenue, 0))}</p>
+              <div className="text-right">
+                <p className="text-white text-2xl font-bold">{fmtCur2(totalRevenue30)}</p>
+                {usdToVnd > 0 && (
+                  <p className="text-[#737373] text-[11px] mt-0.5">≈ {fmtVndFull(Math.round(totalRevenue30 * usdToVnd))}</p>
+                )}
+              </div>
             </div>
             <DailyBarChart
               data={daily.map((d) => d.revenue)}
@@ -406,7 +414,12 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
-              <p className="text-white text-2xl font-bold">{fmtCur2(taxedProfit.reduce((s, v) => s + v, 0))}</p>
+              <div className="text-right">
+                <p className="text-white text-2xl font-bold">{fmtCur2(totalProfit30)}</p>
+                {usdToVnd > 0 && (
+                  <p className="text-[#737373] text-[11px] mt-0.5">≈ {fmtVndFull(Math.round(totalProfit30 * usdToVnd))}</p>
+                )}
+              </div>
             </div>
             <DailyBarChart
               data={taxedProfit}
