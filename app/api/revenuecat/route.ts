@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
 
@@ -10,6 +11,8 @@ let overviewCache: { data: unknown; timestamp: number } | null = null;
 let transactionLedgerCache: { key: string; data: TransactionLedger; timestamp: number } | null = null;
 
 const RC_BASE = "https://api.revenuecat.com/v2";
+const REVENUECAT_COST_RATE = 0.01;
+const REVENUECAT_FREE_MTR = 2_500;
 
 // Multiple RevenueCat projects. SwipeAway intentionally omitted —
 // it's hidden from the owner dashboard. Webhook still receives it but
@@ -518,7 +521,38 @@ export type DailyPoint = {
   new_subs: number;
   adspend_with_vat: number;
   cost_per_sub: number;
+  openrouter_cost: number;
+  revenuecat_cost: number;
 };
+
+type GrailScanDailyCall = {
+  date?: string;
+  cost_usd?: number | string | null;
+};
+
+async function fetchOpenRouterCostsByDate(): Promise<Record<string, number>> {
+  const url = process.env.GRAILSCAN_SUPABASE_URL;
+  const secretKey = process.env.GRAILSCAN_SUPABASE_SECRET_KEY;
+  if (!url || !secretKey) throw new Error("GrailScan OpenRouter cost source is not configured");
+
+  const grailscan = createClient(url, secretKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await grailscan.rpc("get_grailscan_dashboard", {
+    p_request_limit: 1,
+    p_days: 30,
+  });
+  if (error) throw new Error(`GrailScan OpenRouter cost query failed: ${error.code}`);
+
+  const costsByDate: Record<string, number> = {};
+  const dailyCalls = ((data as { daily_calls?: GrailScanDailyCall[] } | null)?.daily_calls || []);
+  for (const point of dailyCalls) {
+    const date = point.date?.slice(0, 10);
+    const cost = Number(point.cost_usd || 0);
+    if (date && Number.isFinite(cost)) costsByDate[date] = cost;
+  }
+  return costsByDate;
+}
 
 type RcProject = (typeof RC_PROJECTS)[number];
 type RcList<T> = { items?: T[]; next_page?: string | null };
@@ -873,6 +907,27 @@ function buildDailyPointsFromLedger(
       new_subs: newSubs,
       adspend_with_vat: adspendWithVat,
       cost_per_sub: newSubs > 0 ? adspendWithVat / newSubs : 0,
+      openrouter_cost: 0,
+      revenuecat_cost: 0,
+    };
+  });
+}
+
+function applyGrailScanOperatingCosts(
+  daily: DailyPoint[],
+  openRouterCostsByDate: Record<string, number>
+): DailyPoint[] {
+  const trackedRevenue = daily.reduce((sum, point) => sum + point.revenue, 0);
+  const revenueCatRate = trackedRevenue > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
+
+  return daily.map((point) => {
+    const openrouterCost = openRouterCostsByDate[point.date] || 0;
+    const revenuecatCost = point.revenue * revenueCatRate;
+    return {
+      ...point,
+      profit: point.profit - openrouterCost - revenuecatCost,
+      openrouter_cost: openrouterCost,
+      revenuecat_cost: revenuecatCost,
     };
   });
 }
@@ -1136,18 +1191,28 @@ async function fetchFastTodayStatsFromDb(
   const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
   const cachedDaily = cachedData?.today_vn === today ? cachedData.daily || [] : [];
+  const cachedRevenue30 = cachedDaily.reduce((sum, day) => sum + day.revenue, 0);
+  const cachedTodayRevenue = cachedDaily.find((day) => day.date === today)?.revenue || 0;
+  const refreshedRevenue30 = cachedRevenue30 - cachedTodayRevenue + totalRevenue;
+  const revenueCatRate = refreshedRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
   const daily = cachedDaily.map((point) => ({
     ...point,
     new_subs: point.new_subs || 0,
     adspend_with_vat: point.adspend_with_vat || 0,
     cost_per_sub: point.cost_per_sub || 0,
+    openrouter_cost: point.openrouter_cost || 0,
+    revenuecat_cost: point.revenuecat_cost || 0,
     ...(point.date === today
       ? {
           revenue: totalRevenue,
-          profit: profit.total_profit,
+          profit:
+            profit.total_profit -
+            (point.openrouter_cost || 0) -
+            totalRevenue * revenueCatRate,
           new_subs: newSubs,
           adspend_with_vat: profit.adspend_with_vat,
           cost_per_sub: profit.cost_per_new_sub,
+          revenuecat_cost: totalRevenue * revenueCatRate,
         }
       : {}),
   }));
@@ -1165,18 +1230,22 @@ async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
   const metaVat = META_VAT_RATE;
 
-  const [mrrByApp, ads, spendUsdByDate, ledger] = await Promise.all([
+  const [mrrByApp, ads, spendUsdByDate, ledger, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
     getTodayMetaSpend(),
     getMetaSpendByDay(start, today),
     fetchTransactionLedger(start, endExclusive, appName),
+    appName === "GrailScan" ? fetchOpenRouterCostsByDate() : Promise.resolve({}),
   ]);
 
   if (ads.configured && !ads.error && ads.date === today) {
     spendUsdByDate[today] = ads.spend_usd || 0;
   }
 
-  const daily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat, appName);
+  const baseDaily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat, appName);
+  const daily = appName === "GrailScan"
+    ? applyGrailScanOperatingCosts(baseDaily, openRouterCostsByDate)
+    : baseDaily;
   const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp, appName);
   const perApp = todayLedger.perApp;
   const txns = todayLedger.transactions;

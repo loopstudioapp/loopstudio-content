@@ -12,7 +12,16 @@ type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: numbe
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
-type DailyPoint = { date: string; revenue: number; profit: number; new_subs?: number; adspend_with_vat?: number; cost_per_sub?: number };
+type DailyPoint = {
+  date: string;
+  revenue: number;
+  profit: number;
+  new_subs?: number;
+  adspend_with_vat?: number;
+  cost_per_sub?: number;
+  openrouter_cost?: number;
+  revenuecat_cost?: number;
+};
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan";
@@ -244,6 +253,12 @@ function fmtCur2(n: number): string {
   const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (neg ? "-$" : "$") + abs;
 }
+function fmtApiCost(n: number): string {
+  return "$" + n.toLocaleString("en-US", {
+    minimumFractionDigits: n > 0 && n < 1 ? 4 : 2,
+    maximumFractionDigits: n > 0 && n < 1 ? 4 : 2,
+  });
+}
 // Like fmtCur2 but always shows an explicit + / − sign (for profit boxes)
 function fmtSignedCur(n: number): string {
   const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -319,6 +334,8 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
   const totalRevenue30 = (daily || []).reduce((sum, day) => sum + day.revenue, 0);
   const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
+  const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
+  const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
   const usdToVnd = ads?.usd_rate ?? 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
   const totalSubCost30 = (daily || []).reduce(
@@ -430,6 +447,16 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
             />
+            <div className="mt-3 pt-3 border-t border-[#262626] grid grid-cols-2 gap-3 text-[11px]">
+              <div>
+                <p className="text-[#737373]">OpenRouter API · reported usage</p>
+                <p className="text-white font-semibold mt-0.5">-{fmtApiCost(openRouterCost30)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[#737373]">RevenueCat · 1% tracked revenue</p>
+                <p className="text-white font-semibold mt-0.5">-{fmtCur2(revenueCatCost30)}</p>
+              </div>
+            </div>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
