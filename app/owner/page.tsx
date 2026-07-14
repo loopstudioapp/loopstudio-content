@@ -240,10 +240,10 @@ type DailyCostBreakdown = {
 };
 
 const COST_SEGMENTS = [
-  { key: "meta", label: "Meta", color: "#a3a3a3" },
-  { key: "apple", label: "Apple", color: "#ef4444" },
-  { key: "revenueCat", label: "RevenueCat", color: "#facc15" },
-  { key: "openRouter", label: "OpenRouter", color: "#2563eb" },
+  { key: "meta", label: "Meta", color: "#0082fb" },
+  { key: "apple", label: "Apple", color: "#f5f5f7" },
+  { key: "revenueCat", label: "RevenueCat", color: "#f2545b" },
+  { key: "openRouter", label: "OpenRouter", color: "#c8ff00" },
 ] as const;
 
 function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: string[] }) {
