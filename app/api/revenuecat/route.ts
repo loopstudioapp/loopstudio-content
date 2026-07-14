@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
 
@@ -525,31 +524,65 @@ export type DailyPoint = {
   revenuecat_cost: number;
 };
 
-type GrailScanDailyCall = {
+type OpenRouterKey = {
+  name?: string;
+  hash?: string;
+  usage_daily?: number | string | null;
+};
+
+type OpenRouterActivity = {
   date?: string;
-  cost_usd?: number | string | null;
+  usage?: number | string | null;
 };
 
 async function fetchOpenRouterCostsByDate(): Promise<Record<string, number>> {
-  const url = process.env.GRAILSCAN_SUPABASE_URL;
-  const secretKey = process.env.GRAILSCAN_SUPABASE_SECRET_KEY;
-  if (!url || !secretKey) throw new Error("GrailScan OpenRouter cost source is not configured");
+  const managementKey = process.env.OPENROUTER_MANAGEMENT_API_KEY;
+  const keyName = process.env.OPENROUTER_GRAILSCAN_KEY_NAME || "Sports Card Scanner";
+  if (!managementKey) throw new Error("OpenRouter management API is not configured");
 
-  const grailscan = createClient(url, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  const headers = { Authorization: `Bearer ${managementKey}` };
+  const keysResponse = await fetch("https://openrouter.ai/api/v1/keys", {
+    headers,
+    cache: "no-store",
   });
-  const { data, error } = await grailscan.rpc("get_grailscan_dashboard", {
-    p_request_limit: 1,
-    p_days: 30,
-  });
-  if (error) throw new Error(`GrailScan OpenRouter cost query failed: ${error.code}`);
+  if (!keysResponse.ok) {
+    throw new Error(`OpenRouter key query failed: ${keysResponse.status}`);
+  }
+
+  const keysJson = (await keysResponse.json()) as { data?: OpenRouterKey[] };
+  const matchingKeys = (keysJson.data || []).filter((key) => key.name === keyName && key.hash);
+  if (matchingKeys.length === 0) throw new Error(`OpenRouter key not found: ${keyName}`);
+
+  const activityResponses = await Promise.all(
+    matchingKeys.map(async (key) => {
+      const url = new URL("https://openrouter.ai/api/v1/activity");
+      url.searchParams.set("api_key_hash", key.hash!);
+      const response = await fetch(url, { headers, cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`OpenRouter activity query failed: ${response.status}`);
+      }
+      const json = (await response.json()) as { data?: OpenRouterActivity[] };
+      return json.data || [];
+    })
+  );
 
   const costsByDate: Record<string, number> = {};
-  const dailyCalls = ((data as { daily_calls?: GrailScanDailyCall[] } | null)?.daily_calls || []);
-  for (const point of dailyCalls) {
+  const currentUtcDate = new Date().toISOString().slice(0, 10);
+  for (const point of activityResponses.flat()) {
     const date = point.date?.slice(0, 10);
-    const cost = Number(point.cost_usd || 0);
-    if (date && Number.isFinite(cost)) costsByDate[date] = cost;
+    const cost = Number(point.usage || 0);
+    // Activity contains completed UTC days. The live UTC day comes from
+    // usage_daily below, so ignore it here if the API starts returning it.
+    if (date && date !== currentUtcDate && Number.isFinite(cost)) {
+      costsByDate[date] = (costsByDate[date] || 0) + cost;
+    }
+  }
+
+  for (const key of matchingKeys) {
+    const currentCost = Number(key.usage_daily || 0);
+    if (Number.isFinite(currentCost)) {
+      costsByDate[currentUtcDate] = (costsByDate[currentUtcDate] || 0) + currentCost;
+    }
   }
   return costsByDate;
 }

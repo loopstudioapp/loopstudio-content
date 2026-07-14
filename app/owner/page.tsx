@@ -449,7 +449,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
             />
             <div className="mt-3 pt-3 border-t border-[#262626] grid grid-cols-2 gap-3 text-[11px]">
               <div>
-                <p className="text-[#737373]">OpenRouter API · reported usage</p>
+                <p className="text-[#737373]">OpenRouter API · official UTC activity</p>
                 <p className="text-white font-semibold mt-0.5">-{fmtApiCost(openRouterCost30)}</p>
               </div>
               <div className="text-right">
