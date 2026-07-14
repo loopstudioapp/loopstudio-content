@@ -607,13 +607,13 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <p className="text-[#8b5cf6] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
+              <p className="text-[#d946ef] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
               <p className="text-white text-2xl font-bold">{fmtNum(totalNewSubs30)}</p>
             </div>
             <DailyBarChart
               data={daily.map((d) => d.new_subs || 0)}
               dates={daily.map((d) => d.date)}
-              color="#8b5cf6"
+              color="#d946ef"
               label="New subscriptions"
               valueLabel={(value) => value.toFixed(0)}
               tooltipValue={(value) => `${value.toFixed(0)} new ${value === 1 ? "sub" : "subs"}`}
