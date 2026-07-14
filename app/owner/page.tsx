@@ -232,6 +232,125 @@ function DailyBarChart({
   );
 }
 
+type DailyCostBreakdown = {
+  meta: number;
+  apple: number;
+  revenueCat: number;
+  openRouter: number;
+};
+
+const COST_SEGMENTS = [
+  { key: "meta", label: "Meta", color: "#a3a3a3" },
+  { key: "apple", label: "Apple", color: "#ef4444" },
+  { key: "revenueCat", label: "RevenueCat", color: "#facc15" },
+  { key: "openRouter", label: "OpenRouter", color: "#2563eb" },
+] as const;
+
+function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: string[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
+
+  const w = 960;
+  const h = 165;
+  const pad = { top: 25, right: 8, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const totals = data.map((day) => COST_SEGMENTS.reduce((sum, segment) => sum + day[segment.key], 0));
+  const rawMax = Math.max(...totals, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
+  const chartMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
+  const slot = plotW / data.length;
+  const barW = Math.max(8, Math.min(22, slot * 0.62));
+  const yOf = (value: number) => pad.top + ((chartMax - value) / chartMax) * plotH;
+  const gridValues = [chartMax, chartMax / 2, 0];
+
+  return (
+    <div className="relative overflow-x-auto pb-1 [direction:rtl] sm:[direction:ltr]">
+      <div dir="ltr" className="relative min-w-[960px]">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          className="block w-full cursor-crosshair"
+          role="img"
+          aria-label="Meta, Apple, RevenueCat, and OpenRouter costs by day for the last 30 days"
+          onMouseLeave={() => setHover(null)}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * w;
+            const index = Math.floor((x - pad.left) / slot);
+            setHover(Math.max(0, Math.min(data.length - 1, index)));
+          }}
+        >
+          {gridValues.map((value) => {
+            const y = yOf(value);
+            return (
+              <g key={value}>
+                <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke="#2f2f2f" strokeWidth="1" />
+                <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{fmtCompactCur(value)}</text>
+              </g>
+            );
+          })}
+          {data.map((day, i) => {
+            const x = pad.left + i * slot + slot / 2;
+            const active = hover === i;
+            let cumulative = 0;
+            return (
+              <g key={`${dates[i]}-${i}`}>
+                {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="#f59e0b" opacity="0.08" />}
+                {COST_SEGMENTS.map((segment) => {
+                  const value = day[segment.key];
+                  const bottom = yOf(cumulative);
+                  cumulative += value;
+                  const top = yOf(cumulative);
+                  return value > 0 ? (
+                    <rect
+                      key={segment.key}
+                      x={x - barW / 2}
+                      y={top}
+                      width={barW}
+                      height={Math.max(1, bottom - top)}
+                      fill={segment.color}
+                      opacity={active ? 1 : 0.86}
+                    />
+                  ) : null;
+                })}
+                <text x={x} y={Math.max(10, yOf(totals[i]) - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
+                  {fmtCompactCur(totals[i])}
+                </text>
+                <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">
+                  {dates[i]?.slice(5)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+        {hover !== null && (
+          <div
+            className="absolute top-0 pointer-events-none bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 shadow-xl z-10 min-w-36"
+            style={{
+              left: `${((pad.left + hover * slot + slot / 2) / w) * 100}%`,
+              transform: hover < 2 ? "translateX(0)" : hover > data.length - 3 ? "translateX(-100%)" : "translateX(-50%)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-5 mb-1.5">
+              <p className="text-[#a3a3a3] text-[10px] whitespace-nowrap">{dates[hover]}</p>
+              <p className="text-white text-xs font-bold whitespace-nowrap">{fmtCur2(totals[hover])}</p>
+            </div>
+            {COST_SEGMENTS.map((segment) => (
+              <div key={segment.key} className="flex items-center justify-between gap-5 text-[10px] leading-5">
+                <span className="flex items-center gap-1.5 text-[#a3a3a3] whitespace-nowrap">
+                  <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
+                  {segment.label}
+                </span>
+                <span className="text-white font-medium">{fmtApiCost(data[hover][segment.key])}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Helpers ── */
 function countryFlag(code: string): string {
   if (!code || code.length !== 2) return "🌍";
@@ -336,6 +455,18 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
   const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
+  const appleCost30 = (daily || []).reduce(
+    (sum, day) => sum + day.revenue * (profit?.apple_commission_rate ?? 0.15),
+    0
+  );
+  const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
+  const totalCost30 = metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30;
+  const dailyCosts = (daily || []).map((day) => ({
+    meta: day.adspend_with_vat || 0,
+    apple: day.revenue * (profit?.apple_commission_rate ?? 0.15),
+    revenueCat: day.revenuecat_cost || 0,
+    openRouter: day.openrouter_cost || 0,
+  }));
   const usdToVnd = ads?.usd_rate ?? 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
   const totalSubCost30 = (daily || []).reduce(
@@ -447,16 +578,32 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
             />
-            <div className="mt-3 pt-3 border-t border-[#262626] grid grid-cols-2 gap-3 text-[11px]">
+          </div>
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-start justify-between gap-4 mb-3">
               <div>
-                <p className="text-[#737373]">OpenRouter API · official UTC activity</p>
-                <p className="text-white font-semibold mt-0.5">-{fmtApiCost(openRouterCost30)}</p>
+                <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Cost</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                  {COST_SEGMENTS.map((segment) => {
+                    const values = { meta: metaCost30, apple: appleCost30, revenueCat: revenueCatCost30, openRouter: openRouterCost30 };
+                    return (
+                      <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
+                        <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
+                        {segment.label} <span className="text-white font-medium">{fmtCur2(values[segment.key])}</span>
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-[#737373]">RevenueCat · 1% tracked revenue</p>
-                <p className="text-white font-semibold mt-0.5">-{fmtCur2(revenueCatCost30)}</p>
+              <div className="text-right shrink-0">
+                <p className="text-white text-2xl font-bold">{fmtCur2(totalCost30)}</p>
+                {usdToVnd > 0 && (
+                  <p className="text-[#737373] text-[11px] mt-0.5">≈ {fmtVndFull(Math.round(totalCost30 * usdToVnd))}</p>
+                )}
               </div>
             </div>
+            <StackedCostChart data={dailyCosts} dates={daily.map((d) => d.date)} />
+            <p className="text-[#525252] text-[10px] mt-2">Meta includes 10% VAT · OpenRouter uses official UTC activity</p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
