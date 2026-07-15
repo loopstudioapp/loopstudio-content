@@ -748,7 +748,7 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
 
 /* ── Main ── */
 export default function OwnerDashboard() {
-  const { lang, setLang, t } = useLang();
+  const { t } = useLang();
   const router = useRouter();
 
   // GrailScan-only stats and transactions for the owner dashboard.
@@ -875,9 +875,8 @@ export default function OwnerDashboard() {
           <p className="text-xs text-[#525252]">Dashboard Overview</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/owner/tiktok" className={btnCls}>TikTok</Link>
-          <Link href="/owner/pinterest" className={btnCls}>Pinterest</Link>
-          <button onClick={() => setLang(lang === "en" ? "vi" : "en")} className={btnCls}>{lang === "en" ? "VN" : "EN"}</button>
+          <Link href="/timer" className={btnCls}>Timer</Link>
+          <Link href="/grailscan" className={btnCls}>Server</Link>
           <Link href="/" className={btnCls}>{t("logout")}</Link>
         </div>
       </div>
