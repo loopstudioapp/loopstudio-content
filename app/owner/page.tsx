@@ -877,6 +877,7 @@ export default function OwnerDashboard() {
         <div className="flex items-center gap-2">
           <Link href="/timer" className={btnCls}>Timer</Link>
           <Link href="/grailscan" className={btnCls}>Server</Link>
+          <Link href="/portfolio" className={btnCls}>Portfolio</Link>
           <Link href="/" className={btnCls}>{t("logout")}</Link>
         </div>
       </div>
