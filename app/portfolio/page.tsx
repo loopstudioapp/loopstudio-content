@@ -49,19 +49,19 @@ const investments: Investment[] = [
     status: "Income",
   },
   {
+    name: "Loop Studio",
+    detail: "App studio",
+    category: "Business",
+    valueVnd: 150_000 * USD_TO_VND,
+    currentMonthlyVnd: 2_000 * USD_TO_VND,
+    status: "Income",
+  },
+  {
     name: "Huynh Van Chinh Apartment",
     detail: "Residential apartment",
     category: "Real Estate",
     valueVnd: 2_100_000_000,
     status: "Idle",
-  },
-  {
-    name: "Loop Studio",
-    detail: "App studio",
-    category: "Business",
-    valueVnd: 1_500_000_000,
-    currentMonthlyVnd: 2_000 * USD_TO_VND,
-    status: "Income",
   },
   {
     name: "CMTech",
