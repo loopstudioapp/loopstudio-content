@@ -1,14 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
-import { NextRequest, NextResponse } from "next/server";
-import { hasValidGrailScanSession } from "@/lib/grailscan-auth";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
-  if (!hasValidGrailScanSession(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function GET() {
   const url = process.env.GRAILSCAN_SUPABASE_URL;
   const secretKey = process.env.GRAILSCAN_SUPABASE_SECRET_KEY;
   if (!url || !secretKey) {

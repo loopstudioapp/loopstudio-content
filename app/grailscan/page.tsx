@@ -8,14 +8,11 @@ import {
   Cpu,
   Database,
   ExternalLink,
-  KeyRound,
-  LogOut,
   RefreshCw,
   Search,
-  ShieldCheck,
   WalletCards,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type PriceObservation = {
   price_usd: number | string;
@@ -136,71 +133,6 @@ function cardSubtitle(identity: Record<string, unknown> | null): string {
 
 function maskedUser(value: string): string {
   return value ? `user_${value.slice(-6)}` : "anonymous";
-}
-
-function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    try {
-      const response = await fetch("/api/grailscan/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-      });
-      if (!response.ok) {
-        setError("Incorrect password");
-        return;
-      }
-      setPassword("");
-      onAuthenticated();
-    } catch {
-      setError("Could not connect");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="min-h-screen flex items-center justify-center px-6 bg-[#0a0a0a]">
-      <form onSubmit={submit} className="w-full max-w-sm">
-        <div className="w-14 h-14 bg-[#00b894] text-black flex items-center justify-center mb-6 rounded-lg">
-          <ShieldCheck size={26} strokeWidth={2.4} />
-        </div>
-        <p className="text-[#00b894] text-xs font-semibold uppercase tracking-[0.18em] mb-2">GrailScan</p>
-        <h1 className="text-2xl font-bold text-white mb-2">Analytics dashboard</h1>
-        <p className="text-sm text-[#737373] mb-7">Private Loop Studio access</p>
-        <label htmlFor="dashboard-password" className="block text-xs font-semibold text-[#a3a3a3] mb-2">
-          Password
-        </label>
-        <div className="relative">
-          <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#525252]" />
-          <input
-            id="dashboard-password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="w-full h-11 bg-[#141414] border border-[#333] rounded-lg pl-10 pr-3 text-white outline-none focus:border-[#00b894]"
-            autoFocus
-          />
-        </div>
-        {error && <p className="text-[#ef4444] text-xs mt-2">{error}</p>}
-        <button
-          type="submit"
-          disabled={!password || submitting}
-          className="w-full h-11 mt-4 bg-[#00b894] text-black text-sm font-bold rounded-lg disabled:opacity-40 hover:bg-[#11cdaa] transition-colors"
-        >
-          {submitting ? "Signing in…" : "Open dashboard"}
-        </button>
-      </form>
-    </main>
-  );
 }
 
 function StatCard({
@@ -469,7 +401,6 @@ function FragmentCardRow({
 
 export default function GrailScanDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -478,14 +409,8 @@ export default function GrailScanDashboard() {
     if (initial) setLoading(true); else setRefreshing(true);
     try {
       const response = await fetch("/api/grailscan/data", { cache: "no-store" });
-      if (response.status === 401) {
-        setAuthRequired(true);
-        setData(null);
-        return;
-      }
       if (!response.ok) throw new Error("Could not load dashboard");
       setData(await response.json() as DashboardData);
-      setAuthRequired(false);
       setError("");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load dashboard");
@@ -500,22 +425,14 @@ export default function GrailScanDashboard() {
   }, [load]);
 
   useEffect(() => {
-    if (authRequired || !data) return;
+    if (!data) return;
     const timer = window.setInterval(() => load(false), REFRESH_INTERVAL);
     return () => window.clearInterval(timer);
-  }, [authRequired, data, load]);
-
-  async function logout() {
-    await fetch("/api/grailscan/auth", { method: "DELETE" });
-    setData(null);
-    setAuthRequired(true);
-  }
+  }, [data, load]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-sm text-[#737373]">Loading GrailScan…</div>;
   }
-  if (authRequired) return <Login onAuthenticated={() => load(true)} />;
-
   return (
     <main className="min-h-screen bg-[#0a0a0a]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -532,7 +449,7 @@ export default function GrailScanDashboard() {
               {data?.generated_at && <span className="hidden sm:inline">· synced {formatDate(data.generated_at)}</span>}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div>
             <button
               onClick={() => load(false)}
               disabled={refreshing}
@@ -540,13 +457,6 @@ export default function GrailScanDashboard() {
               className="w-9 h-9 rounded-lg bg-[#141414] border border-[#2a2a2a] text-[#737373] hover:text-white flex items-center justify-center disabled:opacity-50"
             >
               <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
-            </button>
-            <button
-              onClick={logout}
-              title="Sign out"
-              className="w-9 h-9 rounded-lg bg-[#141414] border border-[#2a2a2a] text-[#737373] hover:text-white flex items-center justify-center"
-            >
-              <LogOut size={15} />
             </button>
           </div>
         </header>
