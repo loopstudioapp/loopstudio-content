@@ -30,7 +30,7 @@
     },
     {
       "path": "/api/game-studio?refresh=1",
-      "schedule": "0 0,12 * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
