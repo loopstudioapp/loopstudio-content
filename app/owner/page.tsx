@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ExternalLink, MessageCircle, RefreshCw, Share2, ThumbsUp } from "lucide-react";
 
 /* ── Types ── */
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
@@ -23,6 +24,18 @@ type DailyPoint = {
   revenuecat_cost?: number;
 };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
+type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
+type GameStudioPage = { key: string; name: string; url: string; summary: string; posts: GameStudioPost[] };
+type GameStudioData = { generated_at: string; window_start: string; overall_summary: string; total_posts: number; pages: GameStudioPage[] };
+type GameStudioResponse = {
+  ok: boolean;
+  data: GameStudioData | null;
+  updated_at?: string;
+  next_refresh_at?: string;
+  refresh_skipped?: boolean;
+  refresh_error?: string;
+  error?: string;
+};
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan";
 const TODAY_STATS_URL = `/api/revenuecat?type=today_stats&app=${encodeURIComponent(OWNER_APP)}`;
@@ -30,6 +43,139 @@ const TODAY_STATS_URL = `/api/revenuecat?type=today_stats&app=${encodeURICompone
 function mergeChartStats(prev: TodayStats | null, next: TodayStats): TodayStats {
   if (!prev) return next;
   return { ...prev, daily: next.daily || prev.daily };
+}
+
+function gameStudioTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function GameStudioSection({
+  response,
+  loading,
+  error,
+  onRefresh,
+}: {
+  response: GameStudioResponse | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const data = response?.data;
+
+  return (
+    <section className="pb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Game Studio</h2>
+          {data && <span className="text-[10px] text-[#525252]">{data.total_posts} posts · last 24 hours</span>}
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="h-8 px-3 inline-flex items-center gap-1.5 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+          {loading ? "Refreshing" : "Refresh"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="border-y border-[#ef4444]/20 py-3 text-[#ef4444] text-sm mb-4">{error}</div>
+      )}
+
+      {loading && !data && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="h-48 bg-[#141414] border border-[#262626] rounded-lg animate-pulse" />
+          ))}
+        </div>
+      )}
+
+      {!loading && !data && !error && (
+        <div className="border-y border-[#262626] py-8 text-center">
+          <p className="text-sm text-[#737373]">No Facebook update cache yet.</p>
+          <p className="text-xs text-[#525252] mt-1">Refresh once to create it; later page loads use the cache for free.</p>
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div className="border-y border-[#262626] py-4 mb-4">
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-[#22c55e] mb-1">24-hour summary</p>
+            <p className="text-sm leading-6 text-[#d4d4d4]">{data.overall_summary}</p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] text-[#525252]">
+              {response?.updated_at && <span>Updated {gameStudioTime(response.updated_at)} GMT+7</span>}
+              {response?.next_refresh_at && <span>Next paid refresh after {gameStudioTime(response.next_refresh_at)}</span>}
+              {response?.refresh_skipped && <span className="text-[#22c55e]">Cache reused · no Apify charge</span>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {data.pages.map((page) => (
+              <article key={page.key} className="bg-[#141414] border border-[#262626] rounded-lg overflow-hidden">
+                <div className="p-4 border-b border-[#262626]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <a
+                        href={page.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
+                      >
+                        <span className="truncate">{page.name}</span>
+                        <ExternalLink size={12} className="shrink-0" />
+                      </a>
+                      <p className="text-xs leading-5 text-[#737373] mt-1">{page.summary}</p>
+                    </div>
+                    <span className="shrink-0 min-w-7 h-7 px-2 inline-flex items-center justify-center bg-[#0f2419] text-[#22c55e] text-xs font-bold rounded-md">
+                      {page.posts.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-[#222]">
+                  {page.posts.map((post) => (
+                    <a
+                      key={post.id}
+                      href={post.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block p-4 hover:bg-[#181818] transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <time className="text-[10px] text-[#525252]">{gameStudioTime(post.created_at)} GMT+7</time>
+                        <ExternalLink size={11} className="text-[#404040]" />
+                      </div>
+                      <p className="text-xs leading-5 text-[#b3b3b3] whitespace-pre-line line-clamp-4">
+                        {post.text || "Media post without a text caption."}
+                      </p>
+                      <div className="flex items-center gap-4 mt-3 text-[10px] text-[#525252]">
+                        <span className="inline-flex items-center gap-1"><ThumbsUp size={11} />{post.likes}</span>
+                        <span className="inline-flex items-center gap-1"><MessageCircle size={11} />{post.comments}</span>
+                        <span className="inline-flex items-center gap-1"><Share2 size={11} />{post.shares}</span>
+                      </div>
+                    </a>
+                  ))}
+                  {!page.posts.length && (
+                    <p className="p-6 text-center text-xs text-[#525252]">No posts in the last 24 hours.</p>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 /* ── Interactive Chart with Hover Tooltip ── */
@@ -758,6 +904,9 @@ export default function OwnerDashboard() {
   const [fabi, setFabi] = useState<FabiData | null>(null);
   const [fabiLoading, setFabiLoading] = useState(false);
   const [fabiError, setFabiError] = useState<string | null>(null);
+  const [gameStudio, setGameStudio] = useState<GameStudioResponse | null>(null);
+  const [gameStudioLoading, setGameStudioLoading] = useState(true);
+  const [gameStudioError, setGameStudioError] = useState<string | null>(null);
 
   // Ket Coffee stays independent from the GrailScan-only app metrics.
   useEffect(() => {
@@ -768,6 +917,29 @@ export default function OwnerDashboard() {
       })
       .catch(() => {});
   }, []);
+
+  const loadGameStudio = useCallback(async (refresh = false) => {
+    setGameStudioLoading(true);
+    setGameStudioError(null);
+    try {
+      const response = await fetch("/api/game-studio", {
+        method: refresh ? "POST" : "GET",
+        cache: "no-store",
+      });
+      const result = await response.json() as GameStudioResponse;
+      if (!response.ok || !result.ok) throw new Error(result.error || "Could not load Game Studio updates");
+      setGameStudio(result);
+      if (result.refresh_error) setGameStudioError(result.refresh_error);
+    } catch (loadError) {
+      setGameStudioError(loadError instanceof Error ? loadError.message : "Could not load Game Studio updates");
+    } finally {
+      setGameStudioLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGameStudio(false);
+  }, [loadGameStudio]);
 
   // Load today's GrailScan stats on mount.
   useEffect(() => {
@@ -960,6 +1132,13 @@ export default function OwnerDashboard() {
           </div>
         )}
       </section>
+
+      <GameStudioSection
+        response={gameStudio}
+        loading={gameStudioLoading}
+        error={gameStudioError}
+        onRefresh={() => loadGameStudio(true)}
+      />
     </div>
   );
 }
