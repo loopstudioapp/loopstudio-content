@@ -151,15 +151,6 @@ function GameStudioSection({
 
       {data && (
         <>
-          <div className="border-y border-[#262626] py-4 mb-4">
-            <p className="text-[10px] uppercase tracking-wider font-semibold text-[#22c55e] mb-1">24-hour summary</p>
-            <p className="text-sm leading-6 text-[#d4d4d4]">{data.overall_summary}</p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] text-[#525252]">
-              {response?.updated_at && <span>Updated {gameStudioTime(response.updated_at)} GMT+7</span>}
-              <span>Auto refreshes daily at 00:00 GMT+7</span>
-            </div>
-          </div>
-
           <div className="space-y-4 lg:hidden">
             {data.pages.map((page) => (
               <GameStudioPageCard key={page.key} page={page} />
