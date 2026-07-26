@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ExternalLink, MessageCircle, RefreshCw, Share2, ThumbsUp } from "lucide-react";
+import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
 
 /* ── Types ── */
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
@@ -57,35 +57,77 @@ function gameStudioTime(value: string): string {
   }).format(date);
 }
 
+function GameStudioPageCard({ page }: { page: GameStudioPage }) {
+  return (
+    <article className="bg-[#141414] border border-[#262626] rounded-lg overflow-hidden">
+      <div className="p-4 border-b border-[#262626]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <a
+              href={page.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex max-w-full min-w-0 items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
+            >
+              <span className="min-w-0 truncate">{page.name}</span>
+              <ExternalLink size={12} className="shrink-0" />
+            </a>
+            <p className="text-xs leading-5 text-[#737373] mt-1 break-words">{page.summary}</p>
+          </div>
+          <span className="shrink-0 min-w-7 h-7 px-2 inline-flex items-center justify-center bg-[#0f2419] text-[#22c55e] text-xs font-bold rounded-md">
+            {page.posts.length}
+          </span>
+        </div>
+      </div>
+
+      <div className="divide-y divide-[#222]">
+        {page.posts.map((post) => (
+          <a
+            key={post.id}
+            href={post.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block p-4 hover:bg-[#181818] transition-colors"
+          >
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <time className="text-[10px] text-[#525252]">{gameStudioTime(post.created_at)} GMT+7</time>
+              <ExternalLink size={11} className="shrink-0 text-[#404040]" />
+            </div>
+            <p className="text-xs leading-5 text-[#b3b3b3] whitespace-pre-wrap break-words">
+              {post.text || "Media post without a text caption."}
+            </p>
+            <div className="flex items-center gap-4 mt-3 text-[10px] text-[#525252]">
+              <span className="inline-flex items-center gap-1"><ThumbsUp size={11} />{post.likes}</span>
+              <span className="inline-flex items-center gap-1"><MessageCircle size={11} />{post.comments}</span>
+              <span className="inline-flex items-center gap-1"><Share2 size={11} />{post.shares}</span>
+            </div>
+          </a>
+        ))}
+        {!page.posts.length && (
+          <p className="p-6 text-center text-xs text-[#525252]">No posts in the last 24 hours.</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
 function GameStudioSection({
   response,
   loading,
   error,
-  onRefresh,
 }: {
   response: GameStudioResponse | null;
   loading: boolean;
   error: string | null;
-  onRefresh: () => void;
 }) {
   const data = response?.data;
 
   return (
     <section className="pb-8">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Game Studio</h2>
-          {data && <span className="text-[10px] text-[#525252]">{data.total_posts} posts · last 24 hours</span>}
-        </div>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          className="h-8 px-3 inline-flex items-center gap-1.5 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-          {loading ? "Refreshing" : "Refresh"}
-        </button>
+      <div className="flex items-center gap-2 mb-5">
+        <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Game Studio</h2>
+        {data && <span className="text-[10px] text-[#525252]">{data.total_posts} posts · last 24 hours</span>}
       </div>
 
       {error && (
@@ -103,7 +145,7 @@ function GameStudioSection({
       {!loading && !data && !error && (
         <div className="border-y border-[#262626] py-8 text-center">
           <p className="text-sm text-[#737373]">No Facebook update cache yet.</p>
-          <p className="text-xs text-[#525252] mt-1">Refresh once to create it; later page loads use the cache for free.</p>
+          <p className="text-xs text-[#525252] mt-1">The feed refreshes automatically at 00:00 GMT+7.</p>
         </div>
       )}
 
@@ -114,62 +156,23 @@ function GameStudioSection({
             <p className="text-sm leading-6 text-[#d4d4d4]">{data.overall_summary}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] text-[#525252]">
               {response?.updated_at && <span>Updated {gameStudioTime(response.updated_at)} GMT+7</span>}
-              {response?.next_refresh_at && <span>Next paid refresh after {gameStudioTime(response.next_refresh_at)}</span>}
-              {response?.refresh_skipped && <span className="text-[#22c55e]">Cache reused · no Apify charge</span>}
+              <span>Auto refreshes daily at 00:00 GMT+7</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-4 lg:hidden">
             {data.pages.map((page) => (
-              <article key={page.key} className="bg-[#141414] border border-[#262626] rounded-lg overflow-hidden">
-                <div className="p-4 border-b border-[#262626]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <a
-                        href={page.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex max-w-full min-w-0 items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
-                      >
-                        <span className="min-w-0 truncate">{page.name}</span>
-                        <ExternalLink size={12} className="shrink-0" />
-                      </a>
-                      <p className="text-xs leading-5 text-[#737373] mt-1">{page.summary}</p>
-                    </div>
-                    <span className="shrink-0 min-w-7 h-7 px-2 inline-flex items-center justify-center bg-[#0f2419] text-[#22c55e] text-xs font-bold rounded-md">
-                      {page.posts.length}
-                    </span>
-                  </div>
-                </div>
+              <GameStudioPageCard key={page.key} page={page} />
+            ))}
+          </div>
 
-                <div className="divide-y divide-[#222]">
-                  {page.posts.map((post) => (
-                    <a
-                      key={post.id}
-                      href={post.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block p-4 hover:bg-[#181818] transition-colors"
-                    >
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <time className="text-[10px] text-[#525252]">{gameStudioTime(post.created_at)} GMT+7</time>
-                        <ExternalLink size={11} className="text-[#404040]" />
-                      </div>
-                      <p className="text-xs leading-5 text-[#b3b3b3] whitespace-pre-line line-clamp-4">
-                        {post.text || "Media post without a text caption."}
-                      </p>
-                      <div className="flex items-center gap-4 mt-3 text-[10px] text-[#525252]">
-                        <span className="inline-flex items-center gap-1"><ThumbsUp size={11} />{post.likes}</span>
-                        <span className="inline-flex items-center gap-1"><MessageCircle size={11} />{post.comments}</span>
-                        <span className="inline-flex items-center gap-1"><Share2 size={11} />{post.shares}</span>
-                      </div>
-                    </a>
-                  ))}
-                  {!page.posts.length && (
-                    <p className="p-6 text-center text-xs text-[#525252]">No posts in the last 24 hours.</p>
-                  )}
-                </div>
-              </article>
+          <div className="hidden lg:grid lg:grid-cols-2 lg:items-start gap-4">
+            {[0, 1].map((column) => (
+              <div key={column} className="space-y-4">
+                {data.pages
+                  .filter((_, index) => index % 2 === column)
+                  .map((page) => <GameStudioPageCard key={page.key} page={page} />)}
+              </div>
             ))}
           </div>
         </>
@@ -918,14 +921,11 @@ export default function OwnerDashboard() {
       .catch(() => {});
   }, []);
 
-  const loadGameStudio = useCallback(async (refresh = false) => {
+  const loadGameStudio = useCallback(async () => {
     setGameStudioLoading(true);
     setGameStudioError(null);
     try {
-      const response = await fetch("/api/game-studio", {
-        method: refresh ? "POST" : "GET",
-        cache: "no-store",
-      });
+      const response = await fetch("/api/game-studio", { cache: "no-store" });
       const result = await response.json() as GameStudioResponse;
       if (!response.ok || !result.ok) throw new Error(result.error || "Could not load Game Studio updates");
       setGameStudio(result);
@@ -938,7 +938,7 @@ export default function OwnerDashboard() {
   }, []);
 
   useEffect(() => {
-    loadGameStudio(false);
+    loadGameStudio();
   }, [loadGameStudio]);
 
   // Load today's GrailScan stats on mount.
@@ -1137,7 +1137,6 @@ export default function OwnerDashboard() {
         response={gameStudio}
         loading={gameStudioLoading}
         error={gameStudioError}
-        onRefresh={() => loadGameStudio(true)}
       />
     </div>
   );
