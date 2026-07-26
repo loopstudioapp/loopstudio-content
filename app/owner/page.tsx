@@ -129,9 +129,9 @@ function GameStudioSection({
                         href={page.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
+                        className="flex max-w-full min-w-0 items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
                       >
-                        <span className="truncate">{page.name}</span>
+                        <span className="min-w-0 truncate">{page.name}</span>
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
                       <p className="text-xs leading-5 text-[#737373] mt-1">{page.summary}</p>
