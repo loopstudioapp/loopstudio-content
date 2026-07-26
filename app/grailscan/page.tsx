@@ -12,7 +12,7 @@ import {
   Search,
   WalletCards,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type PriceObservation = {
   price_usd: number | string;
@@ -29,6 +29,24 @@ type CardIdentity = {
   confidence: string | null;
   created_at: string;
   updated_at: string;
+  price_count: number;
+  latest_price: PriceObservation | null;
+};
+
+type CardCursor = {
+  updated_at: string;
+  id: string;
+};
+
+type CardPageData = {
+  cards: CardIdentity[];
+  has_more: boolean;
+  next_cursor: CardCursor | null;
+};
+
+type PriceHistoryData = {
+  card_id: string;
+  total_count: number;
   prices: PriceObservation[];
 };
 
@@ -72,10 +90,14 @@ type DashboardData = {
     ai_calls_today: number;
     ai_cost_today: number | string;
   };
-  cards: CardIdentity[];
   recent_requests: ScanRequest[];
   daily_calls: DailyCall[];
   calls_by_operation: OperationCall[];
+};
+
+type RecentScansData = {
+  generated_at: string;
+  recent_requests: ScanRequest[];
 };
 
 const REFRESH_INTERVAL = 5_000;
@@ -258,14 +280,119 @@ function RequestStatus({ request }: { request: ScanRequest }) {
   );
 }
 
-function CardDatabase({ cards }: { cards: CardIdentity[] }) {
+type PriceHistoryState = {
+  loading: boolean;
+  error: string;
+  data: PriceHistoryData | null;
+};
+
+function CardDatabase({ refreshNonce }: { refreshNonce: number }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return cards;
-    return cards.filter((card) => JSON.stringify(card.identity).toLowerCase().includes(needle));
-  }, [cards, query]);
+  const [cards, setCards] = useState<CardIdentity[]>([]);
+  const [cursor, setCursor] = useState<CardCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
+  const [histories, setHistories] = useState<Record<string, PriceHistoryState>>({});
+  const requestSequenceRef = useRef(0);
+
+  const loadCards = useCallback(async ({
+    reset,
+    searchQuery,
+    pageCursor,
+  }: {
+    reset: boolean;
+    searchQuery: string;
+    pageCursor: CardCursor | null;
+  }) => {
+    const sequence = ++requestSequenceRef.current;
+    if (reset) {
+      setLoading(true);
+      setCards([]);
+      setCursor(null);
+      setHasMore(false);
+      setExpanded(null);
+    } else {
+      setLoadingMore(true);
+    }
+    setError("");
+
+    try {
+      const params = new URLSearchParams();
+      const trimmedQuery = searchQuery.trim();
+      if (trimmedQuery) params.set("query", trimmedQuery);
+      if (pageCursor) {
+        params.set("cursor_updated_at", pageCursor.updated_at);
+        params.set("cursor_id", pageCursor.id);
+      }
+
+      const response = await fetch(`/api/grailscan/cards?${params}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load cards");
+      const page = await response.json() as CardPageData;
+      if (sequence !== requestSequenceRef.current) return;
+
+      setCards((current) => {
+        if (reset) return page.cards;
+        const cardsByID = new Map(current.map((card) => [card.id, card]));
+        page.cards.forEach((card) => cardsByID.set(card.id, card));
+        return Array.from(cardsByID.values());
+      });
+      setCursor(page.next_cursor);
+      setHasMore(page.has_more);
+    } catch (loadError) {
+      if (sequence !== requestSequenceRef.current) return;
+      setError(loadError instanceof Error ? loadError.message : "Could not load cards");
+    } finally {
+      if (sequence === requestSequenceRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, []);
+
+  const loadHistory = useCallback(async (cardID: string) => {
+    setHistories((current) => ({
+      ...current,
+      [cardID]: { loading: true, error: "", data: current[cardID]?.data ?? null },
+    }));
+    try {
+      const params = new URLSearchParams({ card_id: cardID });
+      const response = await fetch(`/api/grailscan/card-prices?${params}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load price history");
+      const history = await response.json() as PriceHistoryData;
+      setHistories((current) => ({
+        ...current,
+        [cardID]: { loading: false, error: "", data: history },
+      }));
+    } catch (loadError) {
+      setHistories((current) => ({
+        ...current,
+        [cardID]: {
+          loading: false,
+          error: loadError instanceof Error ? loadError.message : "Could not load price history",
+          data: current[cardID]?.data ?? null,
+        },
+      }));
+    }
+  }, []);
+
+  const toggleCard = useCallback((cardID: string) => {
+    if (expanded === cardID) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(cardID);
+    if (!histories[cardID]) void loadHistory(cardID);
+  }, [expanded, histories, loadHistory]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadCards({ reset: true, searchQuery: query, pageCursor: null });
+    }, query.trim() ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [loadCards, query, refreshNonce]);
 
   return (
     <section className="mt-10">
@@ -298,26 +425,55 @@ function CardDatabase({ cards }: { cards: CardIdentity[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#222]">
-              {filtered.map((card) => {
-                const latest = card.prices[0];
+              {cards.map((card) => {
                 const open = expanded === card.id;
                 return (
                   <FragmentCardRow
                     key={card.id}
                     card={card}
-                    latest={latest}
+                    latest={card.latest_price ?? undefined}
                     open={open}
-                    onToggle={() => setExpanded(open ? null : card.id)}
+                    history={histories[card.id]}
+                    onToggle={() => toggleCard(card.id)}
+                    onRetryHistory={() => loadHistory(card.id)}
                   />
                 );
               })}
-              {filtered.length === 0 && (
+              {loading && (
+                <tr><td colSpan={6} className="px-4 py-14 text-center text-sm text-[#525252]">Loading cards…</td></tr>
+              )}
+              {!loading && error && !cards.length && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center">
+                    <p className="text-sm text-[#ef4444]">{error}</p>
+                    <button
+                      onClick={() => loadCards({ reset: true, searchQuery: query, pageCursor: null })}
+                      className="mt-3 text-xs font-semibold text-[#00b894] hover:text-white"
+                    >
+                      Retry
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {!loading && !error && cards.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-14 text-center text-sm text-[#525252]">No cards match this search.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      {error && cards.length > 0 && <p className="text-xs text-[#ef4444] mt-3">{error}</p>}
+      {hasMore && (
+        <div className="flex justify-center mt-4">
+          <button
+            onClick={() => loadCards({ reset: false, searchQuery: query, pageCursor: cursor })}
+            disabled={loadingMore || !cursor}
+            className="h-9 px-4 rounded-lg bg-[#141414] border border-[#2a2a2a] text-xs font-semibold text-[#a3a3a3] hover:text-white hover:border-[#3a3a3a] disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -326,13 +482,18 @@ function FragmentCardRow({
   card,
   latest,
   open,
+  history,
   onToggle,
+  onRetryHistory,
 }: {
   card: CardIdentity;
   latest?: PriceObservation;
   open: boolean;
+  history?: PriceHistoryState;
   onToggle: () => void;
+  onRetryHistory: () => void;
 }) {
+  const prices = history?.data?.prices ?? [];
   return (
     <>
       <tr className="hover:bg-[#151515] transition-colors">
@@ -344,7 +505,7 @@ function FragmentCardRow({
         </td>
         <td className="px-4 py-3 text-xs text-[#a3a3a3]">{text(card.identity.condition)}</td>
         <td className="px-4 py-3 text-sm font-bold text-[#00b894] tabular-nums">{latest ? formatMoney(latest.price_usd) : "—"}</td>
-        <td className="px-4 py-3 text-xs text-[#737373]">{card.prices.length} observation{card.prices.length === 1 ? "" : "s"}</td>
+        <td className="px-4 py-3 text-xs text-[#737373]">{card.price_count} observation{card.price_count === 1 ? "" : "s"}</td>
         <td className="px-4 py-3 text-xs text-[#737373] whitespace-nowrap">{formatDate(card.updated_at)}</td>
         <td className="pr-3 text-[#525252]">
           <button onClick={onToggle} aria-label={open ? "Collapse price history" : "Expand price history"} className="w-8 h-8 flex items-center justify-center hover:text-white">
@@ -360,7 +521,14 @@ function FragmentCardRow({
               <span>Rarity: <strong className="text-[#a3a3a3] font-medium">{text(card.identity.rarity)}</strong></span>
               <span>Parallel: <strong className="text-[#a3a3a3] font-medium">{text(card.identity.parallel)}</strong></span>
             </div>
-            {card.prices.length ? (
+            {history?.loading && !history.data ? (
+              <p className="text-xs text-[#525252] py-3">Loading price history…</p>
+            ) : history?.error && !history.data ? (
+              <div className="py-3">
+                <p className="text-xs text-[#ef4444]">{history.error}</p>
+                <button onClick={onRetryHistory} className="mt-2 text-xs font-semibold text-[#00b894] hover:text-white">Retry</button>
+              </div>
+            ) : prices.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[680px]">
                   <thead><tr className="text-[9px] uppercase tracking-wider text-[#525252] border-b border-[#222]">
@@ -371,7 +539,7 @@ function FragmentCardRow({
                     <th className="text-left py-2 font-semibold">Sources</th>
                   </tr></thead>
                   <tbody className="divide-y divide-[#1d1d1d]">
-                    {card.prices.map((price, index) => (
+                    {prices.map((price, index) => (
                       <tr key={`${price.observed_at}-${index}`} className="text-xs text-[#a3a3a3]">
                         <td className="py-2.5 whitespace-nowrap">{formatDate(price.observed_at)}</td>
                         <td className="py-2.5 font-bold text-white">{formatMoney(price.price_usd)}</td>
@@ -404,13 +572,19 @@ export default function GrailScanDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [cardRefreshNonce, setCardRefreshNonce] = useState(0);
+  const recentCursorRef = useRef<string | null>(null);
+  const recentRequestInFlightRef = useRef(false);
 
   const load = useCallback(async (initial = false) => {
     if (initial) setLoading(true); else setRefreshing(true);
     try {
       const response = await fetch("/api/grailscan/data", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load dashboard");
-      setData(await response.json() as DashboardData);
+      const nextData = await response.json() as DashboardData;
+      recentCursorRef.current = nextData.generated_at;
+      setData(nextData);
+      if (!initial) setCardRefreshNonce((value) => value + 1);
       setError("");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load dashboard");
@@ -420,15 +594,52 @@ export default function GrailScanDashboard() {
     }
   }, []);
 
+  const loadRecentScans = useCallback(async () => {
+    const cursor = recentCursorRef.current;
+    if (!cursor || recentRequestInFlightRef.current || document.hidden) return;
+
+    recentRequestInFlightRef.current = true;
+    try {
+      const query = new URLSearchParams({ updated_after: cursor });
+      const response = await fetch(`/api/grailscan/recent-scans?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not refresh recent scans");
+      const update = await response.json() as RecentScansData;
+
+      const activeCursor = recentCursorRef.current;
+      if (activeCursor && Date.parse(update.generated_at) <= Date.parse(activeCursor)) return;
+      recentCursorRef.current = update.generated_at;
+
+      setData((current) => {
+        if (!current) return current;
+        const requestsById = new Map(current.recent_requests.map((request) => [request.id, request]));
+        update.recent_requests.forEach((request) => requestsById.set(request.id, request));
+        const recentRequests = Array.from(requestsById.values())
+          .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+          .slice(0, 100);
+
+        return {
+          ...current,
+          generated_at: update.generated_at,
+          recent_requests: recentRequests,
+        };
+      });
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not refresh recent scans");
+    } finally {
+      recentRequestInFlightRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     load(true);
   }, [load]);
 
   useEffect(() => {
     if (!data) return;
-    const timer = window.setInterval(() => load(false), REFRESH_INTERVAL);
+    const timer = window.setInterval(loadRecentScans, REFRESH_INTERVAL);
     return () => window.clearInterval(timer);
-  }, [data, load]);
+  }, [Boolean(data), loadRecentScans]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-sm text-[#737373]">Loading GrailScan…</div>;
@@ -554,7 +765,7 @@ export default function GrailScanDashboard() {
               </div>
             </section>
 
-            <CardDatabase cards={data.cards} />
+            <CardDatabase refreshNonce={cardRefreshNonce} />
             <footer className="py-8 mt-8 border-t border-[#1f1f1f] text-[10px] text-[#444] flex justify-between">
               <span>GrailScan private analytics</span>
               <span>Times shown in your browser timezone</span>

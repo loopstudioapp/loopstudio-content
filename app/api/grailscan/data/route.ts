@@ -13,7 +13,7 @@ export async function GET() {
   const supabase = createClient(url, secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data, error } = await supabase.rpc("get_grailscan_dashboard", {
+  const { data, error } = await supabase.rpc("get_grailscan_dashboard_v2", {
     p_request_limit: 100,
     p_days: 30,
   });
