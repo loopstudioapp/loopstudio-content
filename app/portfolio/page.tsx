@@ -1,3 +1,4 @@
+import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 
 type Category = "Real Estate" | "Business" | "Other";
@@ -177,9 +178,14 @@ export default function PortfolioPage() {
               <p className="text-[10px] text-[#5f5f5f]">10 holdings across 3 asset classes</p>
             </div>
           </div>
-          <nav className="flex items-center gap-1" aria-label="Main navigation">
-            <Link href="/owner" className="rounded-md px-3 py-2 text-xs text-[#737373] transition-colors hover:bg-[#171717] hover:text-white">Owner</Link>
-            <Link href="/" className="rounded-md px-3 py-2 text-xs text-[#737373] transition-colors hover:bg-[#171717] hover:text-white">Home</Link>
+          <nav aria-label="Main navigation">
+            <Link
+              href="/owner"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#262626] px-3 py-1.5 text-xs text-[#737373] transition-colors hover:border-[#404040] hover:text-white"
+            >
+              <ChevronLeft size={13} />
+              Dashboard
+            </Link>
           </nav>
         </header>
 

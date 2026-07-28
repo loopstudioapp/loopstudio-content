@@ -11,6 +11,30 @@
   color: #fff;
 }
 
+.dashboardLink {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #262626;
+  border-radius: 8px;
+  color: #737373;
+  font: 400 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.dashboardLink:hover {
+  border-color: #404040;
+  color: #fff;
+}
+
 .timer {
   position: relative;
   z-index: 1;

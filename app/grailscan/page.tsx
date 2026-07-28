@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -12,6 +13,7 @@ import {
   Search,
   WalletCards,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type PriceObservation = {
@@ -660,7 +662,14 @@ export default function GrailScanDashboard() {
               {data?.generated_at && <span className="hidden sm:inline">· synced {formatDate(data.generated_at)}</span>}
             </div>
           </div>
-          <div>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/owner"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#262626] px-3 py-1.5 text-xs text-[#737373] transition-colors hover:border-[#404040] hover:text-white"
+            >
+              <ChevronLeft size={13} />
+              Dashboard
+            </Link>
             <button
               onClick={() => load(false)}
               disabled={refreshing}

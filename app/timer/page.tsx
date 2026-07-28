@@ -1,5 +1,7 @@
 "use client";
 
+import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 
@@ -42,6 +44,10 @@ export default function TimerPage() {
 
   return (
     <main className={styles.page}>
+      <Link href="/owner" className={styles.dashboardLink}>
+        <ChevronLeft size={13} />
+        Dashboard
+      </Link>
       <time className={styles.timer} dateTime={`PT${Math.floor(elapsed / 1000)}S`}>
         {time}
       </time>
