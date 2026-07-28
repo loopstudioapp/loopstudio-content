@@ -5,6 +5,7 @@ import {
   FoodDetection,
   FoodMemory,
   normalizeFoodKey,
+  titleCaseFoodName,
 } from "@/lib/food";
 import { findAndTouchFoodMemory } from "@/lib/food-memory-store";
 import { getOpenRouterFoodApiKey } from "@/lib/openrouter-food";
@@ -48,7 +49,7 @@ function parseDetection(raw: string): FoodDetection {
     .trim();
   const parsed = JSON.parse(cleaned) as Partial<FoodDetection>;
   const foodName =
-    typeof parsed.food_name === "string" ? parsed.food_name.trim().slice(0, 100) : "";
+    typeof parsed.food_name === "string" ? titleCaseFoodName(parsed.food_name) : "";
   const normalizedName = normalizeFoodKey(
     typeof parsed.normalized_name === "string" ? parsed.normalized_name : foodName,
   );

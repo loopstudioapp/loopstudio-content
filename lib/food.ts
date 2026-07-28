@@ -33,6 +33,28 @@ export function normalizeFoodKey(value: string): string {
     .slice(0, 100);
 }
 
+export function titleCaseFoodName(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((word) => {
+      if (word.length > 1 && word === word.toUpperCase() && /[A-Z]/.test(word)) {
+        return word;
+      }
+
+      return word
+        .toLocaleLowerCase("en-US")
+        .replace(
+          /(^|[-/(\[])([\p{L}\p{N}])/gu,
+          (_, prefix: string, character: string) =>
+            `${prefix}${character.toLocaleUpperCase("en-US")}`,
+        );
+    })
+    .join(" ")
+    .slice(0, 100);
+}
+
 export function cleanReasons(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
 

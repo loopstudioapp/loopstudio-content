@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { FoodMemory } from "@/lib/food";
+import { FoodMemory, titleCaseFoodName } from "@/lib/food";
 
 const BUCKET = "food-memory";
 const MEMORY_FILE = "memories.json";
@@ -39,7 +39,18 @@ async function readMemories(): Promise<FoodMemory[]> {
   }
 
   const parsed = JSON.parse(await data.text()) as unknown;
-  return Array.isArray(parsed) ? (parsed as FoodMemory[]) : [];
+  if (!Array.isArray(parsed)) return [];
+
+  let changed = false;
+  const memories = (parsed as FoodMemory[]).map((memory) => {
+    const foodName = titleCaseFoodName(memory.food_name);
+    if (foodName === memory.food_name) return memory;
+    changed = true;
+    return { ...memory, food_name: foodName };
+  });
+
+  if (changed) await writeMemories(memories);
+  return memories;
 }
 
 async function writeMemories(memories: FoodMemory[]) {
@@ -94,6 +105,7 @@ export async function upsertFoodMemory(
 
   const saved: FoodMemory = {
     ...memory,
+    food_name: titleCaseFoodName(memory.food_name),
     id: index >= 0 ? memories[index].id : crypto.randomUUID(),
     created_at: index >= 0 ? memories[index].created_at : now,
     updated_at: now,

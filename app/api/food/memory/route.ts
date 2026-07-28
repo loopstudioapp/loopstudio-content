@@ -6,6 +6,7 @@ import {
   FoodDecision,
   FoodMemory,
   normalizeFoodKey,
+  titleCaseFoodName,
 } from "@/lib/food";
 import { getFoodMemories, upsertFoodMemory } from "@/lib/food-memory-store";
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const foodName =
       typeof body.food_name === "string"
-        ? body.food_name.trim().replace(/\s+/g, " ").slice(0, 100)
+        ? titleCaseFoodName(body.food_name)
         : "";
     const normalizedName = normalizeFoodKey(
       typeof body.normalized_name === "string" ? body.normalized_name : foodName,
