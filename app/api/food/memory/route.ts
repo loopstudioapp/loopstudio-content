@@ -8,19 +8,33 @@ import {
   normalizeFoodKey,
   titleCaseFoodName,
 } from "@/lib/food";
-import { getFoodMemories, upsertFoodMemory } from "@/lib/food-memory-store";
+import {
+  findAndTouchFoodMemory,
+  getFoodMemories,
+  upsertFoodMemory,
+} from "@/lib/food-memory-store";
 
 async function isAuthorized() {
   const cookieStore = await cookies();
   return cookieStore.get("admin")?.value === "1";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!(await isAuthorized())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
+    const name = new URL(request.url).searchParams.get("name");
+    if (name) {
+      const normalizedName = normalizeFoodKey(name);
+      if (!normalizedName) {
+        return NextResponse.json({ error: "Invalid food name." }, { status: 400 });
+      }
+      const memory = await findAndTouchFoodMemory(new Set([normalizedName]));
+      return NextResponse.json({ memory });
+    }
+
     const memories = await getFoodMemories(8);
     return NextResponse.json({ memories });
   } catch (error) {

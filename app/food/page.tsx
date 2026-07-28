@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ImagePlus,
   LoaderCircle,
+  Pencil,
   RotateCcw,
   Sparkles,
   Utensils,
@@ -24,7 +25,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { FoodDecision, FoodDetection, FoodMemory } from "@/lib/food";
+import {
+  FoodDecision,
+  FoodDetection,
+  FoodMemory,
+  normalizeFoodKey,
+  titleCaseFoodName,
+} from "@/lib/food";
 
 type Analysis =
   | { status: "known"; detection: FoodDetection; memory: FoodMemory }
@@ -86,9 +93,11 @@ export default function FoodPage() {
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [foodName, setFoodName] = useState("");
   const [history, setHistory] = useState<FoodMemory[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [correctingName, setCorrectingName] = useState(false);
   const [error, setError] = useState("");
   const [decision, setDecision] = useState<FoodDecision | null>(null);
   const [reasons, setReasons] = useState("");
@@ -123,6 +132,7 @@ export default function FoodPage() {
 
   const resetResult = () => {
     setAnalysis(null);
+    setFoodName("");
     setDecision(null);
     setReasons("");
     setError("");
@@ -188,6 +198,7 @@ export default function FoodPage() {
       }
       if (!response.ok) throw new Error(data.error || "I couldn't check that food.");
       setAnalysis(data);
+      setFoodName(data.detection?.food_name || "");
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : "I couldn't check that food.",
@@ -199,6 +210,11 @@ export default function FoodPage() {
 
   const saveDecision = async () => {
     if (analysis?.status !== "unknown" || !decision) return;
+    const finalFoodName = titleCaseFoodName(foodName);
+    if (!finalFoodName) {
+      setError("Add the correct food name before saving.");
+      return;
+    }
     const cleanReason = reasons.trim();
     if (!cleanReason) {
       setError("Add a reason so this memory is useful next time.");
@@ -212,9 +228,12 @@ export default function FoodPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          food_name: analysis.detection.food_name,
-          normalized_name: analysis.detection.normalized_name,
-          aliases: analysis.detection.aliases,
+          food_name: finalFoodName,
+          normalized_name: finalFoodName,
+          aliases: [
+            ...analysis.detection.aliases,
+            analysis.detection.normalized_name,
+          ],
           decision,
           reasons: cleanReason
             .split(/\n|;/)
@@ -228,9 +247,14 @@ export default function FoodPage() {
       }
       setAnalysis({
         status: "known",
-        detection: analysis.detection,
+        detection: {
+          ...analysis.detection,
+          food_name: data.memory.food_name,
+          normalized_name: data.memory.normalized_name,
+        },
         memory: data.memory,
       });
+      setFoodName(data.memory.food_name);
       setDecision(null);
       setReasons("");
       await loadHistory();
@@ -238,6 +262,66 @@ export default function FoodPage() {
       setError(saveError instanceof Error ? saveError.message : "I couldn't save that decision.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyFoodNameCorrection = async () => {
+    if (!analysis || analysis.status === "no_food") return;
+    const correctedName = titleCaseFoodName(foodName);
+    const normalizedName = normalizeFoodKey(correctedName);
+    if (!correctedName || !normalizedName) {
+      setError("Enter the correct food name.");
+      return;
+    }
+
+    setCorrectingName(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/food/memory?name=${encodeURIComponent(correctedName)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json()) as {
+        memory?: FoodMemory | null;
+        error?: string;
+      };
+      if (response.status === 401) {
+        router.push("/");
+        return;
+      }
+      if (!response.ok) throw new Error(data.error || "I couldn't check that name.");
+
+      const resolvedName = data.memory?.food_name || correctedName;
+      const detection: FoodDetection = {
+        ...analysis.detection,
+        food_name: resolvedName,
+        normalized_name: data.memory?.normalized_name || normalizedName,
+        aliases: Array.from(
+          new Set([
+            ...analysis.detection.aliases,
+            analysis.detection.normalized_name,
+          ]),
+        ).filter((alias) => alias !== normalizedName),
+        description: "Food name corrected manually.",
+        confidence: 1,
+      };
+      setFoodName(resolvedName);
+      setDecision(null);
+      setReasons("");
+      setAnalysis(
+        data.memory
+          ? { status: "known", detection, memory: data.memory }
+          : { status: "unknown", detection },
+      );
+      if (data.memory) await loadHistory();
+    } catch (correctionError) {
+      setError(
+        correctionError instanceof Error
+          ? correctionError.message
+          : "I couldn't check that name.",
+      );
+    } finally {
+      setCorrectingName(false);
     }
   };
 
@@ -399,6 +483,10 @@ export default function FoodPage() {
               <KnownResult
                 detection={analysis.detection}
                 memory={analysis.memory}
+                foodName={foodName}
+                onFoodNameChange={setFoodName}
+                onApplyFoodName={applyFoodNameCorrection}
+                correctingName={correctingName}
                 onReset={startOver}
               />
             )}
@@ -412,9 +500,13 @@ export default function FoodPage() {
                       New food
                     </span>
                   </div>
-                  <h3 className="text-xl font-semibold text-white">
-                    {analysis.detection.food_name}
-                  </h3>
+                  <FoodNameEditor
+                    value={foodName}
+                    currentName={analysis.detection.food_name}
+                    onChange={setFoodName}
+                    onApply={applyFoodNameCorrection}
+                    busy={correctingName}
+                  />
                   <p className="mt-2 text-sm leading-6 text-[#737373]">
                     {analysis.detection.description ||
                       "I found the food, but you haven't made a rule for it yet."}
@@ -466,7 +558,7 @@ export default function FoodPage() {
                   <button
                     type="button"
                     onClick={saveDecision}
-                    disabled={!decision || !reasons.trim() || saving}
+                    disabled={!decision || !reasons.trim() || !foodName.trim() || saving}
                     className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white text-xs font-semibold text-black transition-colors hover:bg-[#e5e5e5] disabled:cursor-not-allowed disabled:opacity-30"
                   >
                     {saving ? (
@@ -563,10 +655,18 @@ export default function FoodPage() {
 function KnownResult({
   detection,
   memory,
+  foodName,
+  onFoodNameChange,
+  onApplyFoodName,
+  correctingName,
   onReset,
 }: {
   detection: FoodDetection;
   memory: FoodMemory;
+  foodName: string;
+  onFoodNameChange: (value: string) => void;
+  onApplyFoodName: () => void;
+  correctingName: boolean;
   onReset: () => void;
 }) {
   const copy = decisionCopy(memory.decision);
@@ -583,7 +683,14 @@ function KnownResult({
                 {copy.eyebrow}
               </span>
             </div>
-            <p className="text-sm text-[#737373]">{detection.food_name}</p>
+            <FoodNameEditor
+              value={foodName}
+              currentName={detection.food_name}
+              onChange={onFoodNameChange}
+              onApply={onApplyFoodName}
+              busy={correctingName}
+              compact
+            />
             <h3 className="mt-1 text-3xl font-semibold tracking-[-0.04em] text-white">
               {copy.title}
             </h3>
@@ -622,5 +729,65 @@ function KnownResult({
         </span>
       </div>
     </section>
+  );
+}
+
+function FoodNameEditor({
+  value,
+  currentName,
+  onChange,
+  onApply,
+  busy,
+  compact = false,
+}: {
+  value: string;
+  currentName: string;
+  onChange: (value: string) => void;
+  onApply: () => void;
+  busy: boolean;
+  compact?: boolean;
+}) {
+  const changed =
+    normalizeFoodKey(value) !== normalizeFoodKey(currentName) && Boolean(value.trim());
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (changed && !busy) onApply();
+      }}
+    >
+      <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#525252]">
+        <Pencil size={10} />
+        Food identified · editable
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => onChange(titleCaseFoodName(value))}
+          maxLength={100}
+          aria-label="Correct food name"
+          className={`min-w-0 flex-1 border-b border-[#333] bg-transparent pb-1 text-white outline-none transition-colors placeholder:text-[#404040] focus:border-[#737373] ${
+            compact ? "text-sm" : "text-xl font-semibold"
+          }`}
+        />
+        {changed && (
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-[#404040] px-2.5 text-[10px] font-semibold text-[#a3a3a3] transition-colors hover:border-[#525252] hover:text-white disabled:opacity-50"
+          >
+            {busy ? <LoaderCircle size={11} className="animate-spin" /> : <Check size={11} />}
+            Use name
+          </button>
+        )}
+      </div>
+      {!compact && (
+        <p className="mt-2 text-[10px] text-[#525252]">
+          Change this if the AI identified the wrong food.
+        </p>
+      )}
+    </form>
   );
 }
