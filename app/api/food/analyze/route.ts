@@ -93,7 +93,9 @@ one short, factual sentence about what was detected.`;
   const body = {
     model: MODEL,
     temperature: 0.1,
-    max_tokens: 500,
+    // Vision requests can spend a substantial part of the completion budget on
+    // hidden reasoning before emitting the short structured answer.
+    max_tokens: 2000,
     reasoning: { effort: "low", exclude: true },
     messages: [
       { role: "system", content: instruction },
