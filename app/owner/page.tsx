@@ -963,7 +963,9 @@ export default function OwnerDashboard() {
         if (!full.ok || d.error) throw new Error(d.error || "Failed to rebuild GrailScan charts");
         if (!cancelled) setTodayStats((prev) => mergeChartStats(prev, d));
       } catch (error) {
-        if (!cancelled) setTodayStatsError(error instanceof Error ? error.message : "Failed to load GrailScan data");
+        if (!cancelled && !fastLoaded) {
+          setTodayStatsError(error instanceof Error ? error.message : "Failed to load GrailScan data");
+        }
       } finally {
         if (!cancelled && !fastLoaded) setTodayStatsLoading(false);
       }
@@ -1018,7 +1020,9 @@ export default function OwnerDashboard() {
       setTodayStats((prev) => mergeChartStats(prev, data));
       setTodayStatsError(null);
     } catch (error) {
-      setTodayStatsError(error instanceof Error ? error.message : "Failed to rebuild GrailScan charts");
+      if (!fastLoaded) {
+        setTodayStatsError(error instanceof Error ? error.message : "Failed to rebuild GrailScan charts");
+      }
     } finally {
       if (!fastLoaded) setTodayStatsLoading(false);
     }

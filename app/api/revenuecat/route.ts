@@ -634,6 +634,20 @@ class RevenueCatApiError extends Error {
   }
 }
 
+function publicRevenueCatError(error: unknown): string {
+  if (!(error instanceof RevenueCatApiError)) {
+    return error instanceof Error ? error.message : "Unknown error";
+  }
+
+  if (error.status === 403) {
+    return "RevenueCat denied the historical ledger refresh. Showing the latest saved chart data.";
+  }
+  if (error.status === 429) {
+    return "RevenueCat rate-limited the historical ledger refresh. Showing the latest saved chart data.";
+  }
+  return `RevenueCat historical ledger refresh failed (HTTP ${error.status || "unknown"}).`;
+}
+
 function configuredProjects(appName?: string): RcProject[] {
   return RC_PROJECTS.filter(
     (project) =>
@@ -1341,18 +1355,31 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const refreshed = await fetchTodayStats(requestedApp);
       const cached = await readTodayStatsCache(requestedApp);
-      const data = cached?.data?.today_vn === refreshed.today_vn
-        ? { ...cached.data, daily: refreshed.daily }
-        : refreshed;
-      await writeTodayStatsCache(data, requestedApp);
-      return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
+      try {
+        const refreshed = await fetchTodayStats(requestedApp);
+        const data = cached?.data?.today_vn === refreshed.today_vn
+          ? { ...cached.data, daily: refreshed.daily }
+          : refreshed;
+        await writeTodayStatsCache(data, requestedApp);
+        return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
+      } catch (refreshError) {
+        if (cached?.data?.today_vn === vnDateIso()) {
+          return NextResponse.json({
+            ...cached.data,
+            cached: true,
+            stale: true,
+            refresh_error: publicRevenueCatError(refreshError),
+            updated_at: cached.updatedAt,
+          });
+        }
+        throw refreshError;
+      }
     }
 
     return NextResponse.json({ error: "type must be 'overview', 'subscribers', or 'today_stats'" }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = publicRevenueCatError(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
