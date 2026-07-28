@@ -10,7 +10,8 @@ import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
 type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
-type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: "NEW_SUB" | "RENEWAL" };
+type TodayTxnType = "NEW_SUB" | "RENEWAL" | "REFUND" | "REFUND_REVERSED";
+type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: TodayTxnType };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
 type DailyPoint = {
@@ -823,6 +824,12 @@ function AppStatGrid({ appName, accent, stats, loading }: { appName: string; acc
 /* ── Today Subscriptions table (new + renewals) ── */
 function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: boolean; todayVn: string }) {
   const planFor = (t: TodayTxn) => t.plan || "—";
+  const typeBadge: Record<TodayTxnType, { label: string; className: string }> = {
+    NEW_SUB: { label: "New Sub", className: "bg-[#3b82f6]/20 text-[#3b82f6]" },
+    RENEWAL: { label: "Renewal", className: "bg-[#22c55e]/20 text-[#22c55e]" },
+    REFUND: { label: "Refund", className: "bg-[#ef4444]/20 text-[#ef4444]" },
+    REFUND_REVERSED: { label: "Refund reversed", className: "bg-[#f59e0b]/20 text-[#f59e0b]" },
+  };
   return (
     <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-[#262626]">
@@ -862,13 +869,9 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
                   <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(t.revenue || 0)}</td>
                   <td className="px-5 py-2.5 text-right">
                     <span
-                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
-                        t.type === "NEW_SUB"
-                          ? "bg-[#3b82f6]/20 text-[#3b82f6]"
-                          : "bg-[#22c55e]/20 text-[#22c55e]"
-                      }`}
+                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${typeBadge[t.type].className}`}
                     >
-                      {t.type === "NEW_SUB" ? "New Sub" : "Renewal"}
+                      {typeBadge[t.type].label}
                     </span>
                   </td>
                 </tr>

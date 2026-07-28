@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import {
+  adjustmentKindFromLedgerId,
+  type RevenueAdjustmentKind,
+} from "@/lib/revenuecat/adjustments";
 import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
 
 export const maxDuration = 300;
@@ -192,6 +196,7 @@ async function fetchSubscribers(filter: string) {
 }
 
 /* ── Today's stats (per app: today_revenue, new_revenue, new_subs, mrr) + today transactions ── */
+type TodayTxnType = "NEW_SUB" | "RENEWAL" | RevenueAdjustmentKind;
 type TodayTxn = {
   id: string;
   country: string;
@@ -202,7 +207,7 @@ type TodayTxn = {
   occurred_at: string;
   expires_at: string;
   revenue: number;
-  type: "NEW_SUB" | "RENEWAL";
+  type: TodayTxnType;
 };
 type TodayPerApp = {
   today_revenue: number;
@@ -375,6 +380,7 @@ function buildDbTodayLedger({
     productId: string;
     store: string;
     revenue: number;
+    adjustmentKind: RevenueAdjustmentKind | null;
   };
 
   const normalizedSubs: NormalizedSub[] = [];
@@ -419,8 +425,10 @@ function buildDbTodayLedger({
     const date = vnDateIso(new Date(occurredMs));
     if (date !== today) continue;
 
+    const revenue = money(row.revenue);
+    const id = row.id || `renewal:${app}:${userId}:${row.product_id || ""}:${row.occurred_at}:${revenue}`;
     normalizedRenewals.push({
-      id: row.id || `renewal:${app}:${userId}:${row.product_id || ""}:${row.occurred_at}:${row.revenue || 0}`,
+      id,
       app,
       userId,
       date,
@@ -431,7 +439,8 @@ function buildDbTodayLedger({
       country: (row.country || "").toUpperCase(),
       productId: row.product_id || "",
       store: row.store || "app_store",
-      revenue: money(row.revenue),
+      revenue,
+      adjustmentKind: adjustmentKindFromLedgerId(id, revenue),
     });
   }
 
@@ -449,7 +458,7 @@ function buildDbTodayLedger({
     // rc_subscriptions is a mutable customer summary. If a same-day renewal
     // or upgrade exists, use that event row as the money event instead.
     const sameDayMoneyEvents = (renewalsByCustomerDate.get(sub.customerDateKey) || []).filter(
-      (renewal) => renewal.occurredMs >= sub.purchasedMs
+      (renewal) => !renewal.adjustmentKind && renewal.occurredMs >= sub.purchasedMs
     );
     const hasSameDayMoneyEvent = sameDayMoneyEvents.length > 0;
     for (const renewal of sameDayMoneyEvents) {
@@ -482,13 +491,16 @@ function buildDbTodayLedger({
 
   for (const renewal of normalizedRenewals) {
     const subscriptionStartedAt = subscriptionStartByKey.get(renewal.customerKey);
-    const isSameVnDayUpgrade =
+    const isSameVnDayPurchase =
       sameDayNewSubRenewalIds.has(renewal.id) ||
       sameVnDayOrLater(subscriptionStartedAt, renewal.occurredAt);
+    const isNewSub = !renewal.adjustmentKind && isSameVnDayPurchase;
 
     perApp[renewal.app].today_revenue += renewal.revenue;
-    if (isSameVnDayUpgrade) {
+    if (isSameVnDayPurchase) {
       perApp[renewal.app].new_revenue += renewal.revenue;
+    }
+    if (isNewSub) {
       if (!countedNewSubDateKeys.has(renewal.customerDateKey)) {
         perApp[renewal.app].new_subs += 1;
         countedNewSubDateKeys.add(renewal.customerDateKey);
@@ -505,7 +517,7 @@ function buildDbTodayLedger({
       occurred_at: renewal.occurredAt,
       expires_at: "",
       revenue: renewal.revenue,
-      type: isSameVnDayUpgrade ? "NEW_SUB" : "RENEWAL",
+      type: renewal.adjustmentKind || (isNewSub ? "NEW_SUB" : "RENEWAL"),
     });
   }
 
@@ -619,6 +631,7 @@ type TransactionEvent = {
   expiresAt: string;
   date: string;
   gross: number;
+  adjustmentKind?: RevenueAdjustmentKind;
 };
 type TransactionLedger = {
   events: TransactionEvent[];
@@ -907,6 +920,49 @@ async function fetchTransactionLedger(
     }
   }
 
+  const { data: adjustmentRows, error: adjustmentError } = await supabase
+    .from("rc_renewal_events")
+    .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
+    .gte("occurred_at", startUtc)
+    .lt("occurred_at", endUtc);
+
+  if (adjustmentError) {
+    throw new Error(`Database error: ${adjustmentError.message}`);
+  }
+
+  for (const row of (adjustmentRows || []) as RenewalEventRow[]) {
+    const app = visibleAppName(row.app_name);
+    const userId = row.app_user_id || "";
+    const occurredMs = dateMs(row.occurred_at);
+    const revenue = money(row.revenue);
+    const adjustmentKind = adjustmentKindFromLedgerId(row.id, revenue);
+    if (
+      !adjustmentKind ||
+      !app ||
+      (appName && app !== appName) ||
+      !userId ||
+      occurredMs == null ||
+      !row.occurred_at
+    ) {
+      continue;
+    }
+
+    events.push({
+      id: row.id || `${adjustmentKind.toLowerCase()}:${app}:${userId}:${occurredMs}`,
+      app,
+      userId,
+      country: (row.country || "").toUpperCase(),
+      productId: row.product_id || "",
+      store: row.store || "app_store",
+      purchasedAt: row.occurred_at,
+      purchasedMs: occurredMs,
+      expiresAt: "",
+      date: vnDateIso(new Date(occurredMs)),
+      gross: revenue,
+      adjustmentKind,
+    });
+  }
+
   events.sort((a, b) => a.purchasedMs - b.purchasedMs);
   const data = { events, firstPaidAtByCustomer };
   transactionLedgerCache = { key: cacheKey, data, timestamp: Date.now() };
@@ -914,6 +970,12 @@ async function fetchTransactionLedger(
 }
 
 function isNewSubEvent(event: TransactionEvent, ledger: TransactionLedger): boolean {
+  if (event.adjustmentKind) return false;
+  const firstPaidAt = ledger.firstPaidAtByCustomer.get(keyFor(event.app, event.userId));
+  return sameVnDayOrLater(firstPaidAt, event.purchasedAt);
+}
+
+function isSameDayNewCustomerEvent(event: TransactionEvent, ledger: TransactionLedger): boolean {
   const firstPaidAt = ledger.firstPaidAtByCustomer.get(keyFor(event.app, event.userId));
   return sameVnDayOrLater(firstPaidAt, event.purchasedAt);
 }
@@ -987,18 +1049,21 @@ function buildTodayLedgerFromTransactions(
 ): { perApp: Record<string, TodayPerApp>; transactions: TodayTxn[] } {
   const perApp = emptyPerApp(mrrByApp, appName);
   const countedNewSubs = new Set<string>();
-  const groups = new Map<string, { type: "NEW_SUB" | "RENEWAL"; latest: TransactionEvent; revenue: number }>();
+  const groups = new Map<string, { type: TodayTxnType; latest: TransactionEvent; revenue: number }>();
 
   for (const event of ledger.events) {
     if (event.date !== today || (appName && event.app !== appName)) continue;
 
-    const type = isNewSubEvent(event, ledger) ? "NEW_SUB" : "RENEWAL";
+    const isNewSub = isNewSubEvent(event, ledger);
+    const type: TodayTxnType = event.adjustmentKind || (isNewSub ? "NEW_SUB" : "RENEWAL");
     const appStats = perApp[event.app];
     if (!appStats) continue;
 
     appStats.today_revenue += event.gross;
-    if (type === "NEW_SUB") {
+    if (isNewSub || (event.adjustmentKind && isSameDayNewCustomerEvent(event, ledger))) {
       appStats.new_revenue += event.gross;
+    }
+    if (isNewSub) {
       const countKey = dateKeyFor(event.app, event.userId, event.date);
       if (!countedNewSubs.has(countKey)) {
         appStats.new_subs += 1;

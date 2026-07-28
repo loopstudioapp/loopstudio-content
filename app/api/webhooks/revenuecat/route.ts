@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { revenueAdjustmentFromEvent } from "@/lib/revenuecat/adjustments";
 
 interface RCEvent {
+  id?: string | null;
   type: string;
   app_user_id: string;
   original_app_user_id: string;
+  transaction_id?: string | null;
   product_id: string;
   period_type: string;
+  event_timestamp_ms?: number | null;
   purchased_at_ms: number | null;
   expiration_at_ms: number | null;
   environment: string;
@@ -86,6 +90,36 @@ export async function POST(request: NextRequest) {
     appName = "GrailScan";
   }
 
+  const adjustment = revenueAdjustmentFromEvent(event);
+  if (adjustment && Math.abs(adjustment.amount) >= 0.000001) {
+    const occurredMs = event.event_timestamp_ms || Date.now();
+    const sourceId =
+      event.id ||
+      event.transaction_id ||
+      `${appUserId}:${event.product_id || "unknown"}:${occurredMs}`;
+    const adjustmentId = `${adjustment.kind.toLowerCase()}:${sourceId}`;
+    const { error: adjustmentError } = await supabase
+      .from("rc_renewal_events")
+      .upsert(
+        {
+          id: adjustmentId,
+          app_user_id: appUserId,
+          app_name: appName,
+          product_id: event.product_id || null,
+          country: event.country_code || null,
+          store: (event.store || "APP_STORE").toLowerCase(),
+          revenue: adjustment.amount,
+          occurred_at: msToTimestamp(occurredMs),
+        },
+        { onConflict: "id" }
+      );
+
+    if (adjustmentError) {
+      console.error("Supabase revenue adjustment upsert error:", adjustmentError);
+      return NextResponse.json({ error: "Database error" }, { status: 500 });
+    }
+  }
+
   const baseRecord = {
     id: appUserId,
     app_user_id: appUserId,
@@ -157,13 +191,30 @@ export async function POST(request: NextRequest) {
     }
 
     case "CANCELLATION":
+      upsertData =
+        adjustment?.kind === "REFUND"
+          ? {
+              id: appUserId,
+              app_user_id: appUserId,
+              app_name: appName,
+              updated_at: new Date().toISOString(),
+            }
+          : {
+              id: appUserId,
+              app_user_id: appUserId,
+              auto_renewal: "will_not_renew",
+              updated_at: new Date().toISOString(),
+              // Keep existing status — only update auto_renewal
+              status: "active", // fallback for upsert; existing row keeps its status via onConflict merge
+            };
+      break;
+
+    case "REFUND_REVERSED":
       upsertData = {
         id: appUserId,
         app_user_id: appUserId,
-        auto_renewal: "will_not_renew",
+        app_name: appName,
         updated_at: new Date().toISOString(),
-        // Keep existing status — only update auto_renewal
-        status: "active", // fallback for upsert; existing row keeps its status via onConflict merge
       };
       break;
 
