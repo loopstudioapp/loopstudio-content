@@ -26,10 +26,8 @@ type PriceObservation = {
 
 type CardIdentity = {
   id: string;
-  canonical_key: string;
   identity: Record<string, unknown>;
   confidence: string | null;
-  created_at: string;
   updated_at: string;
   price_count: number;
   latest_price: PriceObservation | null;
@@ -57,15 +55,10 @@ type ScanRequest = {
   user_id: string;
   status: "processing" | "completed" | "failed_retryable" | "failed_permanent";
   stage: string;
-  app_version: string;
-  locale: string;
   identity: Record<string, unknown> | null;
   result: Record<string, unknown> | null;
-  pricing_method: string | null;
   error_code: string | null;
   created_at: string;
-  updated_at: string;
-  completed_at: string | null;
 };
 
 type DailyCall = {
@@ -330,7 +323,7 @@ function CardDatabase({ refreshNonce }: { refreshNonce: number }) {
         params.set("cursor_id", pageCursor.id);
       }
 
-      const response = await fetch(`/api/grailscan/cards?${params}`, { cache: "no-store" });
+      const response = await fetch(`/api/grailscan/cards?${params}`);
       if (!response.ok) throw new Error("Could not load cards");
       const page = await response.json() as CardPageData;
       if (sequence !== requestSequenceRef.current) return;
@@ -361,7 +354,7 @@ function CardDatabase({ refreshNonce }: { refreshNonce: number }) {
     }));
     try {
       const params = new URLSearchParams({ card_id: cardID });
-      const response = await fetch(`/api/grailscan/card-prices?${params}`, { cache: "no-store" });
+      const response = await fetch(`/api/grailscan/card-prices?${params}`);
       if (!response.ok) throw new Error("Could not load price history");
       const history = await response.json() as PriceHistoryData;
       setHistories((current) => ({
@@ -581,7 +574,7 @@ export default function GrailScanDashboard() {
   const load = useCallback(async (initial = false) => {
     if (initial) setLoading(true); else setRefreshing(true);
     try {
-      const response = await fetch("/api/grailscan/data", { cache: "no-store" });
+      const response = await fetch("/api/grailscan/data");
       if (!response.ok) throw new Error("Could not load dashboard");
       const nextData = await response.json() as DashboardData;
       recentCursorRef.current = nextData.generated_at;
@@ -603,13 +596,13 @@ export default function GrailScanDashboard() {
     recentRequestInFlightRef.current = true;
     try {
       const query = new URLSearchParams({ updated_after: cursor });
-      const response = await fetch(`/api/grailscan/recent-scans?${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/grailscan/recent-scans?${query}`);
       if (!response.ok) throw new Error("Could not refresh recent scans");
       const update = await response.json() as RecentScansData;
 
       const activeCursor = recentCursorRef.current;
       if (activeCursor && Date.parse(update.generated_at) <= Date.parse(activeCursor)) return;
-      recentCursorRef.current = update.generated_at;
+      if (update.recent_requests.length > 0) recentCursorRef.current = update.generated_at;
 
       setData((current) => {
         if (!current) return current;

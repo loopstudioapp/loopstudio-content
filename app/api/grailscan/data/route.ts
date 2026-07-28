@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { compactDashboardData } from "@/lib/grailscan/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export async function GET() {
     return NextResponse.json({ error: "Could not load dashboard data" }, { status: 502 });
   }
 
-  return NextResponse.json(data, {
-    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  return NextResponse.json(compactDashboardData(data), {
+    headers: { "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30" },
   });
 }

@@ -31,6 +31,6 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json(data, {
-    headers: { "Cache-Control": "private, no-store, max-age=0" },
+    headers: { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300" },
   });
 }

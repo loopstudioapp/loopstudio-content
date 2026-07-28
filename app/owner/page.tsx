@@ -40,11 +40,6 @@ const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan";
 const TODAY_STATS_URL = `/api/revenuecat?type=today_stats&app=${encodeURIComponent(OWNER_APP)}`;
 
-function mergeChartStats(prev: TodayStats | null, next: TodayStats): TodayStats {
-  if (!prev) return next;
-  return { ...prev, daily: next.daily || prev.daily };
-}
-
 function gameStudioTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -939,7 +934,6 @@ export default function OwnerDashboard() {
     async function loadInitialTodayStats() {
       setTodayStatsLoading(true);
       setTodayStatsError(null);
-      let fastLoaded = false;
       try {
         const cached = await fetch(`${TODAY_STATS_URL}&cached=1`);
         if (cached.ok) {
@@ -949,25 +943,15 @@ export default function OwnerDashboard() {
         }
 
         const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
-        if (fast.ok) {
-          const d = await fast.json();
-          if (!cancelled && d && !d.error) {
-            setTodayStats(d);
-            fastLoaded = true;
-            setTodayStatsLoading(false);
-          }
-        }
-
-        const full = await fetch(`${TODAY_STATS_URL}&refresh=1`);
-        const d = await full.json();
-        if (!full.ok || d.error) throw new Error(d.error || "Failed to rebuild GrailScan charts");
-        if (!cancelled) setTodayStats((prev) => mergeChartStats(prev, d));
+        const d = await fast.json();
+        if (!fast.ok || d.error) throw new Error(d.error || "Failed to load GrailScan data");
+        if (!cancelled) setTodayStats(d);
       } catch (error) {
-        if (!cancelled && !fastLoaded) {
+        if (!cancelled) {
           setTodayStatsError(error instanceof Error ? error.message : "Failed to load GrailScan data");
         }
       } finally {
-        if (!cancelled && !fastLoaded) setTodayStatsLoading(false);
+        if (!cancelled) setTodayStatsLoading(false);
       }
     }
 
@@ -1001,30 +985,15 @@ export default function OwnerDashboard() {
       }
     })();
 
-    let fastLoaded = false;
     try {
       const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
       const data = await fast.json();
       if (!fast.ok || data.error) throw new Error(data.error || "Fast refresh failed");
       setTodayStats(data);
-      fastLoaded = true;
-      setTodayStatsLoading(false);
     } catch (error) {
       setTodayStatsError(error instanceof Error ? error.message : "Failed to refresh GrailScan data");
-    }
-
-    try {
-      const full = await fetch(`${TODAY_STATS_URL}&refresh=1`);
-      const data = await full.json();
-      if (!full.ok || data.error) throw new Error(data.error || "Chart refresh failed");
-      setTodayStats((prev) => mergeChartStats(prev, data));
-      setTodayStatsError(null);
-    } catch (error) {
-      if (!fastLoaded) {
-        setTodayStatsError(error instanceof Error ? error.message : "Failed to rebuild GrailScan charts");
-      }
     } finally {
-      if (!fastLoaded) setTodayStatsLoading(false);
+      setTodayStatsLoading(false);
     }
     await fabiPromise;
   }, []);

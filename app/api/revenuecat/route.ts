@@ -1237,18 +1237,26 @@ async function fetchFastTodayStatsFromDb(
   const { perApp, transactions } = todayLedger;
   const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
-  const cachedDaily = cachedData?.today_vn === today ? cachedData.daily || [] : [];
+  const cachedByDate = new Map((cachedData?.daily || []).map((point) => [point.date, point]));
+  const cachedDaily = vnDateWindow(today, 30).map((date): DailyPoint => {
+    const point = cachedByDate.get(date);
+    return {
+      date,
+      revenue: point?.revenue || 0,
+      profit: point?.profit || 0,
+      new_subs: point?.new_subs || 0,
+      adspend_with_vat: point?.adspend_with_vat || 0,
+      cost_per_sub: point?.cost_per_sub || 0,
+      openrouter_cost: point?.openrouter_cost || 0,
+      revenuecat_cost: point?.revenuecat_cost || 0,
+    };
+  });
   const cachedRevenue30 = cachedDaily.reduce((sum, day) => sum + day.revenue, 0);
   const cachedTodayRevenue = cachedDaily.find((day) => day.date === today)?.revenue || 0;
   const refreshedRevenue30 = cachedRevenue30 - cachedTodayRevenue + totalRevenue;
   const revenueCatRate = refreshedRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
   const daily = cachedDaily.map((point) => ({
     ...point,
-    new_subs: point.new_subs || 0,
-    adspend_with_vat: point.adspend_with_vat || 0,
-    cost_per_sub: point.cost_per_sub || 0,
-    openrouter_cost: point.openrouter_cost || 0,
-    revenuecat_cost: point.revenuecat_cost || 0,
     ...(point.date === today
       ? {
           revenue: totalRevenue,
@@ -1338,6 +1346,13 @@ export async function GET(request: NextRequest) {
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
       const fastTodayStats = searchParams.get("fast") === "1";
+      if (
+        forceRefresh &&
+        (!process.env.CRON_SECRET ||
+          request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`)
+      ) {
+        return NextResponse.json({ error: "Unauthorized maintenance refresh" }, { status: 401 });
+      }
       if (fastTodayStats) {
         const cached = await readTodayStatsCache(requestedApp);
         const data = await fetchFastTodayStatsFromDb(cached?.data || null, requestedApp);
@@ -1353,6 +1368,15 @@ export async function GET(request: NextRequest) {
         if (cachedOnly && cached?.data?.today_vn !== vnDateIso()) {
           return NextResponse.json({ error: "cached today_stats is stale" }, { status: 404 });
         }
+
+        const data = await fetchFastTodayStatsFromDb(cached?.data || null, requestedApp);
+        await writeTodayStatsCache(data, requestedApp);
+        return NextResponse.json({
+          ...data,
+          cached: false,
+          fast: true,
+          updated_at: new Date().toISOString(),
+        });
       }
 
       const cached = await readTodayStatsCache(requestedApp);

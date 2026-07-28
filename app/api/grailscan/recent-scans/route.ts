@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { compactRecentScans } from "@/lib/grailscan/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Could not refresh recent scans" }, { status: 502 });
   }
 
-  return NextResponse.json(data, {
-    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  return NextResponse.json(compactRecentScans(data), {
+    headers: { "Cache-Control": "public, max-age=0, s-maxage=5, stale-while-revalidate=15" },
   });
 }
