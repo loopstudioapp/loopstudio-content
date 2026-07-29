@@ -30,8 +30,8 @@ const investments: Investment[] = [
     detail: "Podium retail unit",
     category: "Real Estate",
     valueVnd: 6_300_000_000,
-    futureMonthlyVnd: 23_000_000,
-    status: "Upcoming",
+    currentMonthlyVnd: 23_000_000,
+    status: "Income",
   },
   {
     name: "A La Carte Condotel",
@@ -104,6 +104,7 @@ const totalValue = investments.reduce((sum, item) => sum + item.valueVnd, 0);
 const currentMonthly = investments.reduce((sum, item) => sum + (item.currentMonthlyVnd || 0), 0);
 const futureMonthly = investments.reduce((sum, item) => sum + (item.futureMonthlyVnd || 0), 0);
 const projectedMonthly = currentMonthly + futureMonthly;
+const cashflowGrowth = Math.round((futureMonthly * 100) / currentMonthly);
 const realEstateValue = investments
   .filter((item) => item.category === "Real Estate")
   .reduce((sum, item) => sum + item.valueVnd, 0);
@@ -250,9 +251,9 @@ export default function PortfolioPage() {
         <section className="grid gap-10 border-b border-[#202020] py-10 sm:py-12 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16">
           <div>
             <p className="text-[10px] font-semibold uppercase text-[#666]">Income outlook</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Cashflow grows 54%</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Cashflow grows {cashflowGrowth}%</h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-[#737373]">
-              The two retail units add 93M VND per month when they begin producing income, taking annual portfolio yield from {annualYield(currentMonthly)} to {annualYield(projectedMonthly)}.
+              Ocean Park London 2 adds 70M VND per month when it begins producing income, taking annual portfolio yield from {annualYield(currentMonthly)} to {annualYield(projectedMonthly)}.
             </p>
 
             <div className="mt-8 grid grid-cols-3 gap-3">
@@ -281,9 +282,10 @@ export default function PortfolioPage() {
                 <div className="flex items-center justify-center bg-[#176534] text-[10px] font-semibold text-white" style={{ width: `${(100_000_000 / currentMonthly) * 100}%` }}>TPL</div>
                 <div className="flex items-center justify-center bg-[#16626b] text-[10px] font-semibold text-white" style={{ width: `${((2_000 * USD_TO_VND) / currentMonthly) * 100}%` }}>Loop</div>
                 <div className="flex items-center justify-center bg-[#77520c] text-[10px] font-semibold text-white" style={{ width: `${(20_000_000 / currentMonthly) * 100}%` }}>A La Carte</div>
+                <div className="flex items-center justify-center bg-[#4f46e5] text-[10px] font-semibold text-white" style={{ width: `${(23_000_000 / currentMonthly) * 100}%` }}>S105</div>
               </div>
-              <div className="mt-2 flex justify-between text-[10px] text-[#525252]">
-                <span>TPL 100M</span><span>Loop $2,000</span><span>A La Carte 20M</span>
+              <div className="mt-2 grid grid-cols-4 gap-2 text-[10px] text-[#525252]">
+                <span>TPL 100M</span><span className="text-center">Loop $2,000</span><span className="text-center">A La Carte 20M</span><span className="text-right">S105 23M</span>
               </div>
             </div>
 
@@ -293,11 +295,10 @@ export default function PortfolioPage() {
                 <span className="font-semibold text-[#60a5fa]">+{compactVnd(futureMonthly)} VND</span>
               </div>
               <div className="flex h-9 overflow-hidden rounded-md bg-[#171717]">
-                <div className="flex items-center justify-center bg-[#1d4ed8] text-[10px] font-semibold text-white" style={{ width: `${(70_000_000 / futureMonthly) * 100}%` }}>Ocean Park</div>
-                <div className="flex items-center justify-center bg-[#2563eb] text-[10px] font-semibold text-white" style={{ width: `${(23_000_000 / futureMonthly) * 100}%` }}>S105</div>
+                <div className="flex w-full items-center justify-center bg-[#1d4ed8] text-[10px] font-semibold text-white">Ocean Park</div>
               </div>
-              <div className="mt-2 flex justify-between text-[10px] text-[#525252]">
-                <span>Ocean Park 70M</span><span>Smart City S105 23M</span>
+              <div className="mt-2 text-[10px] text-[#525252]">
+                <span>Ocean Park 70M</span>
               </div>
             </div>
           </div>
