@@ -54,7 +54,7 @@ const investments: Investment[] = [
     detail: "App studio",
     category: "Business",
     valueVnd: 150_000 * USD_TO_VND,
-    currentMonthlyVnd: 2_000 * USD_TO_VND,
+    currentMonthlyVnd: 60_000_000,
     status: "Income",
   },
   {
@@ -280,12 +280,12 @@ export default function PortfolioPage() {
               </div>
               <div className="flex h-9 overflow-hidden rounded-md bg-[#171717]">
                 <div className="flex items-center justify-center bg-[#176534] text-[10px] font-semibold text-white" style={{ width: `${(100_000_000 / currentMonthly) * 100}%` }}>TPL</div>
-                <div className="flex items-center justify-center bg-[#16626b] text-[10px] font-semibold text-white" style={{ width: `${((2_000 * USD_TO_VND) / currentMonthly) * 100}%` }}>Loop</div>
+                <div className="flex items-center justify-center bg-[#16626b] text-[10px] font-semibold text-white" style={{ width: `${(60_000_000 / currentMonthly) * 100}%` }}>Loop</div>
                 <div className="flex items-center justify-center bg-[#77520c] text-[10px] font-semibold text-white" style={{ width: `${(20_000_000 / currentMonthly) * 100}%` }}>A La Carte</div>
                 <div className="flex items-center justify-center bg-[#4f46e5] text-[10px] font-semibold text-white" style={{ width: `${(23_000_000 / currentMonthly) * 100}%` }}>S105</div>
               </div>
               <div className="mt-2 grid grid-cols-4 gap-2 text-[10px] text-[#525252]">
-                <span>TPL 100M</span><span className="text-center">Loop $2,000</span><span className="text-center">A La Carte 20M</span><span className="text-right">S105 23M</span>
+                <span>TPL 100M</span><span className="text-center">Loop 60M</span><span className="text-center">A La Carte 20M</span><span className="text-right">S105 23M</span>
               </div>
             </div>
 
