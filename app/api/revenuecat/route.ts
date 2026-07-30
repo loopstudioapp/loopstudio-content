@@ -16,6 +16,8 @@ let transactionLedgerCache: { key: string; data: TransactionLedger; timestamp: n
 const RC_BASE = "https://api.revenuecat.com/v2";
 const REVENUECAT_COST_RATE = 0.01;
 const REVENUECAT_FREE_MTR = 2_500;
+const HIGGSFIELD_MONTHLY_COST = 50;
+const HIGGSFIELD_DAILY_COST = HIGGSFIELD_MONTHLY_COST / 30;
 
 // Multiple RevenueCat projects. SwipeAway intentionally omitted —
 // it's hidden from the owner dashboard. Webhook still receives it but
@@ -534,6 +536,7 @@ export type DailyPoint = {
   cost_per_sub: number;
   openrouter_cost: number;
   revenuecat_cost: number;
+  higgsfield_cost: number;
 };
 
 type OpenRouterKey = {
@@ -1018,6 +1021,7 @@ function buildDailyPointsFromLedger(
       cost_per_sub: newSubs > 0 ? adspendWithVat / newSubs : 0,
       openrouter_cost: 0,
       revenuecat_cost: 0,
+      higgsfield_cost: 0,
     };
   });
 }
@@ -1034,9 +1038,10 @@ function applyGrailScanOperatingCosts(
     const revenuecatCost = point.revenue * revenueCatRate;
     return {
       ...point,
-      profit: point.profit - openrouterCost - revenuecatCost,
+      profit: point.profit - openrouterCost - revenuecatCost - HIGGSFIELD_DAILY_COST,
       openrouter_cost: openrouterCost,
       revenuecat_cost: revenuecatCost,
+      higgsfield_cost: HIGGSFIELD_DAILY_COST,
     };
   });
 }
@@ -1305,15 +1310,19 @@ async function fetchFastTodayStatsFromDb(
   const cachedByDate = new Map((cachedData?.daily || []).map((point) => [point.date, point]));
   const cachedDaily = vnDateWindow(today, 30).map((date): DailyPoint => {
     const point = cachedByDate.get(date);
+    const savedHiggsfieldCost = Number(point?.higgsfield_cost);
+    const previousHiggsfieldCost = Number.isFinite(savedHiggsfieldCost) ? savedHiggsfieldCost : 0;
+    const higgsfieldCost = appName === "GrailScan" ? HIGGSFIELD_DAILY_COST : previousHiggsfieldCost;
     return {
       date,
       revenue: point?.revenue || 0,
-      profit: point?.profit || 0,
+      profit: (point?.profit || 0) - (higgsfieldCost - previousHiggsfieldCost),
       new_subs: point?.new_subs || 0,
       adspend_with_vat: point?.adspend_with_vat || 0,
       cost_per_sub: point?.cost_per_sub || 0,
       openrouter_cost: point?.openrouter_cost || 0,
       revenuecat_cost: point?.revenuecat_cost || 0,
+      higgsfield_cost: higgsfieldCost,
     };
   });
   const cachedRevenue30 = cachedDaily.reduce((sum, day) => sum + day.revenue, 0);
@@ -1328,11 +1337,13 @@ async function fetchFastTodayStatsFromDb(
           profit:
             profit.total_profit -
             (point.openrouter_cost || 0) -
-            totalRevenue * revenueCatRate,
+            totalRevenue * revenueCatRate -
+            point.higgsfield_cost,
           new_subs: newSubs,
           adspend_with_vat: profit.adspend_with_vat,
           cost_per_sub: profit.cost_per_new_sub,
           revenuecat_cost: totalRevenue * revenueCatRate,
+          higgsfield_cost: point.higgsfield_cost,
         }
       : {}),
   }));

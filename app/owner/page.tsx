@@ -23,6 +23,7 @@ type DailyPoint = {
   cost_per_sub?: number;
   openrouter_cost?: number;
   revenuecat_cost?: number;
+  higgsfield_cost?: number;
 };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
@@ -373,6 +374,7 @@ type DailyCostBreakdown = {
   apple: number;
   revenueCat: number;
   openRouter: number;
+  higgsfield: number;
 };
 
 const COST_SEGMENTS = [
@@ -380,6 +382,7 @@ const COST_SEGMENTS = [
   { key: "apple", label: "Apple", color: "#f5f5f7" },
   { key: "revenueCat", label: "RevenueCat", color: "#f2545b" },
   { key: "openRouter", label: "OpenRouter", color: "#c8ff00" },
+  { key: "higgsfield", label: "Higgsfield", color: "#8b5cf6" },
 ] as const;
 
 function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: string[] }) {
@@ -407,7 +410,7 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
           viewBox={`0 0 ${w} ${h}`}
           className="block w-full cursor-crosshair"
           role="img"
-          aria-label="Meta, Apple, RevenueCat, and OpenRouter costs by day for the last 30 days"
+          aria-label="Meta, Apple, RevenueCat, OpenRouter, and Higgsfield costs by day for the last 30 days"
           onMouseLeave={() => setHover(null)}
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -591,17 +594,19 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
   const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
+  const higgsfieldCost30 = (daily || []).reduce((sum, day) => sum + (day.higgsfield_cost || 0), 0);
   const appleCost30 = (daily || []).reduce(
     (sum, day) => sum + day.revenue * (profit?.apple_commission_rate ?? 0.15),
     0
   );
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
-  const totalCost30 = metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30;
+  const totalCost30 = metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30;
   const dailyCosts = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
     apple: day.revenue * (profit?.apple_commission_rate ?? 0.15),
     revenueCat: day.revenuecat_cost || 0,
     openRouter: day.openrouter_cost || 0,
+    higgsfield: day.higgsfield_cost || 0,
   }));
   const usdToVnd = ads?.usd_rate ?? 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
@@ -721,7 +726,13 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
                 <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Cost</p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
                   {COST_SEGMENTS.map((segment) => {
-                    const values = { meta: metaCost30, apple: appleCost30, revenueCat: revenueCatCost30, openRouter: openRouterCost30 };
+                    const values = {
+                      meta: metaCost30,
+                      apple: appleCost30,
+                      revenueCat: revenueCatCost30,
+                      openRouter: openRouterCost30,
+                      higgsfield: higgsfieldCost30,
+                    };
                     return (
                       <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
                         <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
@@ -739,7 +750,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               </div>
             </div>
             <StackedCostChart data={dailyCosts} dates={daily.map((d) => d.date)} />
-            <p className="text-[#525252] text-[10px] mt-2">Meta includes 10% VAT · OpenRouter uses official UTC activity</p>
+            <p className="text-[#525252] text-[10px] mt-2">
+              Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily
+            </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
