@@ -89,6 +89,7 @@ async function prepareImage(file: File): Promise<File> {
 export default function FoodPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const historyRevisionRef = useRef(0);
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -104,6 +105,7 @@ export default function FoodPage() {
   const [dragging, setDragging] = useState(false);
 
   const loadHistory = useCallback(async () => {
+    const requestedRevision = historyRevisionRef.current;
     const response = await fetch("/api/food/memory", { cache: "no-store" });
     if (response.status === 401) {
       router.push("/");
@@ -111,8 +113,23 @@ export default function FoodPage() {
     }
     if (!response.ok) return;
     const data = (await response.json()) as { memories?: FoodMemory[] };
-    setHistory(data.memories || []);
+    if (requestedRevision === historyRevisionRef.current) {
+      setHistory(data.memories || []);
+    }
   }, [router]);
+
+  const showInRecentMemory = useCallback((memory: FoodMemory) => {
+    historyRevisionRef.current += 1;
+    setHistory((current) =>
+      [memory, ...current.filter((item) => item.id !== memory.id)]
+        .sort(
+          (a, b) =>
+            new Date(b.last_used_at).getTime() -
+            new Date(a.last_used_at).getTime(),
+        )
+        .slice(0, 8),
+    );
+  }, []);
 
   useEffect(() => {
     const hasAdmin = document.cookie.match(/(^| )admin=1(?:;|$)/);
@@ -199,6 +216,7 @@ export default function FoodPage() {
       if (!response.ok) throw new Error(data.error || "I couldn't check that food.");
       setAnalysis(data);
       setFoodName(data.detection?.food_name || "");
+      if (data.status === "known") showInRecentMemory(data.memory);
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : "I couldn't check that food.",
@@ -257,7 +275,7 @@ export default function FoodPage() {
       setFoodName(data.memory.food_name);
       setDecision(null);
       setReasons("");
-      await loadHistory();
+      showInRecentMemory(data.memory);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "I couldn't save that decision.");
     } finally {
@@ -313,7 +331,7 @@ export default function FoodPage() {
           ? { status: "known", detection, memory: data.memory }
           : { status: "unknown", detection },
       );
-      if (data.memory) await loadHistory();
+      if (data.memory) showInRecentMemory(data.memory);
     } catch (correctionError) {
       setError(
         correctionError instanceof Error
