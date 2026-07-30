@@ -11,6 +11,7 @@ import { findAndTouchFoodMemory } from "@/lib/food-memory-store";
 import { getOpenRouterFoodApiKey } from "@/lib/openrouter-food";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const MODEL = "xiaomi/mimo-v2.5";
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
@@ -94,10 +95,12 @@ one short, factual sentence about what was detected.`;
   const body = {
     model: MODEL,
     temperature: 0.1,
-    // Vision requests can spend a substantial part of the completion budget on
-    // hidden reasoning before emitting the short structured answer.
-    max_tokens: 2000,
-    reasoning: { effort: "low", exclude: true },
+    max_tokens: 800,
+    reasoning: { effort: "none", exclude: true },
+    provider: {
+      sort: "throughput",
+      require_parameters: true,
+    },
     messages: [
       { role: "system", content: instruction },
       { role: "user", content: userContent },
@@ -140,7 +143,7 @@ one short, factual sentence about what was detected.`;
       "X-Title": "Loop Food Memory",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(90_000),
   });
 
   const payload = (await response.json()) as OpenRouterResponse;
