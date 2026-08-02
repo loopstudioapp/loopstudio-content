@@ -498,9 +498,11 @@ function buildDbTodayLedger({
       sameVnDayOrLater(subscriptionStartedAt, renewal.occurredAt);
     const isNewSub = !renewal.adjustmentKind && isSameVnDayPurchase;
 
-    perApp[renewal.app].today_revenue += renewal.revenue;
-    if (isSameVnDayPurchase) {
-      perApp[renewal.app].new_revenue += renewal.revenue;
+    if (!renewal.adjustmentKind) {
+      perApp[renewal.app].today_revenue += renewal.revenue;
+      if (isSameVnDayPurchase) {
+        perApp[renewal.app].new_revenue += renewal.revenue;
+      }
     }
     if (isNewSub) {
       if (!countedNewSubDateKeys.has(renewal.customerDateKey)) {
@@ -537,6 +539,10 @@ export type DailyPoint = {
   openrouter_cost: number;
   revenuecat_cost: number;
   higgsfield_cost: number;
+  refund_amount: number;
+  refund_count: number;
+  refund_reversed_amount: number;
+  refund_reversed_count: number;
 };
 
 type OpenRouterKey = {
@@ -605,21 +611,26 @@ async function fetchOpenRouterCostsByDate(): Promise<Record<string, number>> {
 type RcProject = (typeof RC_PROJECTS)[number];
 type RcList<T> = { items?: T[]; next_page?: string | null };
 type RcCustomer = { id?: string; last_seen_country?: string | null; country?: string | null };
-type RcSubscription = {
-  id?: string;
+type RcCustomerEventBody = {
+  price?: number | string | null;
   product_id?: string | null;
-  product_store_identifier?: string | null;
   store?: string | null;
+  country_code?: string | null;
+  country?: string | null;
   environment?: string | null;
+  transaction_id?: string | null;
+  cancel_reason?: string | null;
+  purchased_at_ms?: number | string | null;
+  event_timestamp_ms?: number | string | null;
+  expiration_at_ms?: number | string | null;
+  expires_at_ms?: number | string | null;
 };
-type RcSubscriptionTransaction = {
+type RcCustomerEvent = {
   id?: string;
-  purchased_at?: number | string | null;
-  product_id?: string | null;
-  product_store_identifier?: string | null;
-  revenue_in_usd?: { gross?: number | string | null };
-  expiration_date?: number | string | null;
-  effective_expiration_date?: number | string | null;
+  type?: string | null;
+  environment?: string | null;
+  occurred_at?: number | string | null;
+  body?: RcCustomerEventBody | null;
 };
 type CustomerSeed = { app: string; userId: string; country: string };
 type TransactionEvent = {
@@ -807,56 +818,66 @@ async function fetchCustomerTransactionEvents(
   const events: TransactionEvent[] = [];
 
   try {
-    const subscriptions = await fetchRcList<RcSubscription>(
+    const customerEvents = await fetchRcList<RcCustomerEvent>(
       project.apiKey,
-      `${RC_BASE}/projects/${project.projectId}/customers/${encodedCustomerId}/subscriptions?limit=100`
+      `${RC_BASE}/projects/${project.projectId}/customers/${encodedCustomerId}/events?environment=production&limit=100`
     );
 
-    for (const subscription of subscriptions) {
-      if (!subscription.id) continue;
-      if ((subscription.environment || "").toLowerCase() === "sandbox") continue;
+    for (const customerEvent of customerEvents) {
+      const body = customerEvent.body || {};
+      const type = (customerEvent.type || "").toUpperCase();
+      const environment = (customerEvent.environment || body.environment || "production").toLowerCase();
+      if (environment === "sandbox") continue;
 
-      const encodedSubscriptionId = encodeURIComponent(subscription.id);
-      const transactions = await fetchRcList<RcSubscriptionTransaction>(
-        project.apiKey,
-        `${RC_BASE}/projects/${project.projectId}/subscriptions/${encodedSubscriptionId}/transactions?limit=100`
-      );
+      const isPurchase =
+        type.endsWith("INITIAL_PURCHASE") ||
+        type.endsWith("RENEWAL") ||
+        type.endsWith("NON_RENEWING_PURCHASE");
+      const isRefundReversed = type.includes("REFUND_REVERSED");
+      const eventPrice = money(body.price);
+      const isRefund =
+        !isRefundReversed &&
+        (type.includes("REFUND") ||
+          (type.endsWith("CANCELLATION") &&
+            ((body.cancel_reason || "").toUpperCase() === "CUSTOMER_SUPPORT" || eventPrice < 0)));
+      if (!isPurchase && !isRefund && !isRefundReversed) continue;
 
-      for (const transaction of transactions) {
-        const purchasedMs = valueMs(transaction.purchased_at);
-        if (purchasedMs == null) continue;
+      const purchaseMs = valueMs(body.purchased_at_ms);
+      const occurredMs = valueMs(customerEvent.occurred_at ?? body.event_timestamp_ms);
+      const eventMs = isPurchase ? purchaseMs ?? occurredMs : occurredMs ?? purchaseMs;
+      if (eventMs == null) continue;
 
-        const gross = money(transaction.revenue_in_usd?.gross);
-        if (Math.abs(gross) < 0.000001) continue;
+      const gross = isRefund ? -Math.abs(eventPrice) : Math.abs(eventPrice);
+      if (Math.abs(gross) < 0.000001) continue;
 
-        if (firstPaidMs == null || purchasedMs < firstPaidMs) {
-          firstPaidMs = purchasedMs;
-        }
-
-        if (purchasedMs < startMs || purchasedMs >= endMs) continue;
-
-        const productId =
-          transaction.product_store_identifier ||
-          transaction.product_id ||
-          subscription.product_store_identifier ||
-          subscription.product_id ||
-          "";
-        const expiresMs = valueMs(transaction.effective_expiration_date ?? transaction.expiration_date);
-
-        events.push({
-          id: transaction.id || `${project.name}:${seed.userId}:${productId}:${purchasedMs}:${gross}`,
-          app: project.name,
-          userId: seed.userId,
-          country: seed.country,
-          productId,
-          store: (subscription.store || "app_store").toLowerCase(),
-          purchasedAt: new Date(purchasedMs).toISOString(),
-          purchasedMs,
-          expiresAt: msToIso(expiresMs),
-          date: vnDateIso(new Date(purchasedMs)),
-          gross,
-        });
+      if (isPurchase && (firstPaidMs == null || eventMs < firstPaidMs)) {
+        firstPaidMs = eventMs;
       }
+
+      if (eventMs < startMs || eventMs >= endMs) continue;
+
+      const adjustmentKind: RevenueAdjustmentKind | undefined = isRefund
+        ? "REFUND"
+        : isRefundReversed
+          ? "REFUND_REVERSED"
+          : undefined;
+      const productId = body.product_id || "";
+      const eventId = customerEvent.id || `${project.name}:${seed.userId}:${productId}:${eventMs}:${gross}`;
+
+      events.push({
+        id: adjustmentKind ? `${adjustmentKind.toLowerCase()}:${eventId}` : eventId,
+        app: project.name,
+        userId: seed.userId,
+        country: (body.country_code || body.country || seed.country || "").toUpperCase(),
+        productId,
+        store: (body.store || "app_store").toLowerCase(),
+        purchasedAt: new Date(eventMs).toISOString(),
+        purchasedMs: eventMs,
+        expiresAt: msToIso(valueMs(body.expiration_at_ms ?? body.expires_at_ms)),
+        date: vnDateIso(new Date(eventMs)),
+        gross,
+        adjustmentKind,
+      });
     }
   } catch (err) {
     if (err instanceof RevenueCatApiError && err.status === 404) {
@@ -933,6 +954,7 @@ async function fetchTransactionLedger(
     throw new Error(`Database error: ${adjustmentError.message}`);
   }
 
+  const eventIds = new Set(events.map((event) => event.id.toLowerCase()));
   for (const row of (adjustmentRows || []) as RenewalEventRow[]) {
     const app = visibleAppName(row.app_name);
     const userId = row.app_user_id || "";
@@ -950,8 +972,11 @@ async function fetchTransactionLedger(
       continue;
     }
 
+    const eventId = row.id || `${adjustmentKind.toLowerCase()}:${app}:${userId}:${occurredMs}`;
+    if (eventIds.has(eventId.toLowerCase())) continue;
+
     events.push({
-      id: row.id || `${adjustmentKind.toLowerCase()}:${app}:${userId}:${occurredMs}`,
+      id: eventId,
       app,
       userId,
       country: (row.country || "").toUpperCase(),
@@ -964,21 +989,19 @@ async function fetchTransactionLedger(
       gross: revenue,
       adjustmentKind,
     });
+    eventIds.add(eventId.toLowerCase());
   }
 
-  events.sort((a, b) => a.purchasedMs - b.purchasedMs);
-  const data = { events, firstPaidAtByCustomer };
+  const dedupedEvents = Array.from(
+    new Map(events.map((event) => [event.id.toLowerCase(), event])).values()
+  ).sort((a, b) => a.purchasedMs - b.purchasedMs);
+  const data = { events: dedupedEvents, firstPaidAtByCustomer };
   transactionLedgerCache = { key: cacheKey, data, timestamp: Date.now() };
   return data;
 }
 
 function isNewSubEvent(event: TransactionEvent, ledger: TransactionLedger): boolean {
   if (event.adjustmentKind) return false;
-  const firstPaidAt = ledger.firstPaidAtByCustomer.get(keyFor(event.app, event.userId));
-  return sameVnDayOrLater(firstPaidAt, event.purchasedAt);
-}
-
-function isSameDayNewCustomerEvent(event: TransactionEvent, ledger: TransactionLedger): boolean {
   const firstPaidAt = ledger.firstPaidAtByCustomer.get(keyFor(event.app, event.userId));
   return sameVnDayOrLater(firstPaidAt, event.purchasedAt);
 }
@@ -993,11 +1016,23 @@ function buildDailyPointsFromLedger(
 ): DailyPoint[] {
   const revenueByDate: Record<string, number> = {};
   const newSubsByDate: Record<string, number> = {};
+  const refundAmountByDate: Record<string, number> = {};
+  const refundCountByDate: Record<string, number> = {};
+  const refundReversedAmountByDate: Record<string, number> = {};
+  const refundReversedCountByDate: Record<string, number> = {};
   const countedNewSubs = new Set<string>();
 
   for (const event of ledger.events) {
     if (appName && event.app !== appName) continue;
     revenueByDate[event.date] = (revenueByDate[event.date] || 0) + event.gross;
+    if (event.adjustmentKind === "REFUND") {
+      refundAmountByDate[event.date] = (refundAmountByDate[event.date] || 0) + Math.abs(event.gross);
+      refundCountByDate[event.date] = (refundCountByDate[event.date] || 0) + 1;
+    } else if (event.adjustmentKind === "REFUND_REVERSED") {
+      refundReversedAmountByDate[event.date] =
+        (refundReversedAmountByDate[event.date] || 0) + Math.abs(event.gross);
+      refundReversedCountByDate[event.date] = (refundReversedCountByDate[event.date] || 0) + 1;
+    }
     if (isNewSubEvent(event, ledger)) {
       const countKey = dateKeyFor(event.app, event.userId, event.date);
       if (!countedNewSubs.has(countKey)) {
@@ -1022,6 +1057,10 @@ function buildDailyPointsFromLedger(
       openrouter_cost: 0,
       revenuecat_cost: 0,
       higgsfield_cost: 0,
+      refund_amount: refundAmountByDate[date] || 0,
+      refund_count: refundCountByDate[date] || 0,
+      refund_reversed_amount: refundReversedAmountByDate[date] || 0,
+      refund_reversed_count: refundReversedCountByDate[date] || 0,
     };
   });
 }
@@ -1064,9 +1103,9 @@ function buildTodayLedgerFromTransactions(
     const appStats = perApp[event.app];
     if (!appStats) continue;
 
-    appStats.today_revenue += event.gross;
-    if (isNewSub || (event.adjustmentKind && isSameDayNewCustomerEvent(event, ledger))) {
-      appStats.new_revenue += event.gross;
+    if (!event.adjustmentKind) {
+      appStats.today_revenue += event.gross;
+      if (isNewSub) appStats.new_revenue += event.gross;
     }
     if (isNewSub) {
       const countKey = dateKeyFor(event.app, event.userId, event.date);
@@ -1278,6 +1317,24 @@ async function fetchFastTodayStatsFromDb(
     const app = visibleAppName(row.app_name);
     return Boolean(app && (!appName || app === appName));
   });
+  let todayRefundAmount = 0;
+  let todayRefundCount = 0;
+  let todayRefundReversedAmount = 0;
+  let todayRefundReversedCount = 0;
+  let todaySignedRefundAdjustment = 0;
+  for (const row of renewalRows) {
+    const revenue = money(row.revenue);
+    const adjustmentKind = adjustmentKindFromLedgerId(row.id, revenue);
+    if (!adjustmentKind) continue;
+    todaySignedRefundAdjustment += revenue;
+    if (adjustmentKind === "REFUND") {
+      todayRefundAmount += Math.abs(revenue);
+      todayRefundCount += 1;
+    } else {
+      todayRefundReversedAmount += Math.abs(revenue);
+      todayRefundReversedCount += 1;
+    }
+  }
   const renewalUserIds = Array.from(new Set(renewalRows.map((row) => row.app_user_id).filter(Boolean))) as string[];
   const renewalSubsResult = renewalUserIds.length > 0
     ? await supabase
@@ -1323,27 +1380,37 @@ async function fetchFastTodayStatsFromDb(
       openrouter_cost: point?.openrouter_cost || 0,
       revenuecat_cost: point?.revenuecat_cost || 0,
       higgsfield_cost: higgsfieldCost,
+      refund_amount: point?.refund_amount || 0,
+      refund_count: point?.refund_count || 0,
+      refund_reversed_amount: point?.refund_reversed_amount || 0,
+      refund_reversed_count: point?.refund_reversed_count || 0,
     };
   });
   const cachedRevenue30 = cachedDaily.reduce((sum, day) => sum + day.revenue, 0);
   const cachedTodayRevenue = cachedDaily.find((day) => day.date === today)?.revenue || 0;
-  const refreshedRevenue30 = cachedRevenue30 - cachedTodayRevenue + totalRevenue;
+  const chartTodayRevenue = totalRevenue + todaySignedRefundAdjustment;
+  const refreshedRevenue30 = cachedRevenue30 - cachedTodayRevenue + chartTodayRevenue;
   const revenueCatRate = refreshedRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
   const daily = cachedDaily.map((point) => ({
     ...point,
     ...(point.date === today
       ? {
-          revenue: totalRevenue,
+          revenue: chartTodayRevenue,
           profit:
-            profit.total_profit -
+            chartTodayRevenue * (1 - appleRate) -
+            profit.adspend_with_vat -
             (point.openrouter_cost || 0) -
-            totalRevenue * revenueCatRate -
+            chartTodayRevenue * revenueCatRate -
             point.higgsfield_cost,
           new_subs: newSubs,
           adspend_with_vat: profit.adspend_with_vat,
           cost_per_sub: profit.cost_per_new_sub,
-          revenuecat_cost: totalRevenue * revenueCatRate,
+          revenuecat_cost: chartTodayRevenue * revenueCatRate,
           higgsfield_cost: point.higgsfield_cost,
+          refund_amount: todayRefundAmount,
+          refund_count: todayRefundCount,
+          refund_reversed_amount: todayRefundReversedAmount,
+          refund_reversed_count: todayRefundReversedCount,
         }
       : {}),
   }));

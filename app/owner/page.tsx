@@ -24,6 +24,10 @@ type DailyPoint = {
   openrouter_cost?: number;
   revenuecat_cost?: number;
   higgsfield_cost?: number;
+  refund_amount?: number;
+  refund_count?: number;
+  refund_reversed_amount?: number;
+  refund_reversed_count?: number;
 };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
 type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
@@ -255,6 +259,7 @@ function DailyBarChart({
   label,
   valueLabel,
   tooltipValue,
+  refunds,
 }: {
   data: number[];
   dates: string[];
@@ -263,6 +268,12 @@ function DailyBarChart({
   label: string;
   valueLabel: (value: number) => string;
   tooltipValue: (value: number) => string;
+  refunds?: Array<{
+    amount: number;
+    count: number;
+    reversedAmount: number;
+    reversedCount: number;
+  }>;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
@@ -362,6 +373,16 @@ function DailyBarChart({
           >
             <p className="text-white text-sm font-bold whitespace-nowrap">{tooltipValue(data[hover])}</p>
             <p className="text-[#737373] text-[10px] whitespace-nowrap">{dates[hover]}</p>
+            {(refunds?.[hover]?.amount || 0) > 0 && (
+              <p className="text-[#ef4444] text-[10px] whitespace-nowrap mt-1">
+                Refunds -{fmtCur2(refunds?.[hover]?.amount || 0)} · {refunds?.[hover]?.count || 0}
+              </p>
+            )}
+            {(refunds?.[hover]?.reversedAmount || 0) > 0 && (
+              <p className="text-[#22c55e] text-[10px] whitespace-nowrap">
+                Reversed +{fmtCur2(refunds?.[hover]?.reversedAmount || 0)} · {refunds?.[hover]?.reversedCount || 0}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -592,6 +613,23 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
   const totalRevenue30 = (daily || []).reduce((sum, day) => sum + day.revenue, 0);
   const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
+  const refundAmount30 = (daily || []).reduce((sum, day) => sum + (day.refund_amount || 0), 0);
+  const refundCount30 = (daily || []).reduce((sum, day) => sum + (day.refund_count || 0), 0);
+  const refundReversedAmount30 = (daily || []).reduce(
+    (sum, day) => sum + (day.refund_reversed_amount || 0),
+    0
+  );
+  const refundReversedCount30 = (daily || []).reduce(
+    (sum, day) => sum + (day.refund_reversed_count || 0),
+    0
+  );
+  const netRefundAmount30 = refundAmount30 - refundReversedAmount30;
+  const dailyRefunds = (daily || []).map((day) => ({
+    amount: day.refund_amount || 0,
+    count: day.refund_count || 0,
+    reversedAmount: day.refund_reversed_amount || 0,
+    reversedCount: day.refund_reversed_count || 0,
+  }));
   const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
   const higgsfieldCost30 = (daily || []).reduce((sum, day) => sum + (day.higgsfield_cost || 0), 0);
@@ -682,8 +720,14 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
       {!loading && daily && daily.length > 1 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
+                <p className="text-[#ef4444] text-[10px] mt-1">
+                  Refunds -{fmtCur2(netRefundAmount30)} · {refundCount30} {refundCount30 === 1 ? "refund" : "refunds"}
+                  {refundReversedCount30 > 0 && ` · ${refundReversedCount30} reversed`}
+                </p>
+              </div>
               <div className="text-right">
                 <p className="text-white text-2xl font-bold">{fmtCur2(totalRevenue30)}</p>
                 {usdToVnd > 0 && (
@@ -698,11 +742,17 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               label="Revenue"
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
+              refunds={dailyRefunds}
             />
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
+                <p className="text-[#ef4444] text-[10px] mt-1">
+                  Includes -{fmtCur2(netRefundAmount30)} in net refunds
+                </p>
+              </div>
               <div className="text-right">
                 <p className="text-white text-2xl font-bold">{fmtCur2(totalProfit30)}</p>
                 {usdToVnd > 0 && (
@@ -718,6 +768,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               label="Profit"
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
+              refunds={dailyRefunds}
             />
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
