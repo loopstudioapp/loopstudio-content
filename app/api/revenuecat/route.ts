@@ -511,18 +511,20 @@ function buildDbTodayLedger({
       }
     }
 
-    transactions.push({
-      id: renewal.userId,
-      country: renewal.country,
-      app: renewal.app,
-      plan: planName(renewal.productId),
-      product_id: renewal.productId,
-      store: renewal.store,
-      occurred_at: renewal.occurredAt,
-      expires_at: "",
-      revenue: renewal.revenue,
-      type: renewal.adjustmentKind || (isNewSub ? "NEW_SUB" : "RENEWAL"),
-    });
+    if (!renewal.adjustmentKind) {
+      transactions.push({
+        id: renewal.userId,
+        country: renewal.country,
+        app: renewal.app,
+        plan: planName(renewal.productId),
+        product_id: renewal.productId,
+        store: renewal.store,
+        occurred_at: renewal.occurredAt,
+        expires_at: "",
+        revenue: renewal.revenue,
+        type: isNewSub ? "NEW_SUB" : "RENEWAL",
+      });
+    }
   }
 
   transactions.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
@@ -1114,6 +1116,8 @@ function buildTodayLedgerFromTransactions(
         countedNewSubs.add(countKey);
       }
     }
+
+    if (event.adjustmentKind) continue;
 
     const groupKey = `${dateKeyFor(event.app, event.userId, event.date)}:${type}`;
     const group = groups.get(groupKey);
