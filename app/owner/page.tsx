@@ -259,7 +259,6 @@ function DailyBarChart({
   label,
   valueLabel,
   tooltipValue,
-  refunds,
 }: {
   data: number[];
   dates: string[];
@@ -268,12 +267,6 @@ function DailyBarChart({
   label: string;
   valueLabel: (value: number) => string;
   tooltipValue: (value: number) => string;
-  refunds?: Array<{
-    amount: number;
-    count: number;
-    reversedAmount: number;
-    reversedCount: number;
-  }>;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
@@ -373,16 +366,6 @@ function DailyBarChart({
           >
             <p className="text-white text-sm font-bold whitespace-nowrap">{tooltipValue(data[hover])}</p>
             <p className="text-[#737373] text-[10px] whitespace-nowrap">{dates[hover]}</p>
-            {(refunds?.[hover]?.amount || 0) > 0 && (
-              <p className="text-[#ef4444] text-[10px] whitespace-nowrap mt-1">
-                Refunds -{fmtCur2(refunds?.[hover]?.amount || 0)} · {refunds?.[hover]?.count || 0}
-              </p>
-            )}
-            {(refunds?.[hover]?.reversedAmount || 0) > 0 && (
-              <p className="text-[#22c55e] text-[10px] whitespace-nowrap">
-                Reversed +{fmtCur2(refunds?.[hover]?.reversedAmount || 0)} · {refunds?.[hover]?.reversedCount || 0}
-              </p>
-            )}
           </div>
         )}
       </div>
@@ -396,6 +379,7 @@ type DailyCostBreakdown = {
   revenueCat: number;
   openRouter: number;
   higgsfield: number;
+  refunds: number;
 };
 
 const COST_SEGMENTS = [
@@ -404,6 +388,7 @@ const COST_SEGMENTS = [
   { key: "revenueCat", label: "RevenueCat", color: "#f2545b" },
   { key: "openRouter", label: "OpenRouter", color: "#c8ff00" },
   { key: "higgsfield", label: "Higgsfield", color: "#8b5cf6" },
+  { key: "refunds", label: "Refunds", color: "#ef4444" },
 ] as const;
 
 function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: string[] }) {
@@ -431,7 +416,7 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
           viewBox={`0 0 ${w} ${h}`}
           className="block w-full cursor-crosshair"
           role="img"
-          aria-label="Meta, Apple, RevenueCat, OpenRouter, and Higgsfield costs by day for the last 30 days"
+          aria-label="Meta, Apple, RevenueCat, OpenRouter, Higgsfield, and refund costs by day for the last 30 days"
           onMouseLeave={() => setHover(null)}
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -614,22 +599,11 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const totalRevenue30 = (daily || []).reduce((sum, day) => sum + day.revenue, 0);
   const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
   const refundAmount30 = (daily || []).reduce((sum, day) => sum + (day.refund_amount || 0), 0);
-  const refundCount30 = (daily || []).reduce((sum, day) => sum + (day.refund_count || 0), 0);
   const refundReversedAmount30 = (daily || []).reduce(
     (sum, day) => sum + (day.refund_reversed_amount || 0),
     0
   );
-  const refundReversedCount30 = (daily || []).reduce(
-    (sum, day) => sum + (day.refund_reversed_count || 0),
-    0
-  );
   const netRefundAmount30 = refundAmount30 - refundReversedAmount30;
-  const dailyRefunds = (daily || []).map((day) => ({
-    amount: day.refund_amount || 0,
-    count: day.refund_count || 0,
-    reversedAmount: day.refund_reversed_amount || 0,
-    reversedCount: day.refund_reversed_count || 0,
-  }));
   const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
   const higgsfieldCost30 = (daily || []).reduce((sum, day) => sum + (day.higgsfield_cost || 0), 0);
@@ -638,13 +612,15 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
     0
   );
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
-  const totalCost30 = metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30;
+  const totalCost30 =
+    metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
   const dailyCosts = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
     apple: day.revenue * (profit?.apple_commission_rate ?? 0.15),
     revenueCat: day.revenuecat_cost || 0,
     openRouter: day.openrouter_cost || 0,
     higgsfield: day.higgsfield_cost || 0,
+    refunds: Math.max(0, (day.refund_amount || 0) - (day.refund_reversed_amount || 0)),
   }));
   const usdToVnd = ads?.usd_rate ?? 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
@@ -720,14 +696,8 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
       {!loading && daily && daily.length > 1 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
-                <p className="text-[#ef4444] text-[10px] mt-1">
-                  Refunds -{fmtCur2(netRefundAmount30)} · {refundCount30} {refundCount30 === 1 ? "refund" : "refunds"}
-                  {refundReversedCount30 > 0 && ` · ${refundReversedCount30} reversed`}
-                </p>
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#22c55e] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
               <div className="text-right">
                 <p className="text-white text-2xl font-bold">{fmtCur2(totalRevenue30)}</p>
                 {usdToVnd > 0 && (
@@ -742,17 +712,11 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               label="Revenue"
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
-              refunds={dailyRefunds}
             />
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
-                <p className="text-[#ef4444] text-[10px] mt-1">
-                  Includes -{fmtCur2(netRefundAmount30)} in net refunds
-                </p>
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
               <div className="text-right">
                 <p className="text-white text-2xl font-bold">{fmtCur2(totalProfit30)}</p>
                 {usdToVnd > 0 && (
@@ -768,7 +732,6 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
               label="Profit"
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
-              refunds={dailyRefunds}
             />
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -783,6 +746,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
                       revenueCat: revenueCatCost30,
                       openRouter: openRouterCost30,
                       higgsfield: higgsfieldCost30,
+                      refunds: netRefundAmount30,
                     };
                     return (
                       <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
@@ -802,7 +766,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
             </div>
             <StackedCostChart data={dailyCosts} dates={daily.map((d) => d.date)} />
             <p className="text-[#525252] text-[10px] mt-2">
-              Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily
+              Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Refunds are already netted from revenue and profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
