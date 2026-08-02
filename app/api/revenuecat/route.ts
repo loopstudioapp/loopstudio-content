@@ -545,6 +545,8 @@ export type DailyPoint = {
   refund_count: number;
   refund_reversed_amount: number;
   refund_reversed_count: number;
+  refund_source_amount: number;
+  refund_source_reversed_amount: number;
 };
 
 type OpenRouterKey = {
@@ -1016,7 +1018,7 @@ function buildDailyPointsFromLedger(
   metaVat: number,
   appName?: string
 ): DailyPoint[] {
-  const revenueByDate: Record<string, number> = {};
+  const purchaseRevenueByDate: Record<string, number> = {};
   const newSubsByDate: Record<string, number> = {};
   const refundAmountByDate: Record<string, number> = {};
   const refundCountByDate: Record<string, number> = {};
@@ -1026,7 +1028,6 @@ function buildDailyPointsFromLedger(
 
   for (const event of ledger.events) {
     if (appName && event.app !== appName) continue;
-    revenueByDate[event.date] = (revenueByDate[event.date] || 0) + event.gross;
     if (event.adjustmentKind === "REFUND") {
       refundAmountByDate[event.date] = (refundAmountByDate[event.date] || 0) + Math.abs(event.gross);
       refundCountByDate[event.date] = (refundCountByDate[event.date] || 0) + 1;
@@ -1034,6 +1035,8 @@ function buildDailyPointsFromLedger(
       refundReversedAmountByDate[event.date] =
         (refundReversedAmountByDate[event.date] || 0) + Math.abs(event.gross);
       refundReversedCountByDate[event.date] = (refundReversedCountByDate[event.date] || 0) + 1;
+    } else {
+      purchaseRevenueByDate[event.date] = (purchaseRevenueByDate[event.date] || 0) + event.gross;
     }
     if (isNewSubEvent(event, ledger)) {
       const countKey = dateKeyFor(event.app, event.userId, event.date);
@@ -1044,8 +1047,14 @@ function buildDailyPointsFromLedger(
     }
   }
 
+  const distributedRefundAmount =
+    dates.reduce((sum, date) => sum + (refundAmountByDate[date] || 0), 0) / dates.length;
+  const distributedRefundReversedAmount =
+    dates.reduce((sum, date) => sum + (refundReversedAmountByDate[date] || 0), 0) / dates.length;
+
   return dates.map((date) => {
-    const gross = revenueByDate[date] || 0;
+    const gross =
+      (purchaseRevenueByDate[date] || 0) - distributedRefundAmount + distributedRefundReversedAmount;
     const newSubs = newSubsByDate[date] || 0;
     const net = gross * (1 - appleRate);
     const adspendWithVat = (spendUsdByDate[date] || 0) * (1 + metaVat);
@@ -1059,10 +1068,12 @@ function buildDailyPointsFromLedger(
       openrouter_cost: 0,
       revenuecat_cost: 0,
       higgsfield_cost: 0,
-      refund_amount: refundAmountByDate[date] || 0,
+      refund_amount: distributedRefundAmount,
       refund_count: refundCountByDate[date] || 0,
-      refund_reversed_amount: refundReversedAmountByDate[date] || 0,
+      refund_reversed_amount: distributedRefundReversedAmount,
       refund_reversed_count: refundReversedCountByDate[date] || 0,
+      refund_source_amount: refundAmountByDate[date] || 0,
+      refund_source_reversed_amount: refundReversedAmountByDate[date] || 0,
     };
   });
 }
@@ -1325,12 +1336,10 @@ async function fetchFastTodayStatsFromDb(
   let todayRefundCount = 0;
   let todayRefundReversedAmount = 0;
   let todayRefundReversedCount = 0;
-  let todaySignedRefundAdjustment = 0;
   for (const row of renewalRows) {
     const revenue = money(row.revenue);
     const adjustmentKind = adjustmentKindFromLedgerId(row.id, revenue);
     if (!adjustmentKind) continue;
-    todaySignedRefundAdjustment += revenue;
     if (adjustmentKind === "REFUND") {
       todayRefundAmount += Math.abs(revenue);
       todayRefundCount += 1;
@@ -1388,36 +1397,76 @@ async function fetchFastTodayStatsFromDb(
       refund_count: point?.refund_count || 0,
       refund_reversed_amount: point?.refund_reversed_amount || 0,
       refund_reversed_count: point?.refund_reversed_count || 0,
+      refund_source_amount: point?.refund_source_amount ?? point?.refund_amount ?? 0,
+      refund_source_reversed_amount:
+        point?.refund_source_reversed_amount ?? point?.refund_reversed_amount ?? 0,
     };
   });
-  const cachedRevenue30 = cachedDaily.reduce((sum, day) => sum + day.revenue, 0);
-  const cachedTodayRevenue = cachedDaily.find((day) => day.date === today)?.revenue || 0;
-  const chartTodayRevenue = totalRevenue + todaySignedRefundAdjustment;
-  const refreshedRevenue30 = cachedRevenue30 - cachedTodayRevenue + chartTodayRevenue;
+  const totalRefundAmount =
+    cachedDaily
+      .filter((point) => point.date !== today)
+      .reduce((sum, point) => sum + point.refund_source_amount, 0) + todayRefundAmount;
+  const totalRefundReversedAmount =
+    cachedDaily
+      .filter((point) => point.date !== today)
+      .reduce((sum, point) => sum + point.refund_source_reversed_amount, 0) + todayRefundReversedAmount;
+  const distributedRefundAmount = totalRefundAmount / cachedDaily.length;
+  const distributedRefundReversedAmount = totalRefundReversedAmount / cachedDaily.length;
+  const purchaseRevenueByDate = new Map(
+    cachedDaily.map((point) => [
+      point.date,
+      point.date === today
+        ? totalRevenue
+        : point.revenue - point.refund_reversed_amount + point.refund_amount,
+    ])
+  );
+  const refreshedRevenue30 = cachedDaily.reduce(
+    (sum, point) =>
+      sum +
+      (purchaseRevenueByDate.get(point.date) || 0) -
+      distributedRefundAmount +
+      distributedRefundReversedAmount,
+    0
+  );
   const revenueCatRate = refreshedRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
-  const daily = cachedDaily.map((point) => ({
-    ...point,
-    ...(point.date === today
-      ? {
-          revenue: chartTodayRevenue,
-          profit:
-            chartTodayRevenue * (1 - appleRate) -
-            profit.adspend_with_vat -
-            (point.openrouter_cost || 0) -
-            chartTodayRevenue * revenueCatRate -
-            point.higgsfield_cost,
-          new_subs: newSubs,
-          adspend_with_vat: profit.adspend_with_vat,
-          cost_per_sub: profit.cost_per_new_sub,
-          revenuecat_cost: chartTodayRevenue * revenueCatRate,
-          higgsfield_cost: point.higgsfield_cost,
-          refund_amount: todayRefundAmount,
-          refund_count: todayRefundCount,
-          refund_reversed_amount: todayRefundReversedAmount,
-          refund_reversed_count: todayRefundReversedCount,
-        }
-      : {}),
-  }));
+  const daily = cachedDaily.map((point) => {
+    const revenue =
+      (purchaseRevenueByDate.get(point.date) || 0) -
+      distributedRefundAmount +
+      distributedRefundReversedAmount;
+    const adspendWithVat = point.date === today ? profit.adspend_with_vat : point.adspend_with_vat;
+    const newSubCount = point.date === today ? newSubs : point.new_subs;
+    const sourceRefundAmount = point.date === today ? todayRefundAmount : point.refund_source_amount;
+    const sourceRefundReversedAmount =
+      point.date === today ? todayRefundReversedAmount : point.refund_source_reversed_amount;
+
+    return {
+      ...point,
+      revenue,
+      profit:
+        revenue * (1 - appleRate) -
+        adspendWithVat -
+        point.openrouter_cost -
+        revenue * revenueCatRate -
+        point.higgsfield_cost,
+      new_subs: newSubCount,
+      adspend_with_vat: adspendWithVat,
+      cost_per_sub:
+        point.date === today
+          ? profit.cost_per_new_sub
+          : newSubCount > 0
+            ? adspendWithVat / newSubCount
+            : 0,
+      revenuecat_cost: revenue * revenueCatRate,
+      refund_amount: distributedRefundAmount,
+      refund_count: point.date === today ? todayRefundCount : point.refund_count,
+      refund_reversed_amount: distributedRefundReversedAmount,
+      refund_reversed_count:
+        point.date === today ? todayRefundReversedCount : point.refund_reversed_count,
+      refund_source_amount: sourceRefundAmount,
+      refund_source_reversed_amount: sourceRefundReversedAmount,
+    };
+  });
 
   return { today_vn: today, per_app: perApp, transactions, ads, profit, daily };
 }
