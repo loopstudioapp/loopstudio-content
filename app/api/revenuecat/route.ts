@@ -534,6 +534,7 @@ function buildDbTodayLedger({
 export type DailyPoint = {
   date: string;
   revenue: number;
+  purchase_revenue: number;
   profit: number;
   new_subs: number;
   adspend_with_vat: number;
@@ -1053,14 +1054,15 @@ function buildDailyPointsFromLedger(
     dates.reduce((sum, date) => sum + (refundReversedAmountByDate[date] || 0), 0) / dates.length;
 
   return dates.map((date) => {
-    const gross =
-      (purchaseRevenueByDate[date] || 0) - distributedRefundAmount + distributedRefundReversedAmount;
+    const gross = purchaseRevenueByDate[date] || 0;
+    const revenueAfterRefunds = gross - distributedRefundAmount + distributedRefundReversedAmount;
     const newSubs = newSubsByDate[date] || 0;
-    const net = gross * (1 - appleRate);
+    const net = revenueAfterRefunds * (1 - appleRate);
     const adspendWithVat = (spendUsdByDate[date] || 0) * (1 + metaVat);
     return {
       date,
       revenue: gross,
+      purchase_revenue: gross,
       profit: net - adspendWithVat,
       new_subs: newSubs,
       adspend_with_vat: adspendWithVat,
@@ -1082,12 +1084,16 @@ function applyGrailScanOperatingCosts(
   daily: DailyPoint[],
   openRouterCostsByDate: Record<string, number>
 ): DailyPoint[] {
-  const trackedRevenue = daily.reduce((sum, point) => sum + point.revenue, 0);
+  const trackedRevenue = daily.reduce(
+    (sum, point) => sum + point.revenue - point.refund_amount + point.refund_reversed_amount,
+    0
+  );
   const revenueCatRate = trackedRevenue > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
 
   return daily.map((point) => {
     const openrouterCost = openRouterCostsByDate[point.date] || 0;
-    const revenuecatCost = point.revenue * revenueCatRate;
+    const revenueAfterRefunds = point.revenue - point.refund_amount + point.refund_reversed_amount;
+    const revenuecatCost = revenueAfterRefunds * revenueCatRate;
     return {
       ...point,
       profit: point.profit - openrouterCost - revenuecatCost - HIGGSFIELD_DAILY_COST,
@@ -1198,6 +1204,7 @@ type ProfitSummary = {
   total_profit: number; // net_revenue - adspend_with_vat
   new_profit: number; // net_new_revenue - adspend_with_vat
   cost_per_new_sub: number; // adspend_with_vat / new_subs (0 if no new subs)
+  daily_refund_cost: number; // 30-day net refunds amortized evenly per day
 };
 
 type TodayStatsResponse = {
@@ -1296,6 +1303,7 @@ function profitSummaryFromRevenue({
     total_profit: netRevenue - adspendWithVat,
     new_profit: netNewRevenue - adspendWithVat,
     cost_per_new_sub: newSubs > 0 ? adspendWithVat / newSubs : 0,
+    daily_refund_cost: 0,
   };
 }
 
@@ -1386,6 +1394,11 @@ async function fetchFastTodayStatsFromDb(
     return {
       date,
       revenue: point?.revenue || 0,
+      purchase_revenue:
+        point?.purchase_revenue ??
+        (point?.revenue || 0) -
+          (point?.refund_reversed_amount || 0) +
+          (point?.refund_amount || 0),
       profit: (point?.profit || 0) - (higgsfieldCost - previousHiggsfieldCost),
       new_subs: point?.new_subs || 0,
       adspend_with_vat: point?.adspend_with_vat || 0,
@@ -1415,12 +1428,10 @@ async function fetchFastTodayStatsFromDb(
   const purchaseRevenueByDate = new Map(
     cachedDaily.map((point) => [
       point.date,
-      point.date === today
-        ? totalRevenue
-        : point.revenue - point.refund_reversed_amount + point.refund_amount,
+      point.date === today ? totalRevenue : point.purchase_revenue,
     ])
   );
-  const refreshedRevenue30 = cachedDaily.reduce(
+  const refreshedNetRevenue30 = cachedDaily.reduce(
     (sum, point) =>
       sum +
       (purchaseRevenueByDate.get(point.date) || 0) -
@@ -1428,12 +1439,10 @@ async function fetchFastTodayStatsFromDb(
       distributedRefundReversedAmount,
     0
   );
-  const revenueCatRate = refreshedRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
+  const revenueCatRate = refreshedNetRevenue30 > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
   const daily = cachedDaily.map((point) => {
-    const revenue =
-      (purchaseRevenueByDate.get(point.date) || 0) -
-      distributedRefundAmount +
-      distributedRefundReversedAmount;
+    const revenue = purchaseRevenueByDate.get(point.date) || 0;
+    const revenueAfterRefunds = revenue - distributedRefundAmount + distributedRefundReversedAmount;
     const adspendWithVat = point.date === today ? profit.adspend_with_vat : point.adspend_with_vat;
     const newSubCount = point.date === today ? newSubs : point.new_subs;
     const sourceRefundAmount = point.date === today ? todayRefundAmount : point.refund_source_amount;
@@ -1443,11 +1452,12 @@ async function fetchFastTodayStatsFromDb(
     return {
       ...point,
       revenue,
+      purchase_revenue: revenue,
       profit:
-        revenue * (1 - appleRate) -
+        revenueAfterRefunds * (1 - appleRate) -
         adspendWithVat -
         point.openrouter_cost -
-        revenue * revenueCatRate -
+        revenueAfterRefunds * revenueCatRate -
         point.higgsfield_cost,
       new_subs: newSubCount,
       adspend_with_vat: adspendWithVat,
@@ -1457,7 +1467,7 @@ async function fetchFastTodayStatsFromDb(
           : newSubCount > 0
             ? adspendWithVat / newSubCount
             : 0,
-      revenuecat_cost: revenue * revenueCatRate,
+      revenuecat_cost: revenueAfterRefunds * revenueCatRate,
       refund_amount: distributedRefundAmount,
       refund_count: point.date === today ? todayRefundCount : point.refund_count,
       refund_reversed_amount: distributedRefundReversedAmount,
@@ -1468,7 +1478,14 @@ async function fetchFastTodayStatsFromDb(
     };
   });
 
-  return { today_vn: today, per_app: perApp, transactions, ads, profit, daily };
+  const dailyRefundCost = distributedRefundAmount - distributedRefundReversedAmount;
+  const profitWithRefund = {
+    ...profit,
+    total_profit: profit.total_profit - dailyRefundCost,
+    daily_refund_cost: dailyRefundCost,
+  };
+
+  return { today_vn: today, per_app: perApp, transactions, ads, profit: profitWithRefund, daily };
 }
 
 async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
@@ -1503,8 +1520,16 @@ async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
 
   const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
+  const todayPoint = daily.find((point) => point.date === today);
+  const dailyRefundCost =
+    (todayPoint?.refund_amount || 0) - (todayPoint?.refund_reversed_amount || 0);
+  const profitWithRefund = {
+    ...profit,
+    total_profit: profit.total_profit - dailyRefundCost,
+    daily_refund_cost: dailyRefundCost,
+  };
 
-  return { today_vn: today, per_app: perApp, transactions: txns, ads, profit, daily };
+  return { today_vn: today, per_app: perApp, transactions: txns, ads, profit: profitWithRefund, daily };
 }
 
 export async function GET(request: NextRequest) {

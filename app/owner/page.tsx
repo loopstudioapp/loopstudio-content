@@ -13,7 +13,7 @@ type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: numbe
 type TodayTxnType = "NEW_SUB" | "RENEWAL" | "REFUND" | "REFUND_REVERSED";
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: TodayTxnType };
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
-type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number };
+type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number; daily_refund_cost?: number };
 type DailyPoint = {
   date: string;
   revenue: number;
@@ -608,7 +608,10 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
   const higgsfieldCost30 = (daily || []).reduce((sum, day) => sum + (day.higgsfield_cost || 0), 0);
   const appleCost30 = (daily || []).reduce(
-    (sum, day) => sum + day.revenue * (profit?.apple_commission_rate ?? 0.15),
+    (sum, day) =>
+      sum +
+      (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) *
+        (profit?.apple_commission_rate ?? 0.15),
     0
   );
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
@@ -616,7 +619,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
     metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
   const dailyCosts = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
-    apple: day.revenue * (profit?.apple_commission_rate ?? 0.15),
+    apple:
+      (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) *
+      (profit?.apple_commission_rate ?? 0.15),
     revenueCat: day.revenuecat_cost || 0,
     openRouter: day.openrouter_cost || 0,
     higgsfield: day.higgsfield_cost || 0,
@@ -672,7 +677,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Profit</p>
             <p className={`text-3xl font-bold ${profitColor(totalProfit)}`}>{fmtSignedCur(totalProfit)}</p>
-            <p className="text-[#525252] text-[10px] mt-1">net rev − adspend</p>
+            <p className="text-[#525252] text-[10px] mt-1">
+              net rev − adspend − {fmtCur2(profit?.daily_refund_cost || 0)} refund avg
+            </p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">New Profit</p>
