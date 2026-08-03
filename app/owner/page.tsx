@@ -1047,6 +1047,7 @@ export default function OwnerDashboard() {
           <p className="text-xs text-[#525252]">Dashboard Overview</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/calendar" className={btnCls}>Calendar</Link>
           <Link href="/food" className={btnCls}>Food</Link>
           <Link href="/grailscan" className={btnCls}>Server</Link>
           <Link href="/portfolio" className={btnCls}>Portfolio</Link>
