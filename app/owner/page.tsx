@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
@@ -921,7 +920,6 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
 
 /* ── Main ── */
 export default function OwnerDashboard() {
-  const { t } = useLang();
   const router = useRouter();
 
   // GrailScan-only stats and transactions for the owner dashboard.
@@ -1050,10 +1048,8 @@ export default function OwnerDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/food" className={btnCls}>Food</Link>
-          <Link href="/timer" className={btnCls}>Timer</Link>
           <Link href="/grailscan" className={btnCls}>Server</Link>
           <Link href="/portfolio" className={btnCls}>Portfolio</Link>
-          <Link href="/" className={btnCls}>{t("logout")}</Link>
         </div>
       </div>
 
