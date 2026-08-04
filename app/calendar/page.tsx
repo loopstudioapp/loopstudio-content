@@ -87,7 +87,7 @@ function placeDay(occurrences: Occurrence[]): Placed[] {
 
 export default function CalendarPage() {
   const router = useRouter();
-  const [view, setView] = useState<View>("week");
+  const [view, setView] = useState<View>("focus");
   const [cursor, setCursor] = useState(vnToday());
   const [selected, setSelected] = useState(vnToday());
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -316,7 +316,7 @@ export default function CalendarPage() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
         <div className="flex items-center border border-[#3a3a3a] rounded-lg overflow-hidden">
-          {(["week", "focus"] as View[]).map((value) => (
+          {(["focus", "week"] as View[]).map((value) => (
             <button
               key={value}
               onClick={() => setView(value)}
@@ -342,12 +342,15 @@ export default function CalendarPage() {
         <h2 className="text-sm font-semibold text-white ml-1">{title}</h2>
 
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => openNew(selected)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-black bg-[#22c55e] rounded-lg hover:bg-[#16a34a] transition-colors"
-          >
-            <Plus size={13} /> Task
-          </button>
+          {/* Creating happens on the grid; the task view is for working through it. */}
+          {view === "week" && (
+            <button
+              onClick={() => openNew(selected)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-black bg-[#22c55e] rounded-lg hover:bg-[#16a34a] transition-colors"
+            >
+              <Plus size={13} /> Task
+            </button>
+          )}
         </div>
       </div>
 

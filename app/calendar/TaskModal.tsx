@@ -50,8 +50,8 @@ function readAndShrink(file: File): Promise<string> {
 }
 
 const inputCls =
-  "w-full bg-[#161616] border border-[#3a3a3a] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#404040] transition-colors";
-const labelCls = "block text-[11px] uppercase tracking-wider text-[#b0b0b0] font-semibold mb-1.5";
+  "w-full bg-[#161616] border border-[#3a3a3a] rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-[#404040] transition-colors";
+const labelCls = "block text-[10px] uppercase tracking-wider text-[#b0b0b0] font-semibold mb-1";
 
 export default function TaskModal({
   task,
@@ -191,14 +191,14 @@ export default function TaskModal({
       }}
     >
       <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl w-full max-w-lg my-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#3a3a3a]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#3a3a3a]">
           <h2 className="text-sm font-semibold text-white">{task ? "Edit task" : "New task"}</h2>
           <button onClick={onClose} className="text-[#b0b0b0] hover:text-white transition-colors">
             <X size={16} />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-4 space-y-3">
           <div>
             <label className={labelCls}>Title</label>
             <input
@@ -228,7 +228,7 @@ export default function TaskModal({
                 <button
                   key={value}
                   onClick={() => setCategory(value)}
-                  className="py-2 text-xs rounded-lg border transition-colors"
+                  className="py-1.5 text-xs rounded-lg border transition-colors"
                   style={
                     category === value
                       ? { borderColor: CATEGORY_COLOR[value], color: CATEGORY_COLOR[value], background: `${CATEGORY_COLOR[value]}14` }
@@ -269,20 +269,19 @@ export default function TaskModal({
             <label className={labelCls}>Timing</label>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { value: true, label: "At a time", hint: "Shows on the calendar" },
-                { value: false, label: "Anytime", hint: "Ranked by priority" },
+                { value: true, label: "At a time" },
+                { value: false, label: "Anytime" },
               ].map((option) => (
                 <button
                   key={String(option.value)}
                   onClick={() => setTimed(option.value)}
-                  className={`py-2 px-2 rounded-lg border transition-colors ${
+                  className={`py-1.5 px-2 text-xs rounded-lg border transition-colors ${
                     timed === option.value
                       ? "border-[#404040] text-white bg-[#1c1c1c]"
                       : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
                   }`}
                 >
-                  <span className="block text-xs">{option.label}</span>
-                  <span className="block text-[10px] text-[#8f8f8f]">{option.hint}</span>
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -295,7 +294,7 @@ export default function TaskModal({
                 <button
                   key={option.value}
                   onClick={() => setRecurrence(option.value)}
-                  className={`py-2 text-xs rounded-lg border transition-colors ${
+                  className={`py-1.5 text-xs rounded-lg border transition-colors ${
                     recurrence === option.value
                       ? "border-[#404040] text-white bg-[#1c1c1c]"
                       : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
@@ -333,7 +332,7 @@ export default function TaskModal({
                       <button
                         key={day}
                         onClick={() => toggleWeekday(index)}
-                        className={`py-2 text-[11px] rounded-lg border transition-colors ${
+                        className={`py-1.5 text-[11px] rounded-lg border transition-colors ${
                           on ? "border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10" : "border-[#3a3a3a] text-[#b0b0b0]"
                         }`}
                       >
@@ -429,7 +428,7 @@ export default function TaskModal({
             {image ? (
               <div className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image} alt="Task attachment" className="w-full max-h-44 object-cover rounded-lg border border-[#3a3a3a]" />
+                <img src={image} alt="Task attachment" className="w-full max-h-28 object-cover rounded-lg border border-[#3a3a3a]" />
                 <button
                   onClick={() => setImage(null)}
                   className="absolute top-2 right-2 bg-black/70 border border-[#333] rounded-lg p-1.5 text-[#d4d4d4] hover:text-white transition-colors"
@@ -438,7 +437,7 @@ export default function TaskModal({
                 </button>
               </div>
             ) : (
-              <label className="flex items-center justify-center gap-2 h-20 border border-dashed border-[#3a3a3a] rounded-lg text-xs text-[#8f8f8f] hover:text-[#d4d4d4] hover:border-[#404040] cursor-pointer transition-colors">
+              <label className="flex items-center justify-center gap-2 py-2 border border-dashed border-[#3a3a3a] rounded-lg text-xs text-[#8f8f8f] hover:text-[#d4d4d4] hover:border-[#404040] cursor-pointer transition-colors">
                 <ImagePlus size={15} />
                 Attach an image
                 <input
@@ -454,12 +453,12 @@ export default function TaskModal({
           {error && <p className="text-xs text-[#ef4444]">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#3a3a3a]">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-[#3a3a3a]">
           {task ? (
             <button
               onClick={remove}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-[#ef4444] border border-[#ef4444]/25 rounded-lg hover:bg-[#ef4444]/10 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#ef4444] border border-[#ef4444]/25 rounded-lg hover:bg-[#ef4444]/10 transition-colors disabled:opacity-50"
             >
               <Trash2 size={13} /> Delete
             </button>
@@ -469,14 +468,14 @@ export default function TaskModal({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-2 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
+              className="px-3 py-1.5 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={save}
               disabled={saving}
-              className="px-4 py-2 text-xs font-semibold text-black bg-[#22c55e] rounded-lg hover:bg-[#16a34a] transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-xs font-semibold text-black bg-[#22c55e] rounded-lg hover:bg-[#16a34a] transition-colors disabled:opacity-50"
             >
               {saving ? "Saving…" : task ? "Save" : "Add task"}
             </button>
