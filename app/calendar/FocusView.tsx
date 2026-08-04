@@ -29,8 +29,16 @@ export default function FocusView({
   onComplete: (occurrence: Occurrence) => void;
 }) {
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * Elapsed time is derived from wall-clock timestamps rather than counted from
+   * interval ticks. Browsers throttle timers in a hidden tab — often to once a
+   * minute — so a tick counter loses time whenever the tab is in the
+   * background. `runStartedAt` is when the current run began; `bankedMs` holds
+   * the total of any earlier runs that were paused.
+   */
+  const [bankedMs, setBankedMs] = useState(0);
+  const runStartedAt = useRef<number | null>(null);
+  const [, redraw] = useState(0);
 
   const current = queue[0];
   const currentKey = current?.key;
@@ -38,22 +46,48 @@ export default function FocusView({
   // A different task means a fresh timer.
   useEffect(() => {
     setRunning(false);
-    setElapsed(0);
+    setBankedMs(0);
+    runStartedAt.current = null;
   }, [currentKey]);
 
+  // The interval only forces a repaint; the value it shows comes from the
+  // clock, so a throttled tick costs smoothness, never accuracy. Repainting on
+  // visibilitychange makes the figure correct the instant the tab is reopened.
   useEffect(() => {
     if (!running) return;
-    tickRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
+    const tick = () => redraw((n) => n + 1);
+    const id = setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", tick);
     return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
     };
+  }, [running]);
+
+  const toggleRun = useCallback(() => {
+    if (running) {
+      if (runStartedAt.current !== null) {
+        const startedAt = runStartedAt.current;
+        setBankedMs((ms) => ms + (Date.now() - startedAt));
+        runStartedAt.current = null;
+      }
+      setRunning(false);
+    } else {
+      runStartedAt.current = Date.now();
+      setRunning(true);
+    }
   }, [running]);
 
   const finish = useCallback(() => {
     if (!current) return;
     setRunning(false);
+    runStartedAt.current = null;
     onComplete(current);
   }, [current, onComplete]);
+
+  const elapsed = Math.floor(
+    (bankedMs + (runStartedAt.current !== null ? Date.now() - runStartedAt.current : 0)) / 1000,
+  );
 
   if (!queue.length) {
     return (
@@ -143,7 +177,7 @@ export default function FocusView({
           </div>
 
           <button
-            onClick={() => setRunning((value) => !value)}
+            onClick={toggleRun}
             className="w-full inline-flex items-center justify-center gap-2 py-3 text-sm font-semibold text-black rounded-lg transition-opacity hover:opacity-90"
             style={{ background: accent }}
           >
