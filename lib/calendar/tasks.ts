@@ -69,6 +69,12 @@ export const DEFAULT_TIME = "09:00";
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/**
+ * Monday-first display order. Values are JS day numbers, so `weekly_times`
+ * keys keep their 0 = Sunday meaning no matter how the week is laid out.
+ */
+export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
 export const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -126,9 +132,12 @@ export function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-/** Sunday of the week containing `iso`. */
+/**
+ * Monday-first weeks: the week containing `iso` runs Monday to Sunday.
+ * Monday(1) shifts back 0 days, Sunday(0) shifts back 6.
+ */
 export function startOfWeek(iso: string): string {
-  return addDays(iso, -dayOfWeek(iso));
+  return addDays(iso, -((dayOfWeek(iso) + 6) % 7));
 }
 
 /** The Sunday that starts the 6-week grid covering `iso`'s month. */

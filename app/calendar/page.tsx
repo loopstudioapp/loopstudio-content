@@ -15,6 +15,7 @@ import {
   WEEKDAYS,
   addDays,
   anytimeQueue,
+  dayOfWeek,
   dayQueue,
   expandRange,
   fmtDateLong,
@@ -403,7 +404,7 @@ export default function CalendarPage() {
                   onClick={() => setSelected(date)}
                   className={`py-2 text-center transition-colors hover:bg-[#282828] ${date === selected ? "bg-[#282828]" : ""}`}
                 >
-                  <p className="text-[11px] uppercase tracking-wider text-[#8f8f8f]">{WEEKDAYS[offset]}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-[#8f8f8f]">{WEEKDAYS[dayOfWeek(date)]}</p>
                   <p className={`text-sm font-semibold ${isToday ? "text-[#22c55e]" : "text-white"}`}>
                     {Number(date.slice(8, 10))}
                   </p>

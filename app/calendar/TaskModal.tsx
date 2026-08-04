@@ -12,6 +12,7 @@ import {
   Recurrence,
   Task,
   WEEKDAYS,
+  WEEK_ORDER,
   daysInMonth,
   vnToday,
 } from "@/lib/calendar/tasks";
@@ -326,7 +327,8 @@ export default function TaskModal({
               <div>
                 <label className={labelCls}>Days</label>
                 <div className="grid grid-cols-7 gap-1.5">
-                  {WEEKDAYS.map((day, index) => {
+                  {WEEK_ORDER.map((index) => {
+                    const day = WEEKDAYS[index];
                     const on = Boolean(weeklyTimes[String(index)]);
                     return (
                       <button
@@ -345,7 +347,7 @@ export default function TaskModal({
 
               {/* Each selected day carries its own time — 6am Monday, 6pm Tuesday. */}
               {timed && Object.keys(weeklyTimes)
-                .sort()
+                .sort((a, b) => WEEK_ORDER.indexOf(Number(a)) - WEEK_ORDER.indexOf(Number(b)))
                 .map((day) => (
                   <div key={day} className="flex items-center gap-3">
                     <span className="text-xs text-[#d4d4d4] w-10">{WEEKDAYS[Number(day)]}</span>
