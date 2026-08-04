@@ -53,7 +53,7 @@ export const CATEGORIES: Category[] = ["music", "app", "other"];
 export const CATEGORY_COLOR: Record<Category, string> = {
   music: "#a855f7",
   app: "#22c55e",
-  other: "#f43f5e",
+  other: "#ea580c",
 };
 
 export const CATEGORY_LABEL: Record<Category, string> = {
