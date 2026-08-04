@@ -345,9 +345,16 @@ export function dayQueue(occurrences: Occurrence[], nowMinutes?: number): Occurr
   return [...timed, ...pinned, ...gates, ...rest];
 }
 
-/** Anytime tasks for a day, most important first. */
+/**
+ * Anytime tasks for a day, most important first. Pinned tasks lead, matching
+ * the order the task view works through them.
+ */
 export function anytimeQueue(occurrences: Occurrence[]): Occurrence[] {
-  return occurrences.filter((o) => !o.timed).sort(byImportance);
+  const anytime = occurrences.filter((o) => !o.timed);
+  return [
+    ...anytime.filter((o) => o.task.pin_first).sort(byImportance),
+    ...anytime.filter((o) => !o.task.pin_first).sort(byImportance),
+  ];
 }
 
 /** Occurrences for each date in `[from, to]`, keyed by date. */
