@@ -68,6 +68,8 @@ function buildRow(body: Record<string, unknown>) {
     row.yearly_day = Math.min(31, Math.max(1, Number(body.yearly_day) || 1));
   }
 
+  if (body.pin_first === true) row.pin_first = true;
+
   return row;
 }
 

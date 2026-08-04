@@ -91,6 +91,7 @@ export default function TaskModal({
   const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? defaultEstimate ?? 30));
   const [recurrence, setRecurrence] = useState<Recurrence>(task?.recurrence || "none");
   const [timed, setTimed] = useState(task ? task.timed : true);
+  const [pinFirst, setPinFirst] = useState(task?.pin_first ?? false);
   const [date, setDate] = useState(task?.start_date || defaultDate);
   const [time, setTime] = useState(task?.start_time || defaultTime || DEFAULT_TIME);
   const [weeklyTimes, setWeeklyTimes] = useState<Record<string, string>>(task?.weekly_times || {});
@@ -158,6 +159,7 @@ export default function TaskModal({
         estimate_minutes: Number(estimate) || 30,
         recurrence,
         timed,
+        pin_first: !timed && pinFirst,
         // Recurring tasks keep the date as a "starts from" anchor.
         start_date: date,
         start_time: time,
@@ -300,6 +302,19 @@ export default function TaskModal({
               ))}
             </div>
           </div>
+
+          {!timed && (
+            <button
+              onClick={() => setPinFirst((v) => !v)}
+              className={`w-full py-1.5 text-xs rounded-lg border transition-colors ${
+                pinFirst
+                  ? "border-[#fbbf24] text-[#fbbf24] bg-[#fbbf24]/10"
+                  : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
+              }`}
+            >
+              {pinFirst ? "★ Do first — leads the whole queue" : "Do first (ahead of the music/app must-do)"}
+            </button>
+          )}
 
           <div>
             <label className={labelCls}>Repeat</label>

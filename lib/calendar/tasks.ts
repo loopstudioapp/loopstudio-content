@@ -21,6 +21,7 @@ export type Task = {
   estimate_minutes: number;
   recurrence: Recurrence;
   timed: boolean;
+  pin_first: boolean;
   start_date: string | null;
   start_time: string | null;
   weekly_times: Record<string, string>;
@@ -297,7 +298,7 @@ export function occurrencesOn(
   }
 
   for (const category of GATE_ORDER) {
-    const inCategory = occurrences.filter((o) => !o.timed && o.task.category === category);
+    const inCategory = occurrences.filter((o) => !o.timed && !o.task.pin_first && o.task.category === category);
     if (!inCategory.length) continue;
     const gate = inCategory.slice().sort(byImportance)[0];
     gate.isGate = true;
@@ -328,14 +329,20 @@ export function dayQueue(occurrences: Occurrence[], nowMinutes?: number): Occurr
     .sort((a, b) => a.minutes - b.minutes || byImportance(a, b));
 
   const anytime = pending.filter((o) => !o.timed);
+
+  // Pinned tasks lead everything that is not pinned to a clock, ahead of the
+  // category gates. Priority cannot express this on its own.
+  const pinned = anytime.filter((o) => o.task.pin_first).sort(byImportance);
+  const unpinned = anytime.filter((o) => !o.task.pin_first);
+
   const gates: Occurrence[] = [];
   for (const category of GATE_ORDER) {
-    const gate = anytime.find((o) => o.isGate && o.task.category === category);
+    const gate = unpinned.find((o) => o.isGate && o.task.category === category);
     if (gate) gates.push(gate);
   }
-  const rest = anytime.filter((o) => !o.isGate).sort(byImportance);
+  const rest = unpinned.filter((o) => !o.isGate).sort(byImportance);
 
-  return [...timed, ...gates, ...rest];
+  return [...timed, ...pinned, ...gates, ...rest];
 }
 
 /** Anytime tasks for a day, most important first. */
@@ -372,6 +379,7 @@ export function normalizeTask(row: Record<string, unknown>): Task {
     estimate_minutes: Number(row.estimate_minutes ?? 30),
     recurrence: (row.recurrence as Recurrence) ?? "none",
     timed: row.timed !== false, // legacy rows predate the column and were timed
+    pin_first: row.pin_first === true,
     start_date: (row.start_date as string) ?? null,
     start_time: (row.start_time as string) ?? DEFAULT_TIME,
     weekly_times: (weekly && typeof weekly === "object" ? weekly : {}) as Record<string, string>,
