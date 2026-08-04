@@ -165,13 +165,13 @@ export default function CalendarPage() {
       try {
         const response = wasDone
           ? await fetch(
-              `/api/calendar/complete?task_id=${occurrence.task.id}&occurrence_date=${occurrence.date}`,
+              `/api/calendar/complete?task_id=${occurrence.task.id}&occurrence_date=${occurrence.completionDate}`,
               { method: "DELETE" },
             )
           : await fetch("/api/calendar/complete", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ task_id: occurrence.task.id, occurrence_date: occurrence.date }),
+              body: JSON.stringify({ task_id: occurrence.task.id, occurrence_date: occurrence.completionDate }),
             });
         if (!response.ok) throw new Error();
       } catch {
@@ -189,13 +189,13 @@ export default function CalendarPage() {
   );
 
   const byDate = useMemo(
-    () => expandRange(tasks, rangeFrom, rangeTo, done),
-    [tasks, rangeFrom, rangeTo, done],
+    () => expandRange(tasks, rangeFrom, rangeTo, done, today),
+    [tasks, rangeFrom, rangeTo, done, today],
   );
 
   const focusQueue = useMemo(
-    () => dayQueue(occurrencesOn(tasks, selected, done)),
-    [tasks, selected, done],
+    () => dayQueue(occurrencesOn(tasks, selected, done, today)),
+    [tasks, selected, done, today],
   );
 
   const step = (direction: number) => {
@@ -452,6 +452,7 @@ export default function CalendarPage() {
                               occurrence.done ? "text-[#737373] line-through" : "text-white"
                             }`}
                           >
+                            {occurrence.rolledFrom && <span className="text-[#f59e0b]">↷ </span>}
                             {occurrence.task.title}
                           </p>
                           {height > 30 && (

@@ -91,9 +91,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: completions.error.message }, { status: 500 });
   }
 
+  const rows = [...(completions.data || [])];
+
+  // A carried-over one-off is completed against the date it was originally
+  // scheduled for, which is by definition outside the window being viewed.
+  // Without these rows the client cannot tell it is finished and would keep
+  // rolling it forward forever. One-offs have at most one completion each, so
+  // this stays bounded.
+  const oneOffIds = (tasksQuery.data || [])
+    .filter((task) => task.recurrence === "none")
+    .map((task) => task.id);
+
+  if (oneOffIds.length) {
+    const carried = await supabase
+      .from("calendar_task_completions")
+      .select("task_id, occurrence_date")
+      .in("task_id", oneOffIds);
+    if (carried.error) {
+      return NextResponse.json({ error: carried.error.message }, { status: 500 });
+    }
+    rows.push(...(carried.data || []));
+  }
+
   return NextResponse.json({
     tasks: tasksQuery.data || [],
-    completions: (completions.data || []).map((c) => `${c.task_id}:${c.occurrence_date}`),
+    completions: [...new Set(rows.map((c) => `${c.task_id}:${c.occurrence_date}`))],
   });
 }
 

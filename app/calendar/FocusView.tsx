@@ -99,6 +99,11 @@ export default function FocusView({
             >
               {CATEGORY_LABEL[current.task.category]}
             </span>
+            {current.rolledFrom && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
+                ↷ Carried over
+              </span>
+            )}
             {current.isGate && (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
                 <Flag size={10} /> Must finish first

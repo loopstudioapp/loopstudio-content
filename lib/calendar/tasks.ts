@@ -30,13 +30,20 @@ export type Task = {
 };
 
 export type Occurrence = {
-  key: string; // `${task.id}:${date}` — the completion identity
+  key: string; // `${task.id}:${completionDate}` — the completion identity
   task: Task;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD the occurrence is shown on
+  /**
+   * The date the completion row is keyed on. Same as `date` normally, but a
+   * carried-over task stays pinned to the day it was originally scheduled, so
+   * ticking it writes the row the overdue check reads and it stops rolling.
+   */
+  completionDate: string;
   time: string; // HH:MM
   minutes: number; // minutes past midnight, for sorting and grid placement
   done: boolean;
   isGate: boolean; // the day's must-finish-first task for music / app
+  rolledFrom: string | null; // original date when carried over, else null
 };
 
 export const CATEGORIES: Category[] = ["music", "app", "other"];
@@ -219,20 +226,57 @@ export function byTime(a: Occurrence, b: Occurrence): number {
  * finishing the day's key music task does not promote a second music task
  * into the gate slot.
  */
-export function occurrencesOn(tasks: Task[], iso: string, done: Set<string>): Occurrence[] {
+/**
+ * A one-off task that came and went unfinished. It stops appearing on its
+ * original day and shows up on the current day instead, carrying its time.
+ *
+ * Only one-off tasks roll. A recurring task simply comes around again on its
+ * own schedule; carrying it forward would stack copies against its next
+ * occurrence.
+ */
+export function isCarriedOver(task: Task, today: string, done: Set<string>): boolean {
+  return (
+    task.recurrence === "none" &&
+    !!task.start_date &&
+    task.start_date < today &&
+    !done.has(`${task.id}:${task.start_date}`)
+  );
+}
+
+export function occurrencesOn(
+  tasks: Task[],
+  iso: string,
+  done: Set<string>,
+  today: string = vnToday(),
+): Occurrence[] {
   const occurrences: Occurrence[] = [];
 
   for (const task of tasks) {
-    const time = occursOn(task, iso);
+    let time: string | null;
+    let completionDate = iso;
+    let rolledFrom: string | null = null;
+
+    if (isCarriedOver(task, today, done)) {
+      // Shows only on the current day, never on the day it was scheduled for.
+      if (iso !== today) continue;
+      time = task.start_time || DEFAULT_TIME;
+      completionDate = task.start_date as string;
+      rolledFrom = task.start_date;
+    } else {
+      time = occursOn(task, iso);
+    }
+
     if (!time) continue;
     occurrences.push({
-      key: `${task.id}:${iso}`,
+      key: `${task.id}:${completionDate}`,
       task,
       date: iso,
+      completionDate,
       time,
       minutes: toMinutes(time),
-      done: done.has(`${task.id}:${iso}`),
+      done: done.has(`${task.id}:${completionDate}`),
       isGate: false,
+      rolledFrom,
     });
   }
 
@@ -268,10 +312,11 @@ export function expandRange(
   from: string,
   to: string,
   done: Set<string>,
+  today: string = vnToday(),
 ): Record<string, Occurrence[]> {
   const byDate: Record<string, Occurrence[]> = {};
   for (let iso = from; iso <= to; iso = addDays(iso, 1)) {
-    byDate[iso] = occurrencesOn(tasks, iso, done).sort(byTime);
+    byDate[iso] = occurrencesOn(tasks, iso, done, today).sort(byTime);
   }
   return byDate;
 }
