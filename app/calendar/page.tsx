@@ -96,6 +96,7 @@ export default function CalendarPage() {
   // Only the very first load gets a skeleton. Later refetches (switching views,
   // paging weeks) keep the current content on screen instead of flashing.
   const [ready, setReady] = useState(false);
+  const [workMode, setWorkMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [modal, setModal] = useState<{ task: Task | null; date: string; time?: string; estimate?: number } | null>(null);
@@ -284,6 +285,24 @@ export default function CalendarPage() {
     });
   };
 
+  if (workMode) {
+    return (
+      <div className="min-h-screen bg-[#161616] p-4 sm:p-6">
+        <button
+          onClick={() => setWorkMode(false)}
+          className="absolute top-4 right-4 sm:top-6 sm:right-6 z-10 inline-flex items-center gap-1.5 rounded-lg border border-[#3a3a3a] px-3 py-1.5 text-xs text-[#b0b0b0] transition-colors hover:border-[#555] hover:text-white"
+        >
+          Exit
+        </button>
+        <div className="min-h-[calc(100vh-3rem)] flex items-center justify-center">
+          <div className="w-full max-w-lg">
+            {ready && <FocusView queue={focusQueue} onComplete={toggleDone} />}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#161616] p-4 sm:p-6 max-w-[1700px] mx-auto">
       {/* Header */}
@@ -293,8 +312,14 @@ export default function CalendarPage() {
           <p className="text-xs text-[#8f8f8f]">Tasks &amp; schedule · GMT+7</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/owner" className={btnCls}>Owner</Link>
-          <Link href="/portfolio" className={btnCls}>Portfolio</Link>
+          <button onClick={() => setWorkMode(true)} className={btnCls}>Work</button>
+          <Link
+            href="/owner"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#3a3a3a] px-3 py-1.5 text-xs text-[#b0b0b0] transition-colors hover:border-[#555] hover:text-white"
+          >
+            <ChevronLeft size={13} />
+            Dashboard
+          </Link>
         </div>
       </div>
 
