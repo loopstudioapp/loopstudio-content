@@ -20,6 +20,7 @@ export type Task = {
   category: Category;
   estimate_minutes: number;
   recurrence: Recurrence;
+  timed: boolean;
   start_date: string | null;
   start_time: string | null;
   weekly_times: Record<string, string>;
@@ -41,6 +42,7 @@ export type Occurrence = {
   completionDate: string;
   time: string; // HH:MM
   minutes: number; // minutes past midnight, for sorting and grid placement
+  timed: boolean; // false = anytime task, never drawn on the grid
   done: boolean;
   isGate: boolean; // the day's must-finish-first task for music / app
   rolledFrom: string | null; // original date when carried over, else null
@@ -274,6 +276,7 @@ export function occurrencesOn(
       completionDate,
       time,
       minutes: toMinutes(time),
+      timed: task.timed,
       done: done.has(`${task.id}:${completionDate}`),
       isGate: false,
       rolledFrom,
@@ -281,7 +284,7 @@ export function occurrencesOn(
   }
 
   for (const category of GATE_ORDER) {
-    const inCategory = occurrences.filter((o) => o.task.category === category);
+    const inCategory = occurrences.filter((o) => !o.timed && o.task.category === category);
     if (!inCategory.length) continue;
     const gate = inCategory.slice().sort(byImportance)[0];
     gate.isGate = true;
@@ -291,19 +294,33 @@ export function occurrencesOn(
 }
 
 /**
- * The order to work a day in: the music gate, then the app gate, then whatever
- * is left by priority. Completed occurrences drop out entirely.
+ * The order to work a day in.
+ *
+ * Timed tasks come first in clock order — they are fixed appointments and
+ * outrank priority. Anytime tasks follow: the music gate, then the app gate,
+ * then whatever is left by priority. Completed occurrences drop out entirely.
  */
 export function dayQueue(occurrences: Occurrence[]): Occurrence[] {
+  const pending = occurrences.filter((o) => !o.done);
+
+  const timed = pending
+    .filter((o) => o.timed)
+    .sort((a, b) => a.minutes - b.minutes || byImportance(a, b));
+
+  const anytime = pending.filter((o) => !o.timed);
   const gates: Occurrence[] = [];
   for (const category of GATE_ORDER) {
-    const gate = occurrences.find((o) => o.isGate && o.task.category === category);
-    if (gate && !gate.done) gates.push(gate);
+    const gate = anytime.find((o) => o.isGate && o.task.category === category);
+    if (gate) gates.push(gate);
   }
-  const rest = occurrences
-    .filter((o) => !o.done && !o.isGate)
-    .sort(byImportance);
-  return [...gates, ...rest];
+  const rest = anytime.filter((o) => !o.isGate).sort(byImportance);
+
+  return [...timed, ...gates, ...rest];
+}
+
+/** Anytime tasks for a day, most important first. */
+export function anytimeQueue(occurrences: Occurrence[]): Occurrence[] {
+  return occurrences.filter((o) => !o.timed).sort(byImportance);
 }
 
 /** Occurrences for each date in `[from, to]`, keyed by date. */
@@ -333,6 +350,7 @@ export function normalizeTask(row: Record<string, unknown>): Task {
     category: (CATEGORIES.includes(row.category as Category) ? row.category : "other") as Category,
     estimate_minutes: Number(row.estimate_minutes ?? 30),
     recurrence: (row.recurrence as Recurrence) ?? "none",
+    timed: row.timed !== false, // legacy rows predate the column and were timed
     start_date: (row.start_date as string) ?? null,
     start_time: (row.start_time as string) ?? DEFAULT_TIME,
     weekly_times: (weekly && typeof weekly === "object" ? weekly : {}) as Record<string, string>,

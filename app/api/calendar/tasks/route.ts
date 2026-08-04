@@ -4,6 +4,13 @@ import { supabase } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 const SETUP_HINT = "Calendar tables are missing. Run supabase/migrations/20260804_calendar_tasks.sql in the Supabase SQL editor.";
+const COLUMN_HINT = "The calendar schema is out of date. Run the newest file in supabase/migrations/ in the Supabase SQL editor.";
+
+/** PostgREST reports an unmigrated column as a schema-cache miss. */
+function isMissingColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "PGRST204" || /could not find the '.+' column/i.test(error.message || "");
+}
 
 function isMissingTable(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -35,6 +42,9 @@ function buildRow(body: Record<string, unknown>) {
     category,
     estimate_minutes: estimate,
     recurrence,
+    // Anytime tasks keep whatever time fields they have; they are simply never
+    // read, which means toggling a task back to timed restores its old time.
+    timed: body.timed !== false,
     start_date: body.start_date ? String(body.start_date) : null,
     start_time: body.start_time ? String(body.start_time) : "09:00",
     weekly_times: {},
@@ -126,9 +136,10 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase.from("calendar_tasks").insert(row).select().single();
   if (error) {
-    const missing = isMissingTable(error);
+    const missing = isMissingTable(error) || isMissingColumn(error);
+    const hint = isMissingTable(error) ? SETUP_HINT : COLUMN_HINT;
     return NextResponse.json(
-      { error: missing ? SETUP_HINT : error.message, setup_required: missing },
+      { error: missing ? hint : error.message, setup_required: missing },
       { status: missing ? 503 : 500 },
     );
   }
@@ -150,7 +161,13 @@ export async function PATCH(request: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const missing = isMissingColumn(error);
+    return NextResponse.json(
+      { error: missing ? COLUMN_HINT : error.message, setup_required: missing },
+      { status: missing ? 503 : 500 },
+    );
+  }
   return NextResponse.json({ task: data });
 }
 

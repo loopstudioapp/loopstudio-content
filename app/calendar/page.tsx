@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,11 +8,13 @@ import FocusView from "./FocusView";
 import TaskModal from "./TaskModal";
 import {
   CATEGORY_COLOR,
+  CATEGORY_LABEL,
   MONTHS,
   Occurrence,
   Task,
   WEEKDAYS,
   addDays,
+  anytimeQueue,
   dayQueue,
   expandRange,
   fmtDateLong,
@@ -28,9 +30,10 @@ import {
 
 type View = "week" | "focus";
 
-const HOUR_HEIGHT = 48;
+const HOUR_HEIGHT = 60;
+const BLOCK_GAP = 4; // vertical breathing room between back-to-back blocks
 const btnCls =
-  "px-3 py-1.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors";
+  "px-3 py-1.5 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors";
 
 /* ── Week grid overlap packing ── */
 type Placed = { occurrence: Occurrence; start: number; end: number; col: number; cols: number };
@@ -193,6 +196,11 @@ export default function CalendarPage() {
     [tasks, rangeFrom, rangeTo, done, today],
   );
 
+  const anytimeList = useMemo(
+    () => anytimeQueue(occurrencesOn(tasks, selected, done, today)).filter((o) => !o.done),
+    [tasks, selected, done, today],
+  );
+
   const focusQueue = useMemo(
     () => dayQueue(occurrencesOn(tasks, selected, done, today)),
     [tasks, selected, done, today],
@@ -278,12 +286,12 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="min-h-screen bg-[#161616] p-4 sm:p-6 max-w-[1700px] mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-xl font-bold text-white">Calendar</h1>
-          <p className="text-xs text-[#525252]">Tasks &amp; schedule · GMT+7</p>
+          <p className="text-xs text-[#8f8f8f]">Tasks &amp; schedule · GMT+7</p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/owner" className={btnCls}>Owner</Link>
@@ -292,29 +300,29 @@ export default function CalendarPage() {
       </div>
 
       {setupNeeded && (
-        <div className="bg-[#141414] border border-[#f59e0b]/25 rounded-xl p-4 mb-5">
+        <div className="bg-[#1f1f1f] border border-[#f59e0b]/25 rounded-xl p-4 mb-5">
           <p className="text-[#f59e0b] text-sm font-semibold">Database setup required</p>
-          <p className="text-[#a3a3a3] text-xs mt-1 leading-5">
+          <p className="text-[#d4d4d4] text-xs mt-1 leading-5">
             Run <code className="text-white">supabase/migrations/20260804_calendar_tasks.sql</code> in the Supabase SQL editor, then reload.
           </p>
         </div>
       )}
 
       {error && !setupNeeded && (
-        <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-4 text-[#ef4444] text-sm mb-5">
+        <div className="bg-[#1f1f1f] border border-[#ef4444]/20 rounded-xl p-4 text-[#ef4444] text-sm mb-5">
           {error}
         </div>
       )}
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
-        <div className="flex items-center border border-[#262626] rounded-lg overflow-hidden">
+        <div className="flex items-center border border-[#3a3a3a] rounded-lg overflow-hidden">
           {(["week", "focus"] as View[]).map((value) => (
             <button
               key={value}
               onClick={() => setView(value)}
               className={`px-3 py-1.5 text-xs capitalize transition-colors ${
-                view === value ? "bg-[#1c1c1c] text-white" : "text-[#737373] hover:text-white"
+                view === value ? "bg-[#2a2a2a] text-white" : "text-[#b0b0b0] hover:text-white"
               }`}
             >
               {value === "focus" ? "Task" : value}
@@ -323,11 +331,11 @@ export default function CalendarPage() {
         </div>
 
         <div className="flex items-center gap-1">
-          <button onClick={() => step(-1)} className="p-1.5 text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
+          <button onClick={() => step(-1)} className="p-1.5 text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors">
             <ChevronLeft size={14} />
           </button>
           <button onClick={goToday} className={btnCls}>Today</button>
-          <button onClick={() => step(1)} className="p-1.5 text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors">
+          <button onClick={() => step(1)} className="p-1.5 text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors">
             <ChevronRight size={14} />
           </button>
         </div>
@@ -345,13 +353,13 @@ export default function CalendarPage() {
       </div>
 
       {!ready && (
-        <div className="bg-[#141414] border border-[#262626] rounded-xl h-64 animate-pulse" />
+        <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl h-64 animate-pulse" />
       )}
 
       {/* ── Week ── */}
       {ready && view === "week" && (
-        <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
-          <div className="grid border-b border-[#262626]" style={{ gridTemplateColumns: "44px repeat(7, 1fr)" }}>
+        <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl overflow-hidden">
+          <div className="grid border-b border-[#3a3a3a]" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
             <div />
             {Array.from({ length: 7 }, (_, offset) => {
               const date = addDays(rangeFrom, offset);
@@ -360,9 +368,9 @@ export default function CalendarPage() {
                 <button
                   key={date}
                   onClick={() => setSelected(date)}
-                  className={`py-2 text-center transition-colors hover:bg-[#181818] ${date === selected ? "bg-[#181818]" : ""}`}
+                  className={`py-2 text-center transition-colors hover:bg-[#282828] ${date === selected ? "bg-[#282828]" : ""}`}
                 >
-                  <p className="text-[10px] uppercase tracking-wider text-[#525252]">{WEEKDAYS[offset]}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-[#8f8f8f]">{WEEKDAYS[offset]}</p>
                   <p className={`text-sm font-semibold ${isToday ? "text-[#22c55e]" : "text-white"}`}>
                     {Number(date.slice(8, 10))}
                   </p>
@@ -371,13 +379,13 @@ export default function CalendarPage() {
             })}
           </div>
 
-          <div ref={gridRef} className="overflow-y-auto max-h-[560px]">
-            <div className="grid relative" style={{ gridTemplateColumns: "44px repeat(7, 1fr)" }}>
+          <div ref={gridRef} className="overflow-y-auto h-[calc(100vh-19rem)] min-h-[420px]">
+            <div className="grid relative" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
               {/* Hour gutter */}
               <div>
                 {Array.from({ length: 24 }, (_, hour) => (
                   <div key={hour} style={{ height: HOUR_HEIGHT }} className="relative">
-                    <span className="absolute -top-1.5 right-1.5 text-[9px] text-[#525252]">
+                    <span className="absolute -top-1.5 right-1.5 text-[10px] text-[#8f8f8f]">
                       {hour === 0 ? "" : `${hour % 12 === 0 ? 12 : hour % 12}${hour < 12 ? "am" : "pm"}`}
                     </span>
                   </div>
@@ -386,7 +394,7 @@ export default function CalendarPage() {
 
               {Array.from({ length: 7 }, (_, offset) => {
                 const date = addDays(rangeFrom, offset);
-                const items = (byDate[date] || []).filter((o) => !o.done);
+                const items = (byDate[date] || []).filter((o) => !o.done && o.timed);
                 const placed = placeDay(items);
 
                 const dragging = drag?.date === date;
@@ -396,14 +404,14 @@ export default function CalendarPage() {
                 return (
                   <div
                     key={date}
-                    className="relative border-l border-[#1f1f1f] cursor-pointer select-none"
+                    className="relative border-l border-[#333] cursor-pointer select-none"
                     onPointerDown={(event) => startDrag(event, date)}
                     onPointerMove={extendDrag}
                     onPointerUp={endDrag}
                     onPointerCancel={() => { dragRef.current = null; setDrag(null); }}
                   >
                     {Array.from({ length: 24 }, (_, hour) => (
-                      <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-[#1a1a1a]" />
+                      <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-[#2e2e2e]" />
                     ))}
 
                     {dragging && (
@@ -411,10 +419,10 @@ export default function CalendarPage() {
                         className="absolute left-0.5 right-0.5 rounded-md border border-[#22c55e] bg-[#22c55e]/20 pointer-events-none z-20 px-1.5 py-0.5"
                         style={{ top: (dragStart / 60) * HOUR_HEIGHT, height: (dragSpan / 60) * HOUR_HEIGHT }}
                       >
-                        <p className="text-[9px] font-semibold text-[#22c55e] leading-tight">
+                        <p className="text-[10px] font-semibold text-[#22c55e] leading-tight">
                           {fmtTime(minutesToTime(dragStart))} – {fmtTime(minutesToTime(dragStart + dragSpan))}
                         </p>
-                        <p className="text-[9px] text-[#22c55e]/70 leading-tight">{fmtDuration(dragSpan)}</p>
+                        <p className="text-[10px] text-[#22c55e]/70 leading-tight">{fmtDuration(dragSpan)}</p>
                       </div>
                     )}
 
@@ -430,33 +438,37 @@ export default function CalendarPage() {
 
                     {placed.map(({ occurrence, col, cols }) => {
                       const accent = CATEGORY_COLOR[occurrence.task.category];
-                      const height = Math.max(20, (occurrence.task.estimate_minutes / 60) * HOUR_HEIGHT);
+                      const height = Math.max(18, (occurrence.task.estimate_minutes / 60) * HOUR_HEIGHT - BLOCK_GAP);
                       return (
                         <button
                           key={occurrence.key}
                           data-task-block
                           onClick={() => { setSelected(date); setModal({ task: occurrence.task, date }); }}
-                          className="absolute rounded-md px-1.5 py-0.5 text-left overflow-hidden transition-opacity hover:opacity-80"
+                          className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden transition-[filter] hover:brightness-125"
                           style={{
                             top: (occurrence.minutes / 60) * HOUR_HEIGHT,
                             height,
                             left: `calc(${(col / cols) * 100}% + 2px)`,
                             width: `calc(${100 / cols}% - 4px)`,
-                            background: `${accent}22`,
-                            borderLeft: `2px solid ${accent}`,
+                            // Sits on #141414, so the fill stays dark and the
+                            // outline does the work of separating neighbours.
+                            background: `${accent}3d`,
+                            border: `1px solid ${accent}cc`,
+                            borderLeft: `3px solid ${accent}`,
+                            boxShadow: "0 1px 4px rgba(0,0,0,0.55)",
                             opacity: occurrence.done ? 0.4 : 1,
                           }}
                         >
                           <p
-                            className={`text-[10px] font-medium leading-tight truncate ${
-                              occurrence.done ? "text-[#737373] line-through" : "text-white"
+                            className={`w-full text-[11px] font-medium leading-tight truncate ${
+                              occurrence.done ? "text-[#b0b0b0] line-through" : "text-white"
                             }`}
                           >
                             {occurrence.rolledFrom && <span className="text-[#f59e0b]">↷ </span>}
                             {occurrence.task.title}
                           </p>
                           {height > 30 && (
-                            <p className="text-[9px] text-[#a3a3a3] truncate">{fmtTime(occurrence.time)}</p>
+                            <p className="w-full text-[10px] text-[#d4d4d4] truncate">{fmtTime(occurrence.time)}</p>
                           )}
                         </button>
                       );
@@ -467,6 +479,61 @@ export default function CalendarPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Anytime tasks for the selected day ── */}
+      {ready && view === "week" && (
+        <section className="mt-6">
+          <div className="flex items-center gap-3 mb-3">
+            <h2 className="text-sm font-semibold text-[#8a8a8a] uppercase tracking-wider">
+              Anytime · {selected === today ? "today" : fmtDateLong(selected)}
+            </h2>
+            <span className="text-[11px] text-[#6b6b6b]">by priority</span>
+          </div>
+
+          {anytimeList.length ? (
+            <div className="space-y-1.5">
+              {anytimeList.map((occurrence) => {
+                const accent = CATEGORY_COLOR[occurrence.task.category];
+                return (
+                  <div
+                    key={occurrence.key}
+                    className="flex items-center gap-3 bg-[#2a2a2a] border border-[#333] rounded-lg px-3 py-2.5"
+                  >
+                    <button
+                      onClick={() => toggleDone(occurrence)}
+                      title="Mark done"
+                      className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
+                    />
+                    <button
+                      onClick={() => setModal({ task: occurrence.task, date: selected })}
+                      className="flex-1 min-w-0 text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-white truncate">
+                          {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
+                          {occurrence.task.title}
+                        </span>
+                        {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
+                        <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
+                        <span>·</span>
+                        <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
+                        <span>·</span>
+                        <span>P{occurrence.task.priority}</span>
+                      </div>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-[#2a2a2a] border border-[#333] rounded-lg py-6 text-center text-xs text-[#6b6b6b]">
+              No anytime tasks.
+            </div>
+          )}
+        </section>
       )}
 
       {/* ── Focus ── */}

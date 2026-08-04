@@ -63,12 +63,12 @@ export default function FocusView({
 
   if (!queue.length) {
     return (
-      <div className="bg-[#141414] border border-[#262626] rounded-xl py-20 text-center">
+      <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl py-20 text-center">
         <div className="w-12 h-12 rounded-full bg-[#0f2419] flex items-center justify-center mx-auto mb-4">
           <Check size={20} className="text-[#22c55e]" />
         </div>
         <p className="text-white text-sm font-semibold">Everything is done</p>
-        <p className="text-[#525252] text-xs mt-1">No tasks left for this day.</p>
+        <p className="text-[#8f8f8f] text-xs mt-1">No tasks left for this day.</p>
       </div>
     );
   }
@@ -85,43 +85,43 @@ export default function FocusView({
 
   return (
     <div className="max-w-lg mx-auto">
-      <div className="bg-[#141414] border border-[#262626] rounded-xl overflow-hidden">
+      <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl overflow-hidden">
         {current.task.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.task.image_url} alt="" className="w-full h-40 object-cover border-b border-[#262626]" />
+          <img src={current.task.image_url} alt="" className="w-full h-40 object-cover border-b border-[#3a3a3a]" />
         )}
 
         <div className="p-6">
           <div className="flex items-center gap-2 mb-3">
             <span
-              className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md"
+              className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md"
               style={{ color: accent, background: `${accent}1a` }}
             >
               {CATEGORY_LABEL[current.task.category]}
             </span>
             {current.rolledFrom && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
                 ↷ Carried over
               </span>
             )}
             {current.isGate && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
                 <Flag size={10} /> Must finish first
               </span>
             )}
-            <span className="ml-auto text-[10px] text-[#525252]">
+            <span className="ml-auto text-[11px] text-[#8f8f8f]">
               P{current.task.priority} · {fmtTime(current.time)}
             </span>
           </div>
 
           <h2 className="text-xl font-bold text-white leading-snug">{current.task.title}</h2>
           {current.task.description && (
-            <p className="text-sm text-[#a3a3a3] leading-6 mt-2 whitespace-pre-wrap">{current.task.description}</p>
+            <p className="text-sm text-[#d4d4d4] leading-6 mt-2 whitespace-pre-wrap">{current.task.description}</p>
           )}
 
           <div className="relative flex items-center justify-center my-8">
             <svg width="200" height="200" className="-rotate-90">
-              <circle cx="100" cy="100" r={radius} fill="none" stroke="#262626" strokeWidth="6" />
+              <circle cx="100" cy="100" r={radius} fill="none" stroke="#3a3a3a" strokeWidth="6" />
               <circle
                 cx="100"
                 cy="100"
@@ -142,7 +142,7 @@ export default function FocusView({
               >
                 {clock(remaining)}
               </p>
-              <p className="text-[10px] text-[#525252] mt-1 uppercase tracking-wider">
+              <p className="text-[11px] text-[#8f8f8f] mt-1 uppercase tracking-wider">
                 {overtime ? "Over estimate" : `of ${fmtDuration(current.task.estimate_minutes)}`}
               </p>
             </div>
@@ -159,7 +159,7 @@ export default function FocusView({
             <button
               onClick={() => { setRunning(false); setElapsed(0); }}
               title="Reset timer"
-              className="px-3 py-3 text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
+              className="px-3 py-3 text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
             >
               <RotateCcw size={15} />
             </button>
@@ -175,7 +175,7 @@ export default function FocusView({
             {queue.length > 1 && (
               <button
                 onClick={() => setIndex((value) => (value + 1) % queue.length)}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
               >
                 <SkipForward size={14} /> Skip
               </button>
@@ -184,31 +184,6 @@ export default function FocusView({
         </div>
       </div>
 
-      {queue.length > 1 && (
-        <div className="mt-5">
-          <p className="text-[10px] uppercase tracking-wider text-[#525252] font-semibold mb-2">
-            Up next · {queue.length - 1} left
-          </p>
-          <div className="space-y-1.5">
-            {queue.slice(index + 1, index + 5).map((occurrence) => (
-              <div
-                key={occurrence.key}
-                className="flex items-center gap-2.5 bg-[#141414] border border-[#262626] rounded-lg px-3 py-2"
-              >
-                <span
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: CATEGORY_COLOR[occurrence.task.category] }}
-                />
-                <span className="text-xs text-[#a3a3a3] truncate flex-1">{occurrence.task.title}</span>
-                {occurrence.isGate && <Flag size={11} className="text-[#f59e0b] shrink-0" />}
-                <span className="text-[10px] text-[#525252] shrink-0">
-                  {fmtDuration(occurrence.task.estimate_minutes)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

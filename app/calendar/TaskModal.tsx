@@ -50,8 +50,8 @@ function readAndShrink(file: File): Promise<string> {
 }
 
 const inputCls =
-  "w-full bg-[#0f0f0f] border border-[#262626] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#404040] transition-colors";
-const labelCls = "block text-[10px] uppercase tracking-wider text-[#737373] font-semibold mb-1.5";
+  "w-full bg-[#161616] border border-[#3a3a3a] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#404040] transition-colors";
+const labelCls = "block text-[11px] uppercase tracking-wider text-[#b0b0b0] font-semibold mb-1.5";
 
 export default function TaskModal({
   task,
@@ -76,6 +76,7 @@ export default function TaskModal({
   const [priority, setPriority] = useState(task?.priority ?? 5);
   const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? defaultEstimate ?? 30));
   const [recurrence, setRecurrence] = useState<Recurrence>(task?.recurrence || "none");
+  const [timed, setTimed] = useState(task ? task.timed : true);
   const [date, setDate] = useState(task?.start_date || defaultDate);
   const [time, setTime] = useState(task?.start_time || defaultTime || DEFAULT_TIME);
   const [weeklyTimes, setWeeklyTimes] = useState<Record<string, string>>(task?.weekly_times || {});
@@ -142,6 +143,7 @@ export default function TaskModal({
         priority,
         estimate_minutes: Number(estimate) || 30,
         recurrence,
+        timed,
         // Recurring tasks keep the date as a "starts from" anchor.
         start_date: date,
         start_time: time,
@@ -188,10 +190,10 @@ export default function TaskModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="bg-[#141414] border border-[#262626] rounded-xl w-full max-w-lg my-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#262626]">
+      <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl w-full max-w-lg my-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#3a3a3a]">
           <h2 className="text-sm font-semibold text-white">{task ? "Edit task" : "New task"}</h2>
-          <button onClick={onClose} className="text-[#737373] hover:text-white transition-colors">
+          <button onClick={onClose} className="text-[#b0b0b0] hover:text-white transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -264,6 +266,29 @@ export default function TaskModal({
           </div>
 
           <div>
+            <label className={labelCls}>Timing</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: true, label: "At a time", hint: "Shows on the calendar" },
+                { value: false, label: "Anytime", hint: "Ranked by priority" },
+              ].map((option) => (
+                <button
+                  key={String(option.value)}
+                  onClick={() => setTimed(option.value)}
+                  className={`py-2 px-2 rounded-lg border transition-colors ${
+                    timed === option.value
+                      ? "border-[#404040] text-white bg-[#1c1c1c]"
+                      : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
+                  }`}
+                >
+                  <span className="block text-xs">{option.label}</span>
+                  <span className="block text-[10px] text-[#8f8f8f]">{option.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className={labelCls}>Repeat</label>
             <div className="grid grid-cols-4 gap-2">
               {REPEATS.map((option) => (
@@ -273,7 +298,7 @@ export default function TaskModal({
                   className={`py-2 text-xs rounded-lg border transition-colors ${
                     recurrence === option.value
                       ? "border-[#404040] text-white bg-[#1c1c1c]"
-                      : "border-[#262626] text-[#737373] hover:text-white"
+                      : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
                   }`}
                 >
                   {option.label}
@@ -283,15 +308,17 @@ export default function TaskModal({
           </div>
 
           {recurrence === "none" && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className={timed ? "grid grid-cols-2 gap-4" : ""}>
               <div>
                 <label className={labelCls}>Date</label>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
               </div>
-              <div>
-                <label className={labelCls}>Time</label>
-                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
-              </div>
+              {timed && (
+                <div>
+                  <label className={labelCls}>Time</label>
+                  <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
+                </div>
+              )}
             </div>
           )}
 
@@ -307,7 +334,7 @@ export default function TaskModal({
                         key={day}
                         onClick={() => toggleWeekday(index)}
                         className={`py-2 text-[11px] rounded-lg border transition-colors ${
-                          on ? "border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10" : "border-[#262626] text-[#737373]"
+                          on ? "border-[#22c55e] text-[#22c55e] bg-[#22c55e]/10" : "border-[#3a3a3a] text-[#b0b0b0]"
                         }`}
                       >
                         {day[0]}
@@ -318,11 +345,11 @@ export default function TaskModal({
               </div>
 
               {/* Each selected day carries its own time — 6am Monday, 6pm Tuesday. */}
-              {Object.keys(weeklyTimes)
+              {timed && Object.keys(weeklyTimes)
                 .sort()
                 .map((day) => (
                   <div key={day} className="flex items-center gap-3">
-                    <span className="text-xs text-[#a3a3a3] w-10">{WEEKDAYS[Number(day)]}</span>
+                    <span className="text-xs text-[#d4d4d4] w-10">{WEEKDAYS[Number(day)]}</span>
                     <input
                       type="time"
                       value={weeklyTimes[day]}
@@ -354,10 +381,12 @@ export default function TaskModal({
                   className={inputCls}
                 />
               </div>
-              <div>
-                <label className={labelCls}>Time</label>
-                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
-              </div>
+              {timed && (
+                <div>
+                  <label className={labelCls}>Time</label>
+                  <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
+                </div>
+              )}
             </div>
           )}
 
@@ -386,10 +415,12 @@ export default function TaskModal({
                   className={inputCls}
                 />
               </div>
-              <div>
-                <label className={labelCls}>Time</label>
-                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
-              </div>
+              {timed && (
+                <div>
+                  <label className={labelCls}>Time</label>
+                  <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
+                </div>
+              )}
             </div>
           )}
 
@@ -398,16 +429,16 @@ export default function TaskModal({
             {image ? (
               <div className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image} alt="Task attachment" className="w-full max-h-44 object-cover rounded-lg border border-[#262626]" />
+                <img src={image} alt="Task attachment" className="w-full max-h-44 object-cover rounded-lg border border-[#3a3a3a]" />
                 <button
                   onClick={() => setImage(null)}
-                  className="absolute top-2 right-2 bg-black/70 border border-[#333] rounded-lg p-1.5 text-[#a3a3a3] hover:text-white transition-colors"
+                  className="absolute top-2 right-2 bg-black/70 border border-[#333] rounded-lg p-1.5 text-[#d4d4d4] hover:text-white transition-colors"
                 >
                   <X size={13} />
                 </button>
               </div>
             ) : (
-              <label className="flex items-center justify-center gap-2 h-20 border border-dashed border-[#262626] rounded-lg text-xs text-[#525252] hover:text-[#a3a3a3] hover:border-[#404040] cursor-pointer transition-colors">
+              <label className="flex items-center justify-center gap-2 h-20 border border-dashed border-[#3a3a3a] rounded-lg text-xs text-[#8f8f8f] hover:text-[#d4d4d4] hover:border-[#404040] cursor-pointer transition-colors">
                 <ImagePlus size={15} />
                 Attach an image
                 <input
@@ -423,7 +454,7 @@ export default function TaskModal({
           {error && <p className="text-xs text-[#ef4444]">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#262626]">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#3a3a3a]">
           {task ? (
             <button
               onClick={remove}
@@ -438,7 +469,7 @@ export default function TaskModal({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-2 text-xs text-[#737373] border border-[#262626] rounded-lg hover:text-white transition-colors"
+              className="px-3 py-2 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
             >
               Cancel
             </button>
