@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FocusView from "./FocusView";
@@ -513,11 +513,21 @@ export default function CalendarPage() {
                       const top = Math.max(0, startY);
                       const height = Math.max(18, startY + fullHeight - top - BLOCK_GAP);
                       return (
-                        <button
+                        // A div rather than a button so the tick can be a real
+                        // button inside it; nesting buttons is invalid markup.
+                        <div
                           key={occurrence.key}
                           data-task-block
+                          role="button"
+                          tabIndex={0}
                           onClick={() => { setSelected(date); setModal({ task: occurrence.task, date }); }}
-                          className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden transition-[filter] hover:brightness-125"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              setSelected(date);
+                              setModal({ task: occurrence.task, date });
+                            }
+                          }}
+                          className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden cursor-pointer transition-[filter] hover:brightness-125"
                           style={{
                             top,
                             height,
@@ -533,7 +543,7 @@ export default function CalendarPage() {
                           }}
                         >
                           <p
-                            className={`w-full text-[11px] font-medium leading-tight truncate ${
+                            className={`w-full pr-5 text-[11px] font-medium leading-tight truncate ${
                               occurrence.done ? "text-[#b0b0b0] line-through" : "text-white"
                             }`}
                           >
@@ -543,7 +553,21 @@ export default function CalendarPage() {
                           {height > 30 && (
                             <p className="w-full text-[10px] text-[#d4d4d4] truncate">{fmtTime(occurrence.time)}</p>
                           )}
-                        </button>
+
+                          {/*
+                            Marks this occurrence done and drops it off the grid.
+                            stopPropagation keeps the click off the edit handler.
+                          */}
+                          <button
+                            onClick={(event) => { event.stopPropagation(); toggleDone(occurrence); }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            title="Mark done for this day"
+                            aria-label={`Mark "${occurrence.task.title}" done`}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full border border-white/40 bg-black/25 flex items-center justify-center text-transparent hover:border-[#22c55e] hover:bg-[#22c55e] hover:text-black transition-colors"
+                          >
+                            <Check size={10} strokeWidth={3} />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
