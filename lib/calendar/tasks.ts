@@ -133,6 +133,14 @@ export function toMinutes(time: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
+/** Inverse of `toMinutes` — 390 becomes "06:30". */
+export function minutesToTime(minutes: number): string {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(minutes)));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export function fmtTime(time: string): string {
   const [h, m] = time.split(":").map(Number);
   const period = h >= 12 ? "PM" : "AM";

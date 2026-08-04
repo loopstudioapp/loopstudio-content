@@ -16,7 +16,9 @@ import {
   dayQueue,
   expandRange,
   fmtDateLong,
+  fmtDuration,
   fmtTime,
+  minutesToTime,
   normalizeTask,
   occurrencesOn,
   startOfWeek,
@@ -86,8 +88,14 @@ export default function CalendarPage() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
-  const [modal, setModal] = useState<{ task: Task | null; date: string; time?: string } | null>(null);
+  const [modal, setModal] = useState<{ task: Task | null; date: string; time?: string; estimate?: number } | null>(null);
   const [nowMinutes, setNowMinutes] = useState(vnNowMinutes());
+  // Live drag-to-create selection on the week grid. The ref is the source of
+  // truth so a fast drag cannot outrun a state commit; the state only drives
+  // the preview render.
+  type DragSel = { date: string; from: number; to: number };
+  const [drag, setDrag] = useState<DragSel | null>(null);
+  const dragRef = useRef<DragSel | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const today = vnToday();
 
@@ -205,10 +213,68 @@ export default function CalendarPage() {
       ? fmtDateLong(selected)
       : `${MONTHS[Number(startOfWeek(cursor).slice(5, 7)) - 1]} ${startOfWeek(cursor).slice(0, 4)}`;
 
-  /** Clicking an empty slot seeds the form with that day and hour. */
-  const openNew = (date: string, hour?: number) => {
+  /* ── Drag-to-create on the week grid ── */
+  const SNAP = 15; // minutes
+  const MIN_DRAG = 15;
+
+  /** Pointer Y within a day column -> minute of day, snapped to the grid. */
+  const minuteAt = (element: HTMLElement, clientY: number) => {
+    const rect = element.getBoundingClientRect();
+    const raw = ((clientY - rect.top) / HOUR_HEIGHT) * 60;
+    return Math.max(0, Math.min(24 * 60, Math.round(raw / SNAP) * SNAP));
+  };
+
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>, date: string) => {
+    // Let touch scroll the grid, and never hijack a click on an existing block.
+    if (event.pointerType === "touch") return;
+    if ((event.target as HTMLElement).closest("[data-task-block]")) return;
+    const at = minuteAt(event.currentTarget, event.clientY);
+    // Keeps events flowing to this column even if the cursor drifts out of it.
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer already released; the drag still works without capture.
+    }
+    const next = { date, from: at, to: at };
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const extendDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const next = { ...dragRef.current, to: minuteAt(event.currentTarget, event.clientY) };
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const current = dragRef.current;
+    if (!current) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const start = Math.min(current.from, current.to);
+    const span = Math.abs(current.to - current.from);
+    const date = current.date;
+    dragRef.current = null;
+    setDrag(null);
+    // A tap with no movement keeps the default estimate.
+    openNew(date, start, span >= MIN_DRAG ? span : undefined);
+  };
+
+  /**
+   * Seeds the form from the grid. A drag supplies both the start minute and the
+   * duration; a plain click supplies only the start and keeps the default
+   * estimate.
+   */
+  const openNew = (date: string, startMinutes?: number, durationMinutes?: number) => {
     setSelected(date);
-    setModal({ task: null, date, time: hour === undefined ? undefined : `${String(hour).padStart(2, "0")}:00` });
+    setModal({
+      task: null,
+      date,
+      time: startMinutes === undefined ? undefined : minutesToTime(startMinutes),
+      estimate: durationMinutes,
+    });
   };
 
   return (
@@ -323,16 +389,34 @@ export default function CalendarPage() {
                 const items = (byDate[date] || []).filter((o) => !o.done);
                 const placed = placeDay(items);
 
+                const dragging = drag?.date === date;
+                const dragStart = dragging ? Math.min(drag.from, drag.to) : 0;
+                const dragSpan = dragging ? Math.max(Math.abs(drag.to - drag.from), MIN_DRAG) : 0;
+
                 return (
-                  <div key={date} className="relative border-l border-[#1f1f1f]">
+                  <div
+                    key={date}
+                    className="relative border-l border-[#1f1f1f] cursor-pointer select-none"
+                    onPointerDown={(event) => startDrag(event, date)}
+                    onPointerMove={extendDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={() => { dragRef.current = null; setDrag(null); }}
+                  >
                     {Array.from({ length: 24 }, (_, hour) => (
-                      <div
-                        key={hour}
-                        onClick={() => openNew(date, hour)}
-                        style={{ height: HOUR_HEIGHT }}
-                        className="border-b border-[#1a1a1a] hover:bg-[#181818] transition-colors cursor-pointer"
-                      />
+                      <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-[#1a1a1a]" />
                     ))}
+
+                    {dragging && (
+                      <div
+                        className="absolute left-0.5 right-0.5 rounded-md border border-[#22c55e] bg-[#22c55e]/20 pointer-events-none z-20 px-1.5 py-0.5"
+                        style={{ top: (dragStart / 60) * HOUR_HEIGHT, height: (dragSpan / 60) * HOUR_HEIGHT }}
+                      >
+                        <p className="text-[9px] font-semibold text-[#22c55e] leading-tight">
+                          {fmtTime(minutesToTime(dragStart))} – {fmtTime(minutesToTime(dragStart + dragSpan))}
+                        </p>
+                        <p className="text-[9px] text-[#22c55e]/70 leading-tight">{fmtDuration(dragSpan)}</p>
+                      </div>
+                    )}
 
                     {date === today && (
                       <div
@@ -350,6 +434,7 @@ export default function CalendarPage() {
                       return (
                         <button
                           key={occurrence.key}
+                          data-task-block
                           onClick={() => { setSelected(date); setModal({ task: occurrence.task, date }); }}
                           className="absolute rounded-md px-1.5 py-0.5 text-left overflow-hidden transition-opacity hover:opacity-80"
                           style={{
@@ -396,6 +481,7 @@ export default function CalendarPage() {
           task={modal.task}
           defaultDate={modal.date}
           defaultTime={modal.time}
+          defaultEstimate={modal.estimate}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load(); }}
           onDeleted={() => { setModal(null); load(); }}

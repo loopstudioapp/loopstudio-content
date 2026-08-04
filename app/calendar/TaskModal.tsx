@@ -57,6 +57,7 @@ export default function TaskModal({
   task,
   defaultDate,
   defaultTime,
+  defaultEstimate,
   onClose,
   onSaved,
   onDeleted,
@@ -64,6 +65,7 @@ export default function TaskModal({
   task: Task | null;
   defaultDate: string;
   defaultTime?: string;
+  defaultEstimate?: number;
   onClose: () => void;
   onSaved: () => void;
   onDeleted: () => void;
@@ -72,7 +74,7 @@ export default function TaskModal({
   const [description, setDescription] = useState(task?.description || "");
   const [category, setCategory] = useState<Category>(task?.category || "other");
   const [priority, setPriority] = useState(task?.priority ?? 5);
-  const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? 30));
+  const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? defaultEstimate ?? 30));
   const [recurrence, setRecurrence] = useState<Recurrence>(task?.recurrence || "none");
   const [date, setDate] = useState(task?.start_date || defaultDate);
   const [time, setTime] = useState(task?.start_time || defaultTime || DEFAULT_TIME);
