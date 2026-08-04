@@ -2,9 +2,9 @@
 
 import { ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FocusView from "./FocusView";
+import PinGate, { hasPin } from "./PinGate";
 import TaskModal from "./TaskModal";
 import {
   CATEGORY_COLOR,
@@ -86,7 +86,6 @@ function placeDay(occurrences: Occurrence[]): Placed[] {
 }
 
 export default function CalendarPage() {
-  const router = useRouter();
   const [view, setView] = useState<View>("focus");
   const [cursor, setCursor] = useState(vnToday());
   const [selected, setSelected] = useState(vnToday());
@@ -97,6 +96,8 @@ export default function CalendarPage() {
   // paging weeks) keep the current content on screen instead of flashing.
   const [ready, setReady] = useState(false);
   const [workMode, setWorkMode] = useState(false);
+  // null until the cookie has been read, so the gate never flashes.
+  const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [modal, setModal] = useState<{ task: Task | null; date: string; time?: string; estimate?: number } | null>(null);
@@ -111,10 +112,8 @@ export default function CalendarPage() {
   const today = vnToday();
 
   useEffect(() => {
-    const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
-    const hasEmployee = document.cookie.match(/(^| )employee_id=([^;]+)/);
-    if (!hasAdmin && !hasEmployee) router.push("/");
-  }, [router]);
+    setUnlocked(hasPin());
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMinutes(vnNowMinutes()), 60_000);
@@ -202,8 +201,12 @@ export default function CalendarPage() {
   );
 
   const focusQueue = useMemo(
-    () => dayQueue(occurrencesOn(tasks, selected, done, today)),
-    [tasks, selected, done, today],
+    () => dayQueue(
+      occurrencesOn(tasks, selected, done, today),
+      // Expiry only applies to today; other days show their full queue.
+      selected === today ? nowMinutes : undefined,
+    ),
+    [tasks, selected, done, today, nowMinutes],
   );
 
   const step = (direction: number) => {
@@ -284,6 +287,9 @@ export default function CalendarPage() {
       estimate: durationMinutes,
     });
   };
+
+  if (unlocked === null) return <div className="min-h-screen bg-[#161616]" />;
+  if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
 
   if (workMode) {
     return (
