@@ -26,6 +26,12 @@ const REPEATS: { value: Recurrence; label: string }[] = [
 
 const MAX_IMAGE_EDGE = 1400;
 
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short" })
+    .format(new Date(Date.UTC(y, m - 1, d)));
+}
+
 /** Downscale before upload so a phone photo does not become a 6 MB row. */
 function readAndShrink(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -59,6 +65,9 @@ export default function TaskModal({
   defaultDate,
   defaultTime,
   defaultEstimate,
+  skippedDates = [],
+  onSkip,
+  onRestore,
   onClose,
   onSaved,
   onDeleted,
@@ -67,6 +76,10 @@ export default function TaskModal({
   defaultDate: string;
   defaultTime?: string;
   defaultEstimate?: number;
+  /** Dates this task already skips, so they can be put back. */
+  skippedDates?: string[];
+  onSkip?: (date: string) => void;
+  onRestore?: (date: string) => void;
   onClose: () => void;
   onSaved: () => void;
   onDeleted: () => void;
@@ -451,6 +464,43 @@ export default function TaskModal({
               </label>
             )}
           </div>
+
+          {task && task.recurrence !== "none" && (
+            <div>
+              <label className={labelCls}>This day only</label>
+              {skippedDates.includes(defaultDate) ? (
+                <button
+                  onClick={() => { onRestore?.(defaultDate); onClose(); }}
+                  className="w-full py-1.5 text-xs rounded-lg border border-[#22c55e]/40 text-[#22c55e] hover:bg-[#22c55e]/10 transition-colors"
+                >
+                  Put {shortDate(defaultDate)} back
+                </button>
+              ) : (
+                <button
+                  onClick={() => { onSkip?.(defaultDate); onClose(); }}
+                  className="w-full py-1.5 text-xs rounded-lg border border-[#3a3a3a] text-[#b0b0b0] hover:text-white hover:border-[#555] transition-colors"
+                >
+                  Skip {shortDate(defaultDate)} — leaves every other date alone
+                </button>
+              )}
+
+              {skippedDates.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-[#8f8f8f]">Skipped:</span>
+                  {skippedDates.map((date) => (
+                    <button
+                      key={date}
+                      onClick={() => onRestore?.(date)}
+                      title="Put this date back"
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-[#3a3a3a] text-[#b0b0b0] hover:text-white hover:border-[#555] transition-colors"
+                    >
+                      {shortDate(date)} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-xs text-[#ef4444]">{error}</p>}
         </div>

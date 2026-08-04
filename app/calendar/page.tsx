@@ -92,6 +92,7 @@ export default function CalendarPage() {
   const [selected, setSelected] = useState(vnToday());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [done, setDone] = useState<Set<string>>(new Set());
+  const [skips, setSkips] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   // Only the very first load gets a skeleton. Later refetches (switching views,
   // paging weeks) keep the current content on screen instead of flashing.
@@ -143,6 +144,7 @@ export default function CalendarPage() {
       setSetupNeeded(false);
       setTasks((data.tasks || []).map(normalizeTask));
       setDone(new Set<string>(data.completions || []));
+      setSkips(new Set<string>(data.skips || []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load tasks");
     } finally {
@@ -191,23 +193,52 @@ export default function CalendarPage() {
     [done],
   );
 
+  const setSkip = useCallback(async (taskId: string, date: string, skip: boolean) => {
+    const key = `${taskId}:${date}`;
+    setSkips((current) => {
+      const next = new Set(current);
+      if (skip) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+    try {
+      const response = skip
+        ? await fetch("/api/calendar/skip", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task_id: taskId, occurrence_date: date }),
+          })
+        : await fetch(`/api/calendar/skip?task_id=${taskId}&occurrence_date=${date}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not save that change");
+    } catch (err) {
+      setSkips((current) => {
+        const next = new Set(current);
+        if (skip) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      setError(err instanceof Error ? err.message : "Could not save that change");
+    }
+  }, []);
+
   const byDate = useMemo(
-    () => expandRange(tasks, rangeFrom, rangeTo, done, today),
-    [tasks, rangeFrom, rangeTo, done, today],
+    () => expandRange(tasks, rangeFrom, rangeTo, done, today, skips),
+    [tasks, rangeFrom, rangeTo, done, today, skips],
   );
 
   const anytimeList = useMemo(
-    () => anytimeQueue(occurrencesOn(tasks, selected, done, today)).filter((o) => !o.done),
-    [tasks, selected, done, today],
+    () => anytimeQueue(occurrencesOn(tasks, selected, done, today, skips)).filter((o) => !o.done),
+    [tasks, selected, done, today, skips],
   );
 
   const focusQueue = useMemo(
     () => dayQueue(
-      occurrencesOn(tasks, selected, done, today),
+      occurrencesOn(tasks, selected, done, today, skips),
       // Expiry only applies to today; other days show their full queue.
       selected === today ? nowMinutes : undefined,
     ),
-    [tasks, selected, done, today, nowMinutes],
+    [tasks, selected, done, today, nowMinutes, skips],
   );
 
   const step = (direction: number) => {
@@ -592,6 +623,13 @@ export default function CalendarPage() {
           defaultDate={modal.date}
           defaultTime={modal.time}
           defaultEstimate={modal.estimate}
+          skippedDates={
+            modal.task
+              ? [...skips].filter((k) => k.startsWith(`${modal.task!.id}:`)).map((k) => k.split(":")[1]).sort()
+              : []
+          }
+          onSkip={(date) => modal.task && setSkip(modal.task.id, date, true)}
+          onRestore={(date) => modal.task && setSkip(modal.task.id, date, false)}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load(); }}
           onDeleted={() => { setModal(null); load(); }}

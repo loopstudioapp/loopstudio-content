@@ -259,6 +259,7 @@ export function occurrencesOn(
   iso: string,
   done: Set<string>,
   today: string = vnToday(),
+  skipped: Set<string> = new Set(),
 ): Occurrence[] {
   const occurrences: Occurrence[] = [];
 
@@ -278,6 +279,9 @@ export function occurrencesOn(
     }
 
     if (!time) continue;
+    // A skipped occurrence is dropped outright: off the grid, out of the queue,
+    // and not eligible to carry over.
+    if (skipped.has(`${task.id}:${completionDate}`)) continue;
     occurrences.push({
       key: `${task.id}:${completionDate}`,
       task,
@@ -346,10 +350,11 @@ export function expandRange(
   to: string,
   done: Set<string>,
   today: string = vnToday(),
+  skipped: Set<string> = new Set(),
 ): Record<string, Occurrence[]> {
   const byDate: Record<string, Occurrence[]> = {};
   for (let iso = from; iso <= to; iso = addDays(iso, 1)) {
-    byDate[iso] = occurrencesOn(tasks, iso, done, today).sort(byTime);
+    byDate[iso] = occurrencesOn(tasks, iso, done, today, skipped).sort(byTime);
   }
   return byDate;
 }

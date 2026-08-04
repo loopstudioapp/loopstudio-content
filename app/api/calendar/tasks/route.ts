@@ -123,9 +123,18 @@ export async function GET(request: NextRequest) {
     rows.push(...(carried.data || []));
   }
 
+  // Skips are only ever set on recurring tasks, whose occurrence date always
+  // falls inside the window being viewed, so a plain range filter is enough.
+  let skipsQuery = supabase.from("calendar_task_skips").select("task_id, occurrence_date");
+  if (from) skipsQuery = skipsQuery.gte("occurrence_date", from);
+  if (to) skipsQuery = skipsQuery.lte("occurrence_date", to);
+  const skips = await skipsQuery;
+
   return NextResponse.json({
     tasks: tasksQuery.data || [],
     completions: [...new Set(rows.map((c) => `${c.task_id}:${c.occurrence_date}`))],
+    // Missing table just means the migration has not been run; skips are additive.
+    skips: skips.error ? [] : (skips.data || []).map((s) => `${s.task_id}:${s.occurrence_date}`),
   });
 }
 
