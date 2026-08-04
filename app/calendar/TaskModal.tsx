@@ -303,16 +303,17 @@ export default function TaskModal({
             </div>
           </div>
 
-          {!timed && (
+          {/*
+            Not offered when creating or editing a normal task — pinning is rare
+            and was cluttering the form. An already-pinned task still shows the
+            badge so the pin stays visible and can be cleared.
+          */}
+          {!timed && pinFirst && (
             <button
-              onClick={() => setPinFirst((v) => !v)}
-              className={`w-full py-1.5 text-xs rounded-lg border transition-colors ${
-                pinFirst
-                  ? "border-[#fbbf24] text-[#fbbf24] bg-[#fbbf24]/10"
-                  : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
-              }`}
+              onClick={() => setPinFirst(false)}
+              className="w-full py-1.5 text-xs rounded-lg border border-[#fbbf24] text-[#fbbf24] bg-[#fbbf24]/10 transition-colors"
             >
-              {pinFirst ? "★ Do first — leads the whole queue" : "Do first (ahead of the music/app must-do)"}
+              ★ Do first — tap to unpin
             </button>
           )}
 

@@ -314,18 +314,23 @@ export function occurrencesOn(
  * outrank priority. Anytime tasks follow: the music gate, then the app gate,
  * then whatever is left by priority. Completed occurrences drop out entirely.
  *
- * Pass `nowMinutes` when the day being worked is today, to drop timed tasks
- * whose slot has already gone by. Omit it for any other day.
+ * Pass `nowMinutes` when the day being worked is today, so timed tasks appear
+ * only while their slot is actually running. Omit it for any other day, where
+ * the full queue should be visible.
  */
 export function dayQueue(occurrences: Occurrence[], nowMinutes?: number): Occurrence[] {
   const pending = occurrences.filter((o) => !o.done);
 
   const timed = pending
     .filter((o) => o.timed)
-    // A timed task drops out once its slot has fully passed. The window is the
-    // whole estimate, not the start minute — cutting at the start would hide a
-    // task during the very hours it is meant to be worked.
-    .filter((o) => nowMinutes === undefined || o.minutes + o.task.estimate_minutes > nowMinutes)
+    // A timed task is only offered inside its own window: not before it starts,
+    // and not after it ends. Outside those minutes the day falls through to the
+    // anytime work instead.
+    .filter(
+      (o) =>
+        nowMinutes === undefined ||
+        (nowMinutes >= o.minutes && nowMinutes < o.minutes + o.task.estimate_minutes),
+    )
     .sort((a, b) => a.minutes - b.minutes || byImportance(a, b));
 
   const anytime = pending.filter((o) => !o.timed);
