@@ -31,6 +31,13 @@ import {
 type View = "week" | "focus";
 
 const HOUR_HEIGHT = 60;
+// The grid starts at 07:00 — the small hours are sleep time and just added
+// dead space. Everything vertical is measured from here.
+const DAY_START_HOUR = 7;
+const DAY_START_MIN = DAY_START_HOUR * 60;
+const GRID_HOURS = 24 - DAY_START_HOUR;
+/** Minute of day -> pixels from the top of the grid. */
+const yOf = (minutes: number) => ((minutes - DAY_START_MIN) / 60) * HOUR_HEIGHT;
 const BLOCK_GAP = 4; // vertical breathing room between back-to-back blocks
 const btnCls =
   "px-3 py-1.5 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors";
@@ -147,14 +154,6 @@ export default function CalendarPage() {
     load();
   }, [load]);
 
-  // Open the week grid on the working day, not on midnight. Waits for `ready`
-  // because the grid is not mounted until the first load resolves.
-  useEffect(() => {
-    if (ready && view === "week" && gridRef.current) {
-      gridRef.current.scrollTop = 7 * HOUR_HEIGHT;
-    }
-  }, [view, ready]);
-
   const toggleDone = useCallback(
     async (occurrence: Occurrence) => {
       const wasDone = done.has(occurrence.key);
@@ -228,8 +227,8 @@ export default function CalendarPage() {
   /** Pointer Y within a day column -> minute of day, snapped to the grid. */
   const minuteAt = (element: HTMLElement, clientY: number) => {
     const rect = element.getBoundingClientRect();
-    const raw = ((clientY - rect.top) / HOUR_HEIGHT) * 60;
-    return Math.max(0, Math.min(24 * 60, Math.round(raw / SNAP) * SNAP));
+    const raw = DAY_START_MIN + ((clientY - rect.top) / HOUR_HEIGHT) * 60;
+    return Math.max(DAY_START_MIN, Math.min(24 * 60, Math.round(raw / SNAP) * SNAP));
   };
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>, date: string) => {
@@ -383,7 +382,7 @@ export default function CalendarPage() {
             <div className="grid relative" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
               {/* Hour gutter */}
               <div>
-                {Array.from({ length: 24 }, (_, hour) => (
+                {Array.from({ length: GRID_HOURS }, (_, index) => index + DAY_START_HOUR).map((hour) => (
                   <div key={hour} style={{ height: HOUR_HEIGHT }} className="relative">
                     <span className="absolute -top-1.5 right-1.5 text-[10px] text-[#8f8f8f]">
                       {hour === 0 ? "" : `${hour % 12 === 0 ? 12 : hour % 12}${hour < 12 ? "am" : "pm"}`}
@@ -410,14 +409,14 @@ export default function CalendarPage() {
                     onPointerUp={endDrag}
                     onPointerCancel={() => { dragRef.current = null; setDrag(null); }}
                   >
-                    {Array.from({ length: 24 }, (_, hour) => (
+                    {Array.from({ length: GRID_HOURS }, (_, hour) => (
                       <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-[#2e2e2e]" />
                     ))}
 
                     {dragging && (
                       <div
                         className="absolute left-0.5 right-0.5 rounded-md border border-[#22c55e] bg-[#22c55e]/20 pointer-events-none z-20 px-1.5 py-0.5"
-                        style={{ top: (dragStart / 60) * HOUR_HEIGHT, height: (dragSpan / 60) * HOUR_HEIGHT }}
+                        style={{ top: yOf(dragStart), height: (dragSpan / 60) * HOUR_HEIGHT }}
                       >
                         <p className="text-[10px] font-semibold text-[#22c55e] leading-tight">
                           {fmtTime(minutesToTime(dragStart))} – {fmtTime(minutesToTime(dragStart + dragSpan))}
@@ -426,10 +425,10 @@ export default function CalendarPage() {
                       </div>
                     )}
 
-                    {date === today && (
+                    {date === today && nowMinutes >= DAY_START_MIN && (
                       <div
                         className="absolute left-0 right-0 pointer-events-none z-10"
-                        style={{ top: (nowMinutes / 60) * HOUR_HEIGHT }}
+                        style={{ top: yOf(nowMinutes) }}
                       >
                         <div className="h-px bg-[#ef4444]" />
                         <div className="w-1.5 h-1.5 rounded-full bg-[#ef4444] -mt-[3px]" />
@@ -438,7 +437,15 @@ export default function CalendarPage() {
 
                     {placed.map(({ occurrence, col, cols }) => {
                       const accent = CATEGORY_COLOR[occurrence.task.category];
-                      const height = Math.max(18, (occurrence.task.estimate_minutes / 60) * HOUR_HEIGHT - BLOCK_GAP);
+                      const startY = yOf(occurrence.minutes);
+                      const fullHeight = (occurrence.task.estimate_minutes / 60) * HOUR_HEIGHT;
+                      // A task that runs into the hidden pre-dawn hours is
+                      // clipped to the visible part; one that ends before the
+                      // grid starts is left off it entirely and lives in the
+                      // task view instead.
+                      if (startY + fullHeight <= 0) return null;
+                      const top = Math.max(0, startY);
+                      const height = Math.max(18, startY + fullHeight - top - BLOCK_GAP);
                       return (
                         <button
                           key={occurrence.key}
@@ -446,7 +453,7 @@ export default function CalendarPage() {
                           onClick={() => { setSelected(date); setModal({ task: occurrence.task, date }); }}
                           className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden transition-[filter] hover:brightness-125"
                           style={{
-                            top: (occurrence.minutes / 60) * HOUR_HEIGHT,
+                            top,
                             height,
                             left: `calc(${(col / cols) * 100}% + 2px)`,
                             width: `calc(${100 / cols}% - 4px)`,

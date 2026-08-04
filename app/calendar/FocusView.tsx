@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Flag, Pause, Play, RotateCcw, SkipForward } from "lucide-react";
+import { Check, Flag, Pause, Play } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CATEGORY_COLOR,
@@ -28,12 +28,11 @@ export default function FocusView({
   queue: Occurrence[];
   onComplete: (occurrence: Occurrence) => void;
 }) {
-  const [index, setIndex] = useState(0);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const current = queue[Math.min(index, Math.max(queue.length - 1, 0))];
+  const current = queue[0];
   const currentKey = current?.key;
 
   // A different task means a fresh timer.
@@ -49,11 +48,6 @@ export default function FocusView({
       if (tickRef.current) clearInterval(tickRef.current);
     };
   }, [running]);
-
-  // Keep the pointer inside the queue as tasks are completed out of it.
-  useEffect(() => {
-    if (index > 0 && index >= queue.length) setIndex(Math.max(0, queue.length - 1));
-  }, [queue.length, index]);
 
   const finish = useCallback(() => {
     if (!current) return;
@@ -148,39 +142,20 @@ export default function FocusView({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setRunning((value) => !value)}
-              className="flex-1 inline-flex items-center justify-center gap-2 py-3 text-sm font-semibold text-black rounded-lg transition-opacity hover:opacity-90"
-              style={{ background: accent }}
-            >
-              {running ? <><Pause size={15} /> Pause</> : <><Play size={15} /> {elapsed > 0 ? "Resume" : "Start"}</>}
-            </button>
-            <button
-              onClick={() => { setRunning(false); setElapsed(0); }}
-              title="Reset timer"
-              className="px-3 py-3 text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
-            >
-              <RotateCcw size={15} />
-            </button>
-          </div>
+          <button
+            onClick={() => setRunning((value) => !value)}
+            className="w-full inline-flex items-center justify-center gap-2 py-3 text-sm font-semibold text-black rounded-lg transition-opacity hover:opacity-90"
+            style={{ background: accent }}
+          >
+            {running ? <><Pause size={15} /> Pause</> : <><Play size={15} /> {elapsed > 0 ? "Resume" : "Start"}</>}
+          </button>
 
-          <div className="flex items-center gap-2 mt-2">
-            <button
-              onClick={finish}
-              className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 text-xs font-semibold text-[#22c55e] border border-[#22c55e]/30 rounded-lg hover:bg-[#22c55e]/10 transition-colors"
-            >
-              <Check size={14} /> Done
-            </button>
-            {queue.length > 1 && (
-              <button
-                onClick={() => setIndex((value) => (value + 1) % queue.length)}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs text-[#b0b0b0] border border-[#3a3a3a] rounded-lg hover:text-white transition-colors"
-              >
-                <SkipForward size={14} /> Skip
-              </button>
-            )}
-          </div>
+          <button
+            onClick={finish}
+            className="w-full inline-flex items-center justify-center gap-2 py-2.5 mt-2 text-xs font-semibold text-[#22c55e] border border-[#22c55e]/30 rounded-lg hover:bg-[#22c55e]/10 transition-colors"
+          >
+            <Check size={14} /> Done
+          </button>
         </div>
       </div>
 
