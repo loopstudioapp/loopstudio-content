@@ -122,13 +122,16 @@ export default function CalendarPage() {
     return () => clearInterval(timer);
   }, []);
 
-  /* The date span the current view needs loaded. */
+  /*
+   * Both views load the same whole week, even though the task view only shows
+   * one day. Loading a single day there left the completion set missing every
+   * other day in the week, so switching to the grid drew already-finished
+   * recurring tasks as pending until the wider refetch landed. Matching the
+   * ranges also means switching views triggers no refetch at all.
+   */
   const [rangeFrom, rangeTo] = useMemo((): [string, string] => {
-    if (view === "week") {
-      const start = startOfWeek(cursor);
-      return [start, addDays(start, 6)];
-    }
-    return [selected, selected];
+    const start = startOfWeek(view === "week" ? cursor : selected);
+    return [start, addDays(start, 6)];
   }, [view, cursor, selected]);
 
   const load = useCallback(async () => {
@@ -242,8 +245,17 @@ export default function CalendarPage() {
   );
 
   const step = (direction: number) => {
-    if (view === "week") setCursor(addDays(cursor, direction * 7));
-    else setSelected(addDays(selected, direction));
+    if (view === "week") {
+      const next = addDays(cursor, direction * 7);
+      setCursor(next);
+      // Keep the selected day inside the week on screen, so the two views
+      // always agree on which week is loaded.
+      setSelected(next);
+    } else {
+      const next = addDays(selected, direction);
+      setSelected(next);
+      setCursor(next);
+    }
   };
 
   const goToday = () => {
