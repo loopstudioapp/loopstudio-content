@@ -45,7 +45,7 @@ export type Occurrence = {
   minutes: number; // minutes past midnight, for sorting and grid placement
   timed: boolean; // false = anytime task, never drawn on the grid
   done: boolean;
-  isGate: boolean; // the day's must-finish-first task for music / app
+  isGate: boolean; // the day's priority-10 must-finish-first task for music / app
   rolledFrom: string | null; // original date when carried over, else null
 };
 
@@ -234,9 +234,9 @@ export function byTime(a: Occurrence, b: Occurrence): number {
 
 /**
  * Every occurrence on one date, with completion state and the day's gate tasks
- * flagged. Gates are picked from all occurrences (not just pending ones), so
- * finishing the day's key music task does not promote a second music task
- * into the gate slot.
+ * flagged. Only priority-10 Music and App tasks can be gates. Gates are picked
+ * from all occurrences (not just pending ones), so finishing the day's key
+ * music task does not promote a second music task into the gate slot.
  */
 /**
  * A one-off task that came and went unfinished. It stops appearing on its
@@ -298,7 +298,13 @@ export function occurrencesOn(
   }
 
   for (const category of GATE_ORDER) {
-    const inCategory = occurrences.filter((o) => !o.timed && !o.task.pin_first && o.task.category === category);
+    const inCategory = occurrences.filter(
+      (o) =>
+        !o.timed &&
+        !o.task.pin_first &&
+        o.task.priority === 10 &&
+        o.task.category === category,
+    );
     if (!inCategory.length) continue;
     const gate = inCategory.slice().sort(byImportance)[0];
     gate.isGate = true;
