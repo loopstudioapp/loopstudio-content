@@ -921,6 +921,7 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
 /* ── Main ── */
 export default function OwnerDashboard() {
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // GrailScan-only stats and transactions for the owner dashboard.
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
@@ -997,9 +998,13 @@ export default function OwnerDashboard() {
     };
   }, []);
   useEffect(() => {
-    const hasAdmin = document.cookie.match(/(^| )admin=([^;]+)/);
-    const hasEmployee = document.cookie.match(/(^| )employee_id=([^;]+)/);
-    if (!hasAdmin && !hasEmployee) { router.push("/"); return; }
+    const hasAdmin = /(?:^|;\s*)admin=1(?:;|$)/.test(document.cookie);
+    const role = document.cookie.match(/(?:^|;\s*)owner_role=([^;]+)/)?.[1];
+    if (!hasAdmin && role !== "admin" && role !== "kien") {
+      router.push("/");
+      return;
+    }
+    setIsAdmin(hasAdmin || role === "admin");
   }, [router]);
 
   const loadRevenueCat = useCallback(async () => {
@@ -1046,12 +1051,14 @@ export default function OwnerDashboard() {
           <h1 className="text-xl font-bold text-white">Loop Content Generation</h1>
           <p className="text-xs text-[#525252]">Dashboard Overview</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/calendar" className={btnCls}>Calendar</Link>
-          <Link href="/food" className={btnCls}>Food</Link>
-          <Link href="/grailscan" className={btnCls}>Server</Link>
-          <Link href="/portfolio" className={btnCls}>Portfolio</Link>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <Link href="/calendar" className={btnCls}>Calendar</Link>
+            <Link href="/food" className={btnCls}>Food</Link>
+            <Link href="/grailscan" className={btnCls}>Server</Link>
+            <Link href="/portfolio" className={btnCls}>Portfolio</Link>
+          </div>
+        )}
       </div>
 
       {/* ═══ REVENUE ═══ */}

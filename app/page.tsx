@@ -20,6 +20,14 @@ export default function ProfilePicker() {
   const router = useRouter();
   const { t } = useLang();
 
+  const isKienProfile = (employee: Employee) =>
+    employee.name.trim().toLocaleLowerCase() === "kien";
+
+  const clearOwnerSession = () => {
+    document.cookie = "admin=; path=/; max-age=0";
+    document.cookie = "owner_role=; path=/; max-age=0";
+  };
+
   useEffect(() => {
     supabase
       .from("employees")
@@ -34,6 +42,12 @@ export default function ProfilePicker() {
   const handlePinSubmit = () => {
     if (!selected) return;
     if (pin === selected.pin) {
+      clearOwnerSession();
+      if (isKienProfile(selected)) {
+        document.cookie = "owner_role=kien; path=/; max-age=86400; samesite=lax";
+        router.push("/owner");
+        return;
+      }
       document.cookie = `employee_id=${selected.id}; path=/; max-age=86400`;
       document.cookie = `employee_name=${selected.name}; path=/; max-age=86400`;
       router.push("/dashboard");
@@ -69,8 +83,11 @@ export default function ProfilePicker() {
       if (next.length === 4) {
         setTimeout(() => {
           if (isAdmin) {
-            if (next === "8888") {
-              document.cookie = `admin=1; path=/; max-age=86400`;
+            if (next === "7777") {
+              document.cookie = "employee_id=; path=/; max-age=0";
+              document.cookie = "employee_name=; path=/; max-age=0";
+              document.cookie = "owner_role=admin; path=/; max-age=86400; samesite=lax";
+              document.cookie = "admin=1; path=/; max-age=86400; samesite=lax";
               router.push("/owner");
             } else {
               setError(t("wrongPin"));
@@ -78,9 +95,17 @@ export default function ProfilePicker() {
               document.getElementById("pin-0")?.focus();
             }
           } else if (next === selected.pin) {
-            document.cookie = `employee_id=${selected.id}; path=/; max-age=86400`;
-            document.cookie = `employee_name=${selected.name}; path=/; max-age=86400`;
-            router.push("/dashboard");
+            clearOwnerSession();
+            if (isKienProfile(selected)) {
+              document.cookie = "employee_id=; path=/; max-age=0";
+              document.cookie = "employee_name=; path=/; max-age=0";
+              document.cookie = "owner_role=kien; path=/; max-age=86400; samesite=lax";
+              router.push("/owner");
+            } else {
+              document.cookie = `employee_id=${selected.id}; path=/; max-age=86400`;
+              document.cookie = `employee_name=${selected.name}; path=/; max-age=86400`;
+              router.push("/dashboard");
+            }
           } else {
             setError(t("wrongPin"));
             setPin("");
@@ -150,7 +175,7 @@ export default function ProfilePicker() {
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-6 max-w-lg">
         {/* Admin tile */}
         <button
-          onClick={() => { setIsAdmin(true); setSelected({ id: "", name: "Admin", pin: "8888", avatar_color: "#a855f7", created_at: "" }); }}
+          onClick={() => { setIsAdmin(true); setSelected({ id: "", name: "Admin", pin: "7777", avatar_color: "#a855f7", created_at: "" }); }}
           className="flex flex-col items-center gap-2 group"
         >
           <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-bold text-black transition-transform group-hover:scale-105 ring-2 ring-[#a855f7] ring-offset-2 ring-offset-[#0a0a0a]" style={{ backgroundColor: "#a855f7" }}>
