@@ -9,6 +9,7 @@ import TaskModal from "./TaskModal";
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
+  Category,
   MONTHS,
   Occurrence,
   Task,
@@ -97,7 +98,8 @@ export default function CalendarPage() {
   // Only the very first load gets a skeleton. Later refetches (switching views,
   // paging weeks) keep the current content on screen instead of flashing.
   const [ready, setReady] = useState(false);
-  const [workMode, setWorkMode] = useState(false);
+  const [workCategory, setWorkCategory] = useState<Category | null>(null);
+  const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
   // null until the cookie has been read, so the gate never flashes.
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -255,6 +257,18 @@ export default function CalendarPage() {
       selected === today ? nowMinutes : undefined,
     ),
     [tasks, selected, done, today, nowMinutes, skips],
+  );
+
+  const categoryFocusQueue = useMemo(
+    () => workCategory ? focusQueue.filter((occurrence) => occurrence.task.category === workCategory) : focusQueue,
+    [focusQueue, workCategory],
+  );
+
+  const filteredAnytimeList = useMemo(
+    () => anytimeCategory === "all"
+      ? anytimeList
+      : anytimeList.filter((occurrence) => occurrence.task.category === anytimeCategory),
+    [anytimeList, anytimeCategory],
   );
 
   const step = (direction: number) => {
@@ -466,18 +480,25 @@ export default function CalendarPage() {
   if (unlocked === null) return <div className="min-h-screen bg-[#161616]" />;
   if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
 
-  if (workMode) {
+  if (workCategory) {
+    const accent = CATEGORY_COLOR[workCategory];
     return (
       <div className="min-h-screen bg-[#161616] p-4 sm:p-6">
+        <div
+          className="absolute top-4 left-4 sm:top-6 sm:left-6 z-10 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+          style={{ color: accent, borderColor: `${accent}66`, background: `${accent}14` }}
+        >
+          {CATEGORY_LABEL[workCategory]}
+        </div>
         <button
-          onClick={() => setWorkMode(false)}
+          onClick={() => setWorkCategory(null)}
           className="absolute top-4 right-4 sm:top-6 sm:right-6 z-10 inline-flex items-center gap-1.5 rounded-lg border border-[#3a3a3a] px-3 py-1.5 text-xs text-[#b0b0b0] transition-colors hover:border-[#555] hover:text-white"
         >
           Exit
         </button>
         <div className="min-h-[calc(100vh-3rem)] flex items-center justify-center">
           <div className="w-full max-w-lg">
-            {ready && <FocusView queue={focusQueue} onComplete={toggleDone} />}
+            {ready && <FocusView queue={categoryFocusQueue} onComplete={toggleDone} />}
           </div>
         </div>
       </div>
@@ -493,7 +514,19 @@ export default function CalendarPage() {
           <p className="text-xs text-[#8f8f8f]">Tasks &amp; schedule · GMT+7</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setWorkMode(true)} className={btnCls}>Work</button>
+          {(["app", "music"] as Category[]).map((category) => {
+            const accent = CATEGORY_COLOR[category];
+            return (
+              <button
+                key={category}
+                onClick={() => setWorkCategory(category)}
+                className="rounded-lg border px-3 py-1.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                style={{ color: accent, borderColor: `${accent}66`, background: `${accent}14` }}
+              >
+                {CATEGORY_LABEL[category]}
+              </button>
+            );
+          })}
           <Link
             href="/owner"
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#3a3a3a] px-3 py-1.5 text-xs text-[#b0b0b0] transition-colors hover:border-[#555] hover:text-white"
@@ -775,16 +808,38 @@ export default function CalendarPage() {
       {/* ── Anytime tasks for the selected day ── */}
       {ready && view === "week" && (
         <section className="mt-6">
-          <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-sm font-semibold text-[#8a8a8a] uppercase tracking-wider">
-              Anytime · {selected === today ? "today" : fmtDateLong(selected)}
-            </h2>
-            <span className="text-[11px] text-[#6b6b6b]">by priority</span>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-semibold text-[#8a8a8a] uppercase tracking-wider">
+                Anytime · {selected === today ? "today" : fmtDateLong(selected)}
+              </h2>
+              <span className="text-[11px] text-[#6b6b6b]">by priority</span>
+            </div>
+
+            <div className="flex items-center gap-1 ml-auto" aria-label="Filter anytime tasks by category">
+              {(["all", "app", "music", "other"] as const).map((category) => {
+                const active = anytimeCategory === category;
+                const accent = category === "all" ? "#d4d4d4" : CATEGORY_COLOR[category];
+                return (
+                  <button
+                    key={category}
+                    onClick={() => setAnytimeCategory(category)}
+                    aria-pressed={active}
+                    className="rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                    style={active
+                      ? { color: accent, borderColor: `${accent}80`, background: `${accent}1a` }
+                      : { color: "#8a8a8a", borderColor: "#3a3a3a" }}
+                  >
+                    {category === "all" ? "All" : CATEGORY_LABEL[category]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {anytimeList.length ? (
+          {filteredAnytimeList.length ? (
             <div className="space-y-1.5">
-              {anytimeList.map((occurrence) => {
+              {filteredAnytimeList.map((occurrence) => {
                 const accent = CATEGORY_COLOR[occurrence.task.category];
                 return (
                   <div
@@ -821,7 +876,9 @@ export default function CalendarPage() {
             </div>
           ) : (
             <div className="bg-[#2a2a2a] border border-[#333] rounded-lg py-6 text-center text-xs text-[#6b6b6b]">
-              No anytime tasks.
+              {anytimeCategory === "all"
+                ? "No anytime tasks."
+                : `No ${CATEGORY_LABEL[anytimeCategory].toLowerCase()} anytime tasks.`}
             </div>
           )}
         </section>
