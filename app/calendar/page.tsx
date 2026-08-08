@@ -108,8 +108,21 @@ export default function CalendarPage() {
   // truth so a fast drag cannot outrun a state commit; the state only drives
   // the preview render.
   type DragSel = { date: string; from: number; to: number };
+  type TaskMove = {
+    occurrence: Occurrence;
+    date: string;
+    minutes: number;
+    grabOffsetY: number;
+    pointerId: number;
+    startedX: number;
+    startedY: number;
+    moved: boolean;
+  };
   const [drag, setDrag] = useState<DragSel | null>(null);
   const dragRef = useRef<DragSel | null>(null);
+  const [taskMove, setTaskMove] = useState<TaskMove | null>(null);
+  const taskMoveRef = useRef<TaskMove | null>(null);
+  const suppressTaskClickRef = useRef<{ key: string; until: number } | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const today = vnToday();
 
@@ -332,6 +345,124 @@ export default function CalendarPage() {
     });
   };
 
+  /* ── Drag-to-reschedule an existing timed task ── */
+  const startTaskMove = (event: React.PointerEvent<HTMLDivElement>, occurrence: Occurrence) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const next: TaskMove = {
+      occurrence,
+      date: occurrence.date,
+      minutes: occurrence.minutes,
+      grabOffsetY: event.clientY - rect.top,
+      pointerId: event.pointerId,
+      startedX: event.clientX,
+      startedY: event.clientY,
+      moved: false,
+    };
+    taskMoveRef.current = next;
+    setTaskMove(next);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const updateTaskMove = (event: React.PointerEvent<HTMLDivElement>): TaskMove | null => {
+    const current = taskMoveRef.current;
+    const grid = gridRef.current;
+    if (!current || !grid || current.pointerId !== event.pointerId) return current;
+
+    const distance = Math.hypot(event.clientX - current.startedX, event.clientY - current.startedY);
+    if (!current.moved && distance < 4) return current;
+
+    event.preventDefault();
+    const rect = grid.getBoundingClientRect();
+    const dayWidth = (rect.width - 56) / 7;
+    const dayIndex = Math.max(0, Math.min(6, Math.floor((event.clientX - rect.left - 56) / dayWidth)));
+    const contentY = event.clientY - rect.top + grid.scrollTop - current.grabOffsetY;
+    const rawMinutes = DAY_START_MIN + (contentY / HOUR_HEIGHT) * 60;
+    const latestStart = 24 * 60 - current.occurrence.task.estimate_minutes;
+    const minutes = Math.max(DAY_START_MIN, Math.min(latestStart, Math.round(rawMinutes / SNAP) * SNAP));
+    const next = {
+      ...current,
+      date: addDays(rangeFrom, dayIndex),
+      minutes,
+      moved: true,
+    };
+    taskMoveRef.current = next;
+    setTaskMove(next);
+    return next;
+  };
+
+  const saveTaskMove = async (move: TaskMove) => {
+    const { occurrence, date, minutes } = move;
+    if (date === occurrence.date && minutes === occurrence.minutes) return;
+
+    const task = occurrence.task;
+    const time = minutesToTime(minutes);
+    const updated: Task = { ...task, start_time: time };
+
+    if (task.recurrence === "none") {
+      updated.start_date = date;
+    } else if (task.recurrence === "weekly") {
+      const sourceDay = String(dayOfWeek(occurrence.date));
+      const targetDay = String(dayOfWeek(date));
+      const weeklyTimes = { ...task.weekly_times };
+      if (sourceDay !== targetDay) delete weeklyTimes[sourceDay];
+      weeklyTimes[targetDay] = time;
+      updated.weekly_times = weeklyTimes;
+    } else if (task.recurrence === "monthly") {
+      updated.monthly_day = Number(date.slice(8, 10));
+    } else if (task.recurrence === "yearly") {
+      updated.yearly_month = Number(date.slice(5, 7));
+      updated.yearly_day = Number(date.slice(8, 10));
+    }
+    if (task.recurrence !== "none" && task.start_date && date < task.start_date) {
+      updated.start_date = date;
+    }
+
+    setSelected(date);
+    setError(null);
+    setTasks((current) => current.map((candidate) => candidate.id === task.id ? updated : candidate));
+
+    try {
+      const response = await fetch("/api/calendar/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not move the task");
+      const saved = normalizeTask(result.task);
+      setTasks((current) => current.map((candidate) => candidate.id === task.id ? saved : candidate));
+    } catch (err) {
+      setTasks((current) => current.map((candidate) => candidate.id === task.id ? task : candidate));
+      setError(err instanceof Error ? err.message : "Could not move the task");
+    }
+  };
+
+  const moveTaskPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    updateTaskMove(event);
+  };
+
+  const finishTaskMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const move = updateTaskMove(event);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    taskMoveRef.current = null;
+    setTaskMove(null);
+    if (!move?.moved) return;
+    suppressTaskClickRef.current = { key: move.occurrence.key, until: Date.now() + 500 };
+    void saveTaskMove(move);
+  };
+
+  const cancelTaskMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    taskMoveRef.current = null;
+    setTaskMove(null);
+  };
+
   if (unlocked === null) return <div className="min-h-screen bg-[#161616]" />;
   if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
 
@@ -532,14 +663,27 @@ export default function CalendarPage() {
                           data-task-block
                           role="button"
                           tabIndex={0}
-                          onClick={() => { setSelected(date); setModal({ task: occurrence.task, date }); }}
+                          onPointerDown={(event) => startTaskMove(event, occurrence)}
+                          onPointerMove={moveTaskPointer}
+                          onPointerUp={finishTaskMove}
+                          onPointerCancel={cancelTaskMove}
+                          onClick={() => {
+                            const suppressed = suppressTaskClickRef.current;
+                            if (suppressed?.key === occurrence.key && Date.now() < suppressed.until) {
+                              suppressTaskClickRef.current = null;
+                              return;
+                            }
+                            suppressTaskClickRef.current = null;
+                            setSelected(date);
+                            setModal({ task: occurrence.task, date });
+                          }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               setSelected(date);
                               setModal({ task: occurrence.task, date });
                             }
                           }}
-                          className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden cursor-pointer transition-[filter] hover:brightness-125"
+                          className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden cursor-grab active:cursor-grabbing touch-none transition-[filter,opacity] hover:brightness-125"
                           style={{
                             top,
                             height,
@@ -551,7 +695,7 @@ export default function CalendarPage() {
                             border: `1px solid ${accent}cc`,
                             borderLeft: `3px solid ${accent}`,
                             boxShadow: "0 1px 4px rgba(0,0,0,0.55)",
-                            opacity: occurrence.done ? 0.4 : 1,
+                            opacity: taskMove?.occurrence.key === occurrence.key ? 0.2 : occurrence.done ? 0.4 : 1,
                           }}
                         >
                           <p
@@ -589,6 +733,44 @@ export default function CalendarPage() {
           </div>
         </div>
       )}
+
+      {ready && view === "week" && taskMove?.moved && gridRef.current && (() => {
+        const grid = gridRef.current;
+        const rect = grid.getBoundingClientRect();
+        const dayWidth = (rect.width - 56) / 7;
+        const dayIndex = Array.from({ length: 7 }, (_, offset) => addDays(rangeFrom, offset))
+          .findIndex((date) => date === taskMove.date);
+        const accent = CATEGORY_COLOR[taskMove.occurrence.task.category];
+        const height = Math.max(
+          18,
+          (taskMove.occurrence.task.estimate_minutes / 60) * HOUR_HEIGHT - BLOCK_GAP,
+        );
+
+        return (
+          <div
+            className="fixed z-40 rounded-md px-1.5 py-0.5 overflow-hidden pointer-events-none shadow-lg"
+            style={{
+              left: rect.left + 56 + Math.max(0, dayIndex) * dayWidth + 2,
+              top: rect.top + yOf(taskMove.minutes) - grid.scrollTop,
+              width: dayWidth - 4,
+              height,
+              background: `${accent}66`,
+              border: `1px solid ${accent}`,
+              borderLeft: `3px solid ${accent}`,
+              boxShadow: "0 6px 18px rgba(0,0,0,0.55)",
+            }}
+          >
+            <p className="text-[11px] font-medium leading-tight text-white truncate">
+              {taskMove.occurrence.task.title}
+            </p>
+            {height > 30 && (
+              <p className="text-[10px] text-[#d4d4d4] truncate">
+                {fmtTime(minutesToTime(taskMove.minutes))}
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Anytime tasks for the selected day ── */}
       {ready && view === "week" && (
