@@ -49,6 +49,14 @@ export type Occurrence = {
   rolledFrom: string | null; // original date when carried over, else null
 };
 
+/** A moved recurring occurrence. Its identity stays on the original date. */
+export type OccurrenceOverride = {
+  task_id: string;
+  occurrence_date: string;
+  display_date: string;
+  start_time: string;
+};
+
 export const CATEGORIES: Category[] = ["music", "app", "other"];
 
 export const CATEGORY_COLOR: Record<Category, string> = {
@@ -261,8 +269,12 @@ export function occurrencesOn(
   done: Set<string>,
   today: string = vnToday(),
   skipped: Set<string> = new Set(),
+  overrides: OccurrenceOverride[] = [],
 ): Occurrence[] {
   const occurrences: Occurrence[] = [];
+  const overrideByKey = new Map(
+    overrides.map((override) => [`${override.task_id}:${override.occurrence_date}`, override]),
+  );
 
   for (const task of tasks) {
     let time: string | null;
@@ -277,6 +289,15 @@ export function occurrencesOn(
       rolledFrom = task.start_date;
     } else {
       time = occursOn(task, iso);
+      if (time && task.recurrence !== "none") {
+        const override = overrideByKey.get(`${task.id}:${iso}`);
+        if (override) {
+          // The occurrence keeps its original completion identity even when it
+          // has moved to another day. Its moved copy is added below.
+          if (override.display_date !== iso) continue;
+          time = override.start_time;
+        }
+      }
     }
 
     if (!time) continue;
@@ -294,6 +315,31 @@ export function occurrencesOn(
       done: done.has(`${task.id}:${completionDate}`),
       isGate: false,
       rolledFrom,
+    });
+  }
+
+  // Bring in recurring occurrences whose original schedule date is elsewhere.
+  // Their key stays on that original date so completion and skip records remain
+  // attached to the same occurrence after any number of moves.
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  for (const override of overrides) {
+    if (override.display_date !== iso || override.occurrence_date === iso) continue;
+    const task = taskById.get(override.task_id);
+    if (!task || task.recurrence === "none" || !occursOn(task, override.occurrence_date)) continue;
+
+    const key = `${task.id}:${override.occurrence_date}`;
+    if (skipped.has(key)) continue;
+    occurrences.push({
+      key,
+      task,
+      date: iso,
+      completionDate: override.occurrence_date,
+      time: override.start_time,
+      minutes: toMinutes(override.start_time),
+      timed: task.timed,
+      done: done.has(key),
+      isGate: false,
+      rolledFrom: null,
     });
   }
 
@@ -376,10 +422,11 @@ export function expandRange(
   done: Set<string>,
   today: string = vnToday(),
   skipped: Set<string> = new Set(),
+  overrides: OccurrenceOverride[] = [],
 ): Record<string, Occurrence[]> {
   const byDate: Record<string, Occurrence[]> = {};
   for (let iso = from; iso <= to; iso = addDays(iso, 1)) {
-    byDate[iso] = occurrencesOn(tasks, iso, done, today, skipped).sort(byTime);
+    byDate[iso] = occurrencesOn(tasks, iso, done, today, skipped, overrides).sort(byTime);
   }
   return byDate;
 }

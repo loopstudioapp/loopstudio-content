@@ -12,6 +12,7 @@ import {
   Category,
   MONTHS,
   Occurrence,
+  OccurrenceOverride,
   Task,
   WEEKDAYS,
   addDays,
@@ -94,6 +95,7 @@ export default function CalendarPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [done, setDone] = useState<Set<string>>(new Set());
   const [skips, setSkips] = useState<Set<string>>(new Set());
+  const [overrides, setOverrides] = useState<OccurrenceOverride[]>([]);
   const [loading, setLoading] = useState(true);
   // Only the very first load gets a skeleton. Later refetches (switching views,
   // paging weeks) keep the current content on screen instead of flashing.
@@ -104,7 +106,13 @@ export default function CalendarPage() {
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
-  const [modal, setModal] = useState<{ task: Task | null; date: string; time?: string; estimate?: number } | null>(null);
+  const [modal, setModal] = useState<{
+    task: Task | null;
+    date: string;
+    occurrenceDate?: string;
+    time?: string;
+    estimate?: number;
+  } | null>(null);
   const [nowMinutes, setNowMinutes] = useState(vnNowMinutes());
   // Live drag-to-create selection on the week grid. The ref is the source of
   // truth so a fast drag cannot outrun a state commit; the state only drives
@@ -163,6 +171,7 @@ export default function CalendarPage() {
       setTasks((data.tasks || []).map(normalizeTask));
       setDone(new Set<string>(data.completions || []));
       setSkips(new Set<string>(data.skips || []));
+      setOverrides(data.overrides || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load tasks");
     } finally {
@@ -241,22 +250,22 @@ export default function CalendarPage() {
   }, []);
 
   const byDate = useMemo(
-    () => expandRange(tasks, rangeFrom, rangeTo, done, today, skips),
-    [tasks, rangeFrom, rangeTo, done, today, skips],
+    () => expandRange(tasks, rangeFrom, rangeTo, done, today, skips, overrides),
+    [tasks, rangeFrom, rangeTo, done, today, skips, overrides],
   );
 
   const anytimeList = useMemo(
-    () => anytimeQueue(occurrencesOn(tasks, selected, done, today, skips)).filter((o) => !o.done),
-    [tasks, selected, done, today, skips],
+    () => anytimeQueue(occurrencesOn(tasks, selected, done, today, skips, overrides)).filter((o) => !o.done),
+    [tasks, selected, done, today, skips, overrides],
   );
 
   const focusQueue = useMemo(
     () => dayQueue(
-      occurrencesOn(tasks, selected, done, today, skips),
+      occurrencesOn(tasks, selected, done, today, skips, overrides),
       // Expiry only applies to today; other days show their full queue.
       selected === today ? nowMinutes : undefined,
     ),
-    [tasks, selected, done, today, nowMinutes, skips],
+    [tasks, selected, done, today, nowMinutes, skips, overrides],
   );
 
   const categoryFocusQueue = useMemo(
@@ -412,29 +421,49 @@ export default function CalendarPage() {
 
     const task = occurrence.task;
     const time = minutesToTime(minutes);
-    const updated: Task = { ...task, start_time: time };
-
-    if (task.recurrence === "none") {
-      updated.start_date = date;
-    } else if (task.recurrence === "weekly") {
-      const sourceDay = String(dayOfWeek(occurrence.date));
-      const targetDay = String(dayOfWeek(date));
-      const weeklyTimes = { ...task.weekly_times };
-      if (sourceDay !== targetDay) delete weeklyTimes[sourceDay];
-      weeklyTimes[targetDay] = time;
-      updated.weekly_times = weeklyTimes;
-    } else if (task.recurrence === "monthly") {
-      updated.monthly_day = Number(date.slice(8, 10));
-    } else if (task.recurrence === "yearly") {
-      updated.yearly_month = Number(date.slice(5, 7));
-      updated.yearly_day = Number(date.slice(8, 10));
-    }
-    if (task.recurrence !== "none" && task.start_date && date < task.start_date) {
-      updated.start_date = date;
-    }
 
     setSelected(date);
     setError(null);
+
+    if (task.recurrence !== "none") {
+      const movedOverride: OccurrenceOverride = {
+        task_id: task.id,
+        occurrence_date: occurrence.completionDate,
+        display_date: date,
+        start_time: time,
+      };
+      const previous = overrides.find(
+        (candidate) =>
+          candidate.task_id === task.id &&
+          candidate.occurrence_date === occurrence.completionDate,
+      );
+      const withoutOccurrence = (current: OccurrenceOverride[]) => current.filter(
+        (candidate) =>
+          candidate.task_id !== task.id ||
+          candidate.occurrence_date !== occurrence.completionDate,
+      );
+
+      setOverrides((current) => [...withoutOccurrence(current), movedOverride]);
+      try {
+        const response = await fetch("/api/calendar/override", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(movedOverride),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not move the task");
+        setOverrides((current) => [...withoutOccurrence(current), result.override]);
+      } catch (err) {
+        setOverrides((current) => {
+          const restored = withoutOccurrence(current);
+          return previous ? [...restored, previous] : restored;
+        });
+        setError(err instanceof Error ? err.message : "Could not move the task");
+      }
+      return;
+    }
+
+    const updated: Task = { ...task, start_date: date, start_time: time };
     setTasks((current) => current.map((candidate) => candidate.id === task.id ? updated : candidate));
 
     try {
@@ -708,12 +737,12 @@ export default function CalendarPage() {
                             }
                             suppressTaskClickRef.current = null;
                             setSelected(date);
-                            setModal({ task: occurrence.task, date });
+                            setModal({ task: occurrence.task, date, occurrenceDate: occurrence.completionDate });
                           }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               setSelected(date);
-                              setModal({ task: occurrence.task, date });
+                              setModal({ task: occurrence.task, date, occurrenceDate: occurrence.completionDate });
                             }
                           }}
                           className="absolute rounded-md px-1.5 py-0.5 flex flex-col items-start text-left overflow-hidden cursor-grab active:cursor-grabbing touch-none transition-[filter,opacity] hover:brightness-125"
@@ -852,7 +881,11 @@ export default function CalendarPage() {
                       className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
                     />
                     <button
-                      onClick={() => setModal({ task: occurrence.task, date: selected })}
+                      onClick={() => setModal({
+                        task: occurrence.task,
+                        date: selected,
+                        occurrenceDate: occurrence.completionDate,
+                      })}
                       className="flex-1 min-w-0 text-left"
                     >
                       <div className="flex items-center gap-2">
@@ -896,6 +929,7 @@ export default function CalendarPage() {
         <TaskModal
           task={modal.task}
           defaultDate={modal.date}
+          occurrenceDate={modal.occurrenceDate}
           defaultTime={modal.time}
           defaultEstimate={modal.estimate}
           skippedDates={

@@ -63,6 +63,7 @@ const labelCls = "block text-[10px] uppercase tracking-wider text-[#b0b0b0] font
 export default function TaskModal({
   task,
   defaultDate,
+  occurrenceDate,
   defaultTime,
   defaultEstimate,
   skippedDates = [],
@@ -74,6 +75,8 @@ export default function TaskModal({
 }: {
   task: Task | null;
   defaultDate: string;
+  /** Stable identity date for a recurring occurrence moved to another day. */
+  occurrenceDate?: string;
   defaultTime?: string;
   defaultEstimate?: number;
   /** Dates this task already skips, so they can be put back. */
@@ -198,6 +201,7 @@ export default function TaskModal({
   };
 
   const yearlyDayMax = daysInMonth(Number(vnToday().slice(0, 4)), Number(yearlyMonth) || 1);
+  const occurrenceKeyDate = occurrenceDate || defaultDate;
 
   return (
     <div
@@ -484,16 +488,16 @@ export default function TaskModal({
           {task && task.recurrence !== "none" && (
             <div>
               <label className={labelCls}>This day only</label>
-              {skippedDates.includes(defaultDate) ? (
+              {skippedDates.includes(occurrenceKeyDate) ? (
                 <button
-                  onClick={() => { onRestore?.(defaultDate); onClose(); }}
+                  onClick={() => { onRestore?.(occurrenceKeyDate); onClose(); }}
                   className="w-full py-1.5 text-xs rounded-lg border border-[#22c55e]/40 text-[#22c55e] hover:bg-[#22c55e]/10 transition-colors"
                 >
                   Put {shortDate(defaultDate)} back
                 </button>
               ) : (
                 <button
-                  onClick={() => { onSkip?.(defaultDate); onClose(); }}
+                  onClick={() => { onSkip?.(occurrenceKeyDate); onClose(); }}
                   className="w-full py-1.5 text-xs rounded-lg border border-[#3a3a3a] text-[#b0b0b0] hover:text-white hover:border-[#555] transition-colors"
                 >
                   Skip {shortDate(defaultDate)} — leaves every other date alone
