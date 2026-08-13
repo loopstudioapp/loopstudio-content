@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Flag, Pause, Play } from "lucide-react";
+import { Check, Flag, Pause, Play, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CATEGORY_COLOR,
@@ -37,10 +37,13 @@ export default function FocusView({
    * the total of any earlier runs that were paused.
    */
   const [bankedMs, setBankedMs] = useState(0);
+  // Tasks deferred with Next live only for this mounted focus session. Leaving
+  // the task page unmounts this view, so reopening restores the normal queue.
+  const [deferredKeys, setDeferredKeys] = useState<Set<string>>(() => new Set());
   const runStartedAt = useRef<number | null>(null);
   const [, redraw] = useState(0);
 
-  const current = queue[0];
+  const current = queue.find((occurrence) => !deferredKeys.has(occurrence.key)) || queue[0];
   const currentKey = current?.key;
 
   // A different task means a fresh timer.
@@ -84,6 +87,25 @@ export default function FocusView({
     runStartedAt.current = null;
     onComplete(current);
   }, [current, onComplete]);
+
+  const next = useCallback(() => {
+    if (!current || queue.length < 2) return;
+    setRunning(false);
+    runStartedAt.current = null;
+    setDeferredKeys((deferred) => {
+      const hasAnotherAvailable = queue.some(
+        (occurrence) => occurrence.key !== current.key && !deferred.has(occurrence.key),
+      );
+      if (!hasAnotherAvailable) {
+        // Every other task has already been deferred, so begin another pass
+        // through the session with the current task moved to the back.
+        return new Set([current.key]);
+      }
+      const updated = new Set(deferred);
+      updated.add(current.key);
+      return updated;
+    });
+  }, [current, queue]);
 
   const elapsed = Math.floor(
     (bankedMs + (runStartedAt.current !== null ? Date.now() - runStartedAt.current : 0)) / 1000,
@@ -184,12 +206,22 @@ export default function FocusView({
             {running ? <><Pause size={15} /> Pause</> : <><Play size={15} /> {elapsed > 0 ? "Resume" : "Start"}</>}
           </button>
 
-          <button
-            onClick={finish}
-            className="w-full inline-flex items-center justify-center gap-2 py-2.5 mt-2 text-xs font-semibold text-[#22c55e] border border-[#22c55e]/30 rounded-lg hover:bg-[#22c55e]/10 transition-colors"
-          >
-            <Check size={14} /> Done
-          </button>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <button
+              onClick={finish}
+              className="inline-flex items-center justify-center gap-2 py-2.5 text-xs font-semibold text-[#22c55e] border border-[#22c55e]/30 rounded-lg hover:bg-[#22c55e]/10 transition-colors"
+            >
+              <Check size={14} /> Done
+            </button>
+            <button
+              onClick={next}
+              disabled={queue.length < 2}
+              title="Show the next task for this session only"
+              className="inline-flex items-center justify-center gap-2 py-2.5 text-xs font-semibold text-[#d4d4d4] border border-[#3a3a3a] rounded-lg hover:border-[#555] hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              Next <SkipForward size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
