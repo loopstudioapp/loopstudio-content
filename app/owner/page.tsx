@@ -638,7 +638,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
   const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? META_VAT_RATE)) : 0;
   const adsSub = ads?.configured
     ? metaUnavailable
-      ? "Meta spend unavailable"
+      ? "Meta spend not included"
       : ads?.stale
         ? "using last saved Meta spend"
         : ads.currency !== "USD"
@@ -654,7 +654,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <span className="text-[#525252] text-xs">GrailScan · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
           {ads?.error && (
             <span className="text-[#ef4444] text-[10px]">
-              {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · profit is incomplete"}
+              {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · today's profit excludes Meta spend"}
             </span>
           )}
         </div>
@@ -684,28 +684,24 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Profit</p>
-            <p className={`text-3xl font-bold ${metaUnavailable ? "text-[#737373]" : profitColor(totalProfit)}`}>
-              {metaUnavailable ? "—" : fmtSignedCur(totalProfit)}
-            </p>
+            <p className={`text-3xl font-bold ${profitColor(totalProfit)}`}>{fmtSignedCur(totalProfit)}</p>
             <p className="text-[#525252] text-[10px] mt-1">
               net rev − adspend − {fmtCur2(profit?.daily_refund_cost || 0)} refund avg
             </p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">New Profit</p>
-            <p className={`text-3xl font-bold ${metaUnavailable ? "text-[#737373]" : profitColor(newProfit)}`}>
-              {metaUnavailable ? "—" : fmtSignedCur(newProfit)}
-            </p>
+            <p className={`text-3xl font-bold ${profitColor(newProfit)}`}>{fmtSignedCur(newProfit)}</p>
             <p className="text-[#525252] text-[10px] mt-1">net new rev − adspend</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Cost / New Sub</p>
-            <p className="text-white text-3xl font-bold">{!metaUnavailable && cpns > 0 ? fmtCur2(cpns) : "—"}</p>
+            <p className="text-white text-3xl font-bold">{cpns > 0 ? fmtCur2(cpns) : "—"}</p>
             <p className="text-[#525252] text-[10px] mt-1">adspend ÷ new subs</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#ef4444] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Adspend</p>
-            <p className="text-white text-3xl font-bold">{metaUnavailable ? "—" : fmtCur2(adspend)}</p>
+            <p className="text-white text-3xl font-bold">{fmtCur2(adspend)}</p>
             <p className="text-[#525252] text-[10px] mt-1 truncate">{adsSub}</p>
           </div>
         </div>

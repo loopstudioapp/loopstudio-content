@@ -131,13 +131,15 @@ export async function getTodayMetaSpend(): Promise<MetaSpend> {
   const token = process.env.META_ACCESS_TOKEN;
   const rawAccount = process.env.META_AD_ACCOUNT_ID;
   const date = vnDateIso();
+  const fallbackCurrency = (process.env.META_AD_ACCOUNT_CURRENCY || "VND").trim().toUpperCase();
+  const fallbackUsdRate = await getUsdRate(fallbackCurrency);
 
   const empty: MetaSpend = {
     configured: false,
     spend_native: 0,
     spend_usd: 0,
-    currency: "USD",
-    usd_rate: 1,
+    currency: fallbackCurrency,
+    usd_rate: fallbackUsdRate,
     date,
   };
 
