@@ -20,8 +20,27 @@ export type MetaSpend = {
   currency: string; // account currency, e.g. "VND"
   usd_rate: number; // 1 USD = usd_rate <currency>
   date: string; // YYYY-MM-DD (GMT+7)
+  stale?: boolean; // true when a saved same-day value is used after an API failure
   error?: string;
 };
+
+async function metaErrorMessage(response: Response, operation: string): Promise<string> {
+  let upstreamMessage = "";
+  try {
+    const payload = await response.json();
+    upstreamMessage = typeof payload?.error?.message === "string" ? payload.error.message : "";
+  } catch {
+    // Meta occasionally returns an HTML error page. Keep that out of the UI.
+  }
+
+  if (upstreamMessage.toLowerCase().includes("api access blocked")) {
+    return "Meta API access is blocked. Reconnect the Meta access token.";
+  }
+  if (/expired|invalid.*token|session/i.test(upstreamMessage)) {
+    return "Meta access token expired. Reconnect the Meta access token.";
+  }
+  return `Meta ${operation} request failed (HTTP ${response.status}).`;
+}
 
 function vnDateIso(d: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -132,8 +151,7 @@ export async function getTodayMetaSpend(): Promise<MetaSpend> {
       `${GRAPH_BASE}/${accountId}?fields=currency&access_token=${encodeURIComponent(token)}`
     );
     if (!acctRes.ok) {
-      const t = await acctRes.text();
-      return { ...empty, configured: true, error: `account ${acctRes.status}: ${t.slice(0, 150)}` };
+      return { ...empty, configured: true, error: await metaErrorMessage(acctRes, "account") };
     }
     const acctJson = await acctRes.json();
     const currency: string = acctJson?.currency || "USD";
@@ -145,8 +163,7 @@ export async function getTodayMetaSpend(): Promise<MetaSpend> {
       `${GRAPH_BASE}/${accountId}/insights?fields=spend&time_range=${timeRange}&access_token=${encodeURIComponent(token)}`
     );
     if (!insRes.ok) {
-      const t = await insRes.text();
-      return { ...empty, configured: true, currency, error: `insights ${insRes.status}: ${t.slice(0, 150)}` };
+      return { ...empty, configured: true, currency, error: await metaErrorMessage(insRes, "insights") };
     }
     const insJson = await insRes.json();
     const row = (insJson?.data || [])[0];

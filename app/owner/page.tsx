@@ -11,7 +11,7 @@ type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxnType = "NEW_SUB" | "RENEWAL" | "REFUND" | "REFUND_REVERSED";
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: TodayTxnType };
-type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; error?: string };
+type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; stale?: boolean; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number; daily_refund_cost?: number };
 type DailyPoint = {
   date: string;
@@ -633,10 +633,15 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
     0
   );
   const costPerSub30 = totalNewSubs30 > 0 ? totalSubCost30 / totalNewSubs30 : 0;
+  const metaUnavailable = Boolean(ads?.error && !ads?.stale);
   // Subtitle for adspend showing native VND (incl VAT) + rate
   const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? META_VAT_RATE)) : 0;
   const adsSub = ads?.configured
-    ? ads.currency !== "USD"
+    ? metaUnavailable
+      ? "Meta spend unavailable"
+      : ads?.stale
+        ? "using last saved Meta spend"
+        : ads.currency !== "USD"
       ? `${Math.round(nativeWithVat).toLocaleString("en-US")}${ads.currency === "VND" ? "₫" : " " + ads.currency} incl ${vatPct}% VAT`
       : `incl ${vatPct}% VAT`
     : "Meta not connected";
@@ -647,7 +652,11 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
           <span className="w-2 h-2 rounded-full bg-[#10b981]" />
           <h3 className="text-white text-sm font-semibold">Profit</h3>
           <span className="text-[#525252] text-xs">GrailScan · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
-          {ads?.error && <span className="text-[#ef4444] text-[10px]">⚠ {ads.error.slice(0, 60)}</span>}
+          {ads?.error && (
+            <span className="text-[#ef4444] text-[10px]">
+              {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · profit is incomplete"}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {taxBtns.map((b) => (
@@ -675,24 +684,28 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Profit</p>
-            <p className={`text-3xl font-bold ${profitColor(totalProfit)}`}>{fmtSignedCur(totalProfit)}</p>
+            <p className={`text-3xl font-bold ${metaUnavailable ? "text-[#737373]" : profitColor(totalProfit)}`}>
+              {metaUnavailable ? "—" : fmtSignedCur(totalProfit)}
+            </p>
             <p className="text-[#525252] text-[10px] mt-1">
               net rev − adspend − {fmtCur2(profit?.daily_refund_cost || 0)} refund avg
             </p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold mb-1">New Profit</p>
-            <p className={`text-3xl font-bold ${profitColor(newProfit)}`}>{fmtSignedCur(newProfit)}</p>
+            <p className={`text-3xl font-bold ${metaUnavailable ? "text-[#737373]" : profitColor(newProfit)}`}>
+              {metaUnavailable ? "—" : fmtSignedCur(newProfit)}
+            </p>
             <p className="text-[#525252] text-[10px] mt-1">net new rev − adspend</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold mb-1">Cost / New Sub</p>
-            <p className="text-white text-3xl font-bold">{cpns > 0 ? fmtCur2(cpns) : "—"}</p>
+            <p className="text-white text-3xl font-bold">{!metaUnavailable && cpns > 0 ? fmtCur2(cpns) : "—"}</p>
             <p className="text-[#525252] text-[10px] mt-1">adspend ÷ new subs</p>
           </div>
           <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
             <p className="text-[#ef4444] text-[10px] uppercase tracking-wider font-semibold mb-1">Total Adspend</p>
-            <p className="text-white text-3xl font-bold">{fmtCur2(adspend)}</p>
+            <p className="text-white text-3xl font-bold">{metaUnavailable ? "—" : fmtCur2(adspend)}</p>
             <p className="text-[#525252] text-[10px] mt-1 truncate">{adsSub}</p>
           </div>
         </div>

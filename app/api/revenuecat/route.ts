@@ -1307,6 +1307,17 @@ function profitSummaryFromRevenue({
   };
 }
 
+function preserveCachedMetaSpend(
+  freshAds: MetaSpend,
+  cachedData: TodayStatsResponse | null,
+  today: string
+): MetaSpend {
+  const cachedAds = cachedData?.today_vn === today ? cachedData.ads : undefined;
+  return freshAds.error && cachedAds && !cachedAds.error
+    ? { ...cachedAds, stale: true, error: freshAds.error }
+    : freshAds;
+}
+
 async function fetchFastTodayStatsFromDb(
   cachedData: TodayStatsResponse | null = null,
   appName?: string
@@ -1317,7 +1328,7 @@ async function fetchFastTodayStatsFromDb(
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
   const metaVat = META_VAT_RATE;
 
-  const [mrrByApp, ads, newSubsResult, renewalsResult] = await Promise.all([
+  const [mrrByApp, freshAds, newSubsResult, renewalsResult] = await Promise.all([
     fetchMrrByApp(appName),
     getTodayMetaSpend(),
     supabase
@@ -1335,6 +1346,10 @@ async function fetchFastTodayStatsFromDb(
 
   if (newSubsResult.error) throw new Error(`Database error: ${newSubsResult.error.message}`);
   if (renewalsResult.error) throw new Error(`Database error: ${renewalsResult.error.message}`);
+
+  // A temporary Meta outage must not erase a valid spend value already saved
+  // for this Vietnam day. Keep the value and surface that it is stale.
+  const ads = preserveCachedMetaSpend(freshAds, cachedData, today);
 
   const renewalRows = ((renewalsResult.data || []) as RenewalEventRow[]).filter((row) => {
     const app = visibleAppName(row.app_name);
@@ -1488,7 +1503,10 @@ async function fetchFastTodayStatsFromDb(
   return { today_vn: today, per_app: perApp, transactions, ads, profit: profitWithRefund, daily };
 }
 
-async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
+async function fetchTodayStats(
+  appName?: string,
+  cachedData: TodayStatsResponse | null = null
+): Promise<TodayStatsResponse> {
   const today = vnDateIso();
   const dates = vnDateWindow(today, 30);
   const start = dates[0];
@@ -1498,13 +1516,23 @@ async function fetchTodayStats(appName?: string): Promise<TodayStatsResponse> {
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
   const metaVat = META_VAT_RATE;
 
-  const [mrrByApp, ads, spendUsdByDate, ledger, openRouterCostsByDate] = await Promise.all([
+  const [mrrByApp, freshAds, spendUsdByDate, ledger, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
     getTodayMetaSpend(),
     getMetaSpendByDay(start, today),
     fetchTransactionLedger(start, endExclusive, appName),
     appName === "GrailScan" ? fetchOpenRouterCostsByDate() : Promise.resolve({}),
   ]);
+  const ads = preserveCachedMetaSpend(freshAds, cachedData, today);
+
+  // The Meta history endpoint fails together with the account endpoint. Reuse
+  // the saved daily Meta costs so a ledger rebuild cannot zero past ad spend.
+  if (freshAds.error) {
+    for (const point of cachedData?.daily || []) {
+      if (point.adspend_with_vat === undefined) continue;
+      spendUsdByDate[point.date] = point.adspend_with_vat / (1 + metaVat);
+    }
+  }
 
   if (ads.configured && !ads.error && ads.date === today) {
     spendUsdByDate[today] = ads.spend_usd || 0;
@@ -1602,7 +1630,7 @@ export async function GET(request: NextRequest) {
 
       const cached = await readTodayStatsCache(requestedApp);
       try {
-        const refreshed = await fetchTodayStats(requestedApp);
+        const refreshed = await fetchTodayStats(requestedApp, cached?.data || null);
         const data = cached?.data?.today_vn === refreshed.today_vn
           ? { ...cached.data, daily: refreshed.daily }
           : refreshed;
