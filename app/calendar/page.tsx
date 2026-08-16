@@ -39,6 +39,9 @@ const HOUR_HEIGHT = 60;
 const DAY_START_HOUR = 7;
 const DAY_START_MIN = DAY_START_HOUR * 60;
 const GRID_HOURS = 24 - DAY_START_HOUR;
+// Load surrounding weeks with the current one. Calendar rows are small, and
+// this makes normal previous/next navigation local instead of network-bound.
+const CALENDAR_BUFFER_DAYS = 28;
 /** Minute of day -> pixels from the top of the grid. */
 const yOf = (minutes: number) => ((minutes - DAY_START_MIN) / 60) * HOUR_HEIGHT;
 const BLOCK_GAP = 4; // vertical breathing room between back-to-back blocks
@@ -100,7 +103,7 @@ export default function CalendarPage() {
   // Keep same-range refetches visible, but never render a newly selected week
   // with completion data from the previous week.
   const [ready, setReady] = useState(false);
-  const [loadedRange, setLoadedRange] = useState<string | null>(null);
+  const [loadedWindow, setLoadedWindow] = useState<{ from: string; to: string } | null>(null);
   const [workCategory, setWorkCategory] = useState<Category | null>(null);
   const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
   // null until the cookie has been read, so the gate never flashes.
@@ -158,15 +161,22 @@ export default function CalendarPage() {
     const start = startOfWeek(view === "week" ? cursor : selected);
     return [start, addDays(start, 6)];
   }, [view, cursor, selected]);
-  const rangeKey = `${rangeFrom}:${rangeTo}`;
-  const rangeReady = ready && loadedRange === rangeKey;
+  const rangeReady = ready && Boolean(
+    loadedWindow && loadedWindow.from <= rangeFrom && loadedWindow.to >= rangeTo,
+  );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (!force && loadedWindow && loadedWindow.from <= rangeFrom && loadedWindow.to >= rangeTo) {
+      return;
+    }
+
     const requestId = ++loadRequestRef.current;
+    const fetchFrom = addDays(rangeFrom, -CALENDAR_BUFFER_DAYS);
+    const fetchTo = addDays(rangeTo, CALENDAR_BUFFER_DAYS);
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/calendar/tasks?from=${rangeFrom}&to=${rangeTo}`);
+      const response = await fetch(`/api/calendar/tasks?from=${fetchFrom}&to=${fetchTo}`);
       const data = await response.json();
       if (requestId !== loadRequestRef.current) return;
       if (!response.ok) {
@@ -178,7 +188,7 @@ export default function CalendarPage() {
       setDone(new Set<string>(data.completions || []));
       setSkips(new Set<string>(data.skips || []));
       setOverrides(data.overrides || []);
-      setLoadedRange(rangeKey);
+      setLoadedWindow({ from: fetchFrom, to: fetchTo });
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
       setError(err instanceof Error ? err.message : "Could not load tasks");
@@ -188,7 +198,7 @@ export default function CalendarPage() {
         setReady(true);
       }
     }
-  }, [rangeFrom, rangeTo, rangeKey]);
+  }, [rangeFrom, rangeTo, loadedWindow]);
 
   useEffect(() => {
     load();
@@ -954,8 +964,8 @@ export default function CalendarPage() {
           onSkip={(date) => modal.task && setSkip(modal.task.id, date, true)}
           onRestore={(date) => modal.task && setSkip(modal.task.id, date, false)}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); load(); }}
-          onDeleted={() => { setModal(null); load(); }}
+          onSaved={() => { setModal(null); load(true); }}
+          onDeleted={() => { setModal(null); load(true); }}
         />
       )}
     </div>

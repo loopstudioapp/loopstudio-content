@@ -78,19 +78,11 @@ export async function GET(request: NextRequest) {
   const from = request.nextUrl.searchParams.get("from");
   const to = request.nextUrl.searchParams.get("to");
 
-  const tasksQuery = await supabase
+  const tasksQuery = supabase
     .from("calendar_tasks")
     .select("*")
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
-
-  if (tasksQuery.error) {
-    const missing = isMissingTable(tasksQuery.error);
-    return NextResponse.json(
-      { error: missing ? SETUP_HINT : tasksQuery.error.message, setup_required: missing },
-      { status: missing ? 503 : 500 },
-    );
-  }
 
   // An override matters when either its original occurrence or its moved
   // display date touches the visible range. Query both directions so moving an
@@ -100,36 +92,12 @@ export async function GET(request: NextRequest) {
     .select("task_id, occurrence_date, display_date, start_time");
   if (from) originalOverridesQuery = originalOverridesQuery.gte("occurrence_date", from);
   if (to) originalOverridesQuery = originalOverridesQuery.lte("occurrence_date", to);
-  const originalOverrides = await originalOverridesQuery;
 
-  let overrides: Array<{
-    task_id: string;
-    occurrence_date: string;
-    display_date: string;
-    start_time: string;
-  }> = [];
-
-  if (!originalOverrides.error) {
-    overrides = [...(originalOverrides.data || [])];
-    if (from || to) {
-      let displayedOverridesQuery = supabase
-        .from("calendar_task_overrides")
-        .select("task_id, occurrence_date, display_date, start_time");
-      if (from) displayedOverridesQuery = displayedOverridesQuery.gte("display_date", from);
-      if (to) displayedOverridesQuery = displayedOverridesQuery.lte("display_date", to);
-      const displayedOverrides = await displayedOverridesQuery;
-      if (displayedOverrides.error && !isMissingTable(displayedOverrides.error)) {
-        return NextResponse.json({ error: displayedOverrides.error.message }, { status: 500 });
-      }
-      overrides.push(...(displayedOverrides.data || []));
-    }
-  } else if (!isMissingTable(originalOverrides.error)) {
-    return NextResponse.json({ error: originalOverrides.error.message }, { status: 500 });
-  }
-
-  overrides = [...new Map(
-    overrides.map((override) => [`${override.task_id}:${override.occurrence_date}`, override]),
-  ).values()];
+  let displayedOverridesQuery = supabase
+    .from("calendar_task_overrides")
+    .select("task_id, occurrence_date, display_date, start_time");
+  if (from) displayedOverridesQuery = displayedOverridesQuery.gte("display_date", from);
+  if (to) displayedOverridesQuery = displayedOverridesQuery.lte("display_date", to);
 
   let completionsQuery = supabase
     .from("calendar_task_completions")
@@ -137,71 +105,99 @@ export async function GET(request: NextRequest) {
   if (from) completionsQuery = completionsQuery.gte("occurrence_date", from);
   if (to) completionsQuery = completionsQuery.lte("occurrence_date", to);
 
-  const completions = await completionsQuery;
+  let skipsQuery = supabase.from("calendar_task_skips").select("task_id, occurrence_date");
+  if (from) skipsQuery = skipsQuery.gte("occurrence_date", from);
+  if (to) skipsQuery = skipsQuery.lte("occurrence_date", to);
+
+  // These queries are independent. Running them together avoids paying for a
+  // separate database round trip for every calendar data type.
+  const [tasks, originalOverrides, displayedOverrides, completions, skips] = await Promise.all([
+    tasksQuery,
+    originalOverridesQuery,
+    displayedOverridesQuery,
+    completionsQuery,
+    skipsQuery,
+  ]);
+
+  if (tasks.error) {
+    const missing = isMissingTable(tasks.error);
+    return NextResponse.json(
+      { error: missing ? SETUP_HINT : tasks.error.message, setup_required: missing },
+      { status: missing ? 503 : 500 },
+    );
+  }
+  if (originalOverrides.error && !isMissingTable(originalOverrides.error)) {
+    return NextResponse.json({ error: originalOverrides.error.message }, { status: 500 });
+  }
+  if (displayedOverrides.error && !isMissingTable(displayedOverrides.error)) {
+    return NextResponse.json({ error: displayedOverrides.error.message }, { status: 500 });
+  }
   if (completions.error) {
     return NextResponse.json({ error: completions.error.message }, { status: 500 });
   }
 
+  const overrides = [...new Map(
+    [...(originalOverrides.data || []), ...(displayedOverrides.data || [])]
+      .map((override) => [`${override.task_id}:${override.occurrence_date}`, override]),
+  ).values()];
   const rows = [...(completions.data || [])];
+  const skipRows = [...(skips.data || [])];
 
   // A carried-over one-off is completed against the date it was originally
   // scheduled for, which is by definition outside the window being viewed.
   // Without these rows the client cannot tell it is finished and would keep
   // rolling it forward forever. One-offs have at most one completion each, so
   // this stays bounded.
-  const oneOffIds = (tasksQuery.data || [])
+  const oneOffIds = (tasks.data || [])
     .filter((task) => task.recurrence === "none")
     .map((task) => task.id);
 
-  if (oneOffIds.length) {
-    const carried = await supabase
-      .from("calendar_task_completions")
-      .select("task_id, occurrence_date")
-      .in("task_id", oneOffIds);
-    if (carried.error) {
-      return NextResponse.json({ error: carried.error.message }, { status: 500 });
-    }
-    rows.push(...(carried.data || []));
-  }
-
   const overrideKeys = new Set(overrides.map((override) => `${override.task_id}:${override.occurrence_date}`));
   const overrideDates = [...new Set(overrides.map((override) => override.occurrence_date))];
-  if (overrideDates.length) {
-    const movedCompletions = await supabase
+
+  // The remaining lookups depend on the task/override IDs above, but are
+  // independent of one another and can share a second parallel round trip.
+  const [carried, movedCompletions, movedSkips] = await Promise.all([
+    oneOffIds.length
+      ? supabase
+        .from("calendar_task_completions")
+        .select("task_id, occurrence_date")
+        .in("task_id", oneOffIds)
+      : Promise.resolve(null),
+    overrideDates.length
+      ? supabase
       .from("calendar_task_completions")
       .select("task_id, occurrence_date")
-      .in("occurrence_date", overrideDates);
-    if (movedCompletions.error) {
-      return NextResponse.json({ error: movedCompletions.error.message }, { status: 500 });
-    }
-    rows.push(...(movedCompletions.data || []).filter(
-      (completion) => overrideKeys.has(`${completion.task_id}:${completion.occurrence_date}`),
-    ));
+        .in("occurrence_date", overrideDates)
+      : Promise.resolve(null),
+    !skips.error && overrideDates.length
+      ? supabase
+        .from("calendar_task_skips")
+        .select("task_id, occurrence_date")
+        .in("occurrence_date", overrideDates)
+      : Promise.resolve(null),
+  ]);
+
+  if (carried?.error) {
+    return NextResponse.json({ error: carried.error.message }, { status: 500 });
+  }
+  if (movedCompletions?.error) {
+    return NextResponse.json({ error: movedCompletions.error.message }, { status: 500 });
+  }
+  if (movedSkips?.error && !isMissingTable(movedSkips.error)) {
+    return NextResponse.json({ error: movedSkips.error.message }, { status: 500 });
   }
 
-  let skipsQuery = supabase.from("calendar_task_skips").select("task_id, occurrence_date");
-  if (from) skipsQuery = skipsQuery.gte("occurrence_date", from);
-  if (to) skipsQuery = skipsQuery.lte("occurrence_date", to);
-  const skips = await skipsQuery;
-  const skipRows = [...(skips.data || [])];
-
-  // A moved occurrence can display inside the range while its completion and
-  // skip identity remains on an original date outside it.
-  if (!skips.error && overrideDates.length) {
-    const movedSkips = await supabase
-      .from("calendar_task_skips")
-      .select("task_id, occurrence_date")
-      .in("occurrence_date", overrideDates);
-    if (movedSkips.error && !isMissingTable(movedSkips.error)) {
-      return NextResponse.json({ error: movedSkips.error.message }, { status: 500 });
-    }
-    skipRows.push(...(movedSkips.data || []).filter(
-      (skip) => overrideKeys.has(`${skip.task_id}:${skip.occurrence_date}`),
-    ));
-  }
+  rows.push(...(carried?.data || []));
+  rows.push(...(movedCompletions?.data || []).filter(
+    (completion) => overrideKeys.has(`${completion.task_id}:${completion.occurrence_date}`),
+  ));
+  skipRows.push(...(movedSkips?.data || []).filter(
+    (skip) => overrideKeys.has(`${skip.task_id}:${skip.occurrence_date}`),
+  ));
 
   return NextResponse.json({
-    tasks: tasksQuery.data || [],
+    tasks: tasks.data || [],
     completions: [...new Set(rows.map((c) => `${c.task_id}:${c.occurrence_date}`))],
     // Missing table just means the migration has not been run; skips are additive.
     skips: skips.error ? [] : [...new Set(skipRows.map((s) => `${s.task_id}:${s.occurrence_date}`))],
