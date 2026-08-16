@@ -97,9 +97,10 @@ export default function CalendarPage() {
   const [skips, setSkips] = useState<Set<string>>(new Set());
   const [overrides, setOverrides] = useState<OccurrenceOverride[]>([]);
   const [loading, setLoading] = useState(true);
-  // Only the very first load gets a skeleton. Later refetches (switching views,
-  // paging weeks) keep the current content on screen instead of flashing.
+  // Keep same-range refetches visible, but never render a newly selected week
+  // with completion data from the previous week.
   const [ready, setReady] = useState(false);
+  const [loadedRange, setLoadedRange] = useState<string | null>(null);
   const [workCategory, setWorkCategory] = useState<Category | null>(null);
   const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
   // null until the cookie has been read, so the gate never flashes.
@@ -134,6 +135,7 @@ export default function CalendarPage() {
   const taskMoveRef = useRef<TaskMove | null>(null);
   const suppressTaskClickRef = useRef<{ key: string; until: number } | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const loadRequestRef = useRef(0);
   const today = vnToday();
 
   useEffect(() => {
@@ -156,13 +158,17 @@ export default function CalendarPage() {
     const start = startOfWeek(view === "week" ? cursor : selected);
     return [start, addDays(start, 6)];
   }, [view, cursor, selected]);
+  const rangeKey = `${rangeFrom}:${rangeTo}`;
+  const rangeReady = ready && loadedRange === rangeKey;
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setError(null);
     try {
       const response = await fetch(`/api/calendar/tasks?from=${rangeFrom}&to=${rangeTo}`);
       const data = await response.json();
+      if (requestId !== loadRequestRef.current) return;
       if (!response.ok) {
         setSetupNeeded(Boolean(data.setup_required));
         throw new Error(data.error || "Could not load tasks");
@@ -172,13 +178,17 @@ export default function CalendarPage() {
       setDone(new Set<string>(data.completions || []));
       setSkips(new Set<string>(data.skips || []));
       setOverrides(data.overrides || []);
+      setLoadedRange(rangeKey);
     } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
       setError(err instanceof Error ? err.message : "Could not load tasks");
     } finally {
-      setLoading(false);
-      setReady(true);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+        setReady(true);
+      }
     }
-  }, [rangeFrom, rangeTo]);
+  }, [rangeFrom, rangeTo, rangeKey]);
 
   useEffect(() => {
     load();
@@ -527,7 +537,11 @@ export default function CalendarPage() {
         </button>
         <div className="min-h-[calc(100vh-3rem)] flex items-center justify-center">
           <div className="w-full max-w-lg">
-            {ready && <FocusView queue={categoryFocusQueue} onComplete={toggleDone} />}
+            {rangeReady ? (
+              <FocusView queue={categoryFocusQueue} onComplete={toggleDone} />
+            ) : (
+              <div className="h-64 animate-pulse rounded-xl border border-[#3a3a3a] bg-[#1f1f1f]" />
+            )}
           </div>
         </div>
       </div>
@@ -622,12 +636,12 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {!ready && (
+      {!rangeReady && !error && (
         <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl h-64 animate-pulse" />
       )}
 
       {/* ── Week ── */}
-      {ready && view === "week" && (
+      {rangeReady && view === "week" && (
         <div className="bg-[#1f1f1f] border border-[#3a3a3a] rounded-xl overflow-hidden">
           <div className="grid border-b border-[#3a3a3a]" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
             <div />
@@ -796,7 +810,7 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {ready && view === "week" && taskMove?.moved && gridRef.current && (() => {
+      {rangeReady && view === "week" && taskMove?.moved && gridRef.current && (() => {
         const grid = gridRef.current;
         const rect = grid.getBoundingClientRect();
         const dayWidth = (rect.width - 56) / 7;
@@ -835,7 +849,7 @@ export default function CalendarPage() {
       })()}
 
       {/* ── Anytime tasks for the selected day ── */}
-      {ready && view === "week" && (
+      {rangeReady && view === "week" && (
         <section className="mt-6">
           <div className="flex flex-wrap items-center gap-3 mb-3">
             <div className="flex items-center gap-3">
@@ -918,7 +932,7 @@ export default function CalendarPage() {
       )}
 
       {/* ── Focus ── */}
-      {ready && view === "focus" && (
+      {rangeReady && view === "focus" && (
         <FocusView
           queue={focusQueue}
           onComplete={(occurrence) => toggleDone(occurrence)}
