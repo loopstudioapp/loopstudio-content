@@ -33,6 +33,10 @@
       "schedule": "59 16 * * *"
     },
     {
+      "path": "/api/openrouter-costs?refresh=1",
+      "schedule": "5 0 * * *"
+    },
+    {
       "path": "/api/game-studio?refresh=1",
       "schedule": "0 17 * * *"
     }

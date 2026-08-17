@@ -5,6 +5,10 @@ import {
   type RevenueAdjustmentKind,
 } from "@/lib/revenuecat/adjustments";
 import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
+import {
+  readOpenRouterDailyCosts,
+  refreshOpenRouterCurrentCost,
+} from "@/lib/openrouter/costs";
 
 export const maxDuration = 300;
 
@@ -549,69 +553,6 @@ export type DailyPoint = {
   refund_source_amount: number;
   refund_source_reversed_amount: number;
 };
-
-type OpenRouterKey = {
-  name?: string;
-  hash?: string;
-  usage_daily?: number | string | null;
-};
-
-type OpenRouterActivity = {
-  date?: string;
-  usage?: number | string | null;
-};
-
-async function fetchOpenRouterCostsByDate(): Promise<Record<string, number>> {
-  const managementKey = process.env.OPENROUTER_MANAGEMENT_API_KEY;
-  const keyName = process.env.OPENROUTER_GRAILSCAN_KEY_NAME || "Sports Card Scanner";
-  if (!managementKey) throw new Error("OpenRouter management API is not configured");
-
-  const headers = { Authorization: `Bearer ${managementKey}` };
-  const keysResponse = await fetch("https://openrouter.ai/api/v1/keys", {
-    headers,
-    cache: "no-store",
-  });
-  if (!keysResponse.ok) {
-    throw new Error(`OpenRouter key query failed: ${keysResponse.status}`);
-  }
-
-  const keysJson = (await keysResponse.json()) as { data?: OpenRouterKey[] };
-  const matchingKeys = (keysJson.data || []).filter((key) => key.name === keyName && key.hash);
-  if (matchingKeys.length === 0) throw new Error(`OpenRouter key not found: ${keyName}`);
-
-  const activityResponses = await Promise.all(
-    matchingKeys.map(async (key) => {
-      const url = new URL("https://openrouter.ai/api/v1/activity");
-      url.searchParams.set("api_key_hash", key.hash!);
-      const response = await fetch(url, { headers, cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`OpenRouter activity query failed: ${response.status}`);
-      }
-      const json = (await response.json()) as { data?: OpenRouterActivity[] };
-      return json.data || [];
-    })
-  );
-
-  const costsByDate: Record<string, number> = {};
-  const currentUtcDate = new Date().toISOString().slice(0, 10);
-  for (const point of activityResponses.flat()) {
-    const date = point.date?.slice(0, 10);
-    const cost = Number(point.usage || 0);
-    // Activity contains completed UTC days. The live UTC day comes from
-    // usage_daily below, so ignore it here if the API starts returning it.
-    if (date && date !== currentUtcDate && Number.isFinite(cost)) {
-      costsByDate[date] = (costsByDate[date] || 0) + cost;
-    }
-  }
-
-  for (const key of matchingKeys) {
-    const currentCost = Number(key.usage_daily || 0);
-    if (Number.isFinite(currentCost)) {
-      costsByDate[currentUtcDate] = (costsByDate[currentUtcDate] || 0) + currentCost;
-    }
-  }
-  return costsByDate;
-}
 
 type RcProject = (typeof RC_PROJECTS)[number];
 type RcList<T> = { items?: T[]; next_page?: string | null };
@@ -1253,6 +1194,63 @@ async function writeTodayStatsCache(data: TodayStatsResponse, appName?: string) 
   );
 }
 
+function embeddedOpenRouterCosts(daily: DailyPoint[] | undefined): Record<string, number> {
+  return Object.fromEntries(
+    (daily || []).map((point) => [point.date, Number(point.openrouter_cost) || 0])
+  );
+}
+
+async function loadOpenRouterCostsByDate(
+  dates: string[],
+  fallbackDaily: DailyPoint[] | undefined,
+  refreshCurrent: boolean
+): Promise<Record<string, number>> {
+  const costsByDate = embeddedOpenRouterCosts(fallbackDaily);
+
+  try {
+    const saved = await readOpenRouterDailyCosts("GrailScan", dates);
+    Object.assign(costsByDate, saved.costsByDate);
+  } catch {
+    // Preserve costs embedded in the last dashboard snapshot if the independent
+    // cache is temporarily unavailable.
+  }
+
+  if (refreshCurrent) {
+    try {
+      const current = await refreshOpenRouterCurrentCost("GrailScan");
+      Object.assign(costsByDate, current.costsByDate);
+    } catch {
+      // A failed live query must not turn a previously reconciled day into zero.
+    }
+  }
+
+  return costsByDate;
+}
+
+function overlayOpenRouterCosts(
+  data: TodayStatsResponse,
+  costsByDate: Record<string, number>
+): TodayStatsResponse {
+  const daily = data.daily.map((point) => {
+    if (!(point.date in costsByDate)) return point;
+    const nextCost = costsByDate[point.date];
+    const previousCost = Number(point.openrouter_cost) || 0;
+    return {
+      ...point,
+      openrouter_cost: nextCost,
+      profit: point.profit + previousCost - nextCost,
+    };
+  });
+  const todayPoint = daily.find((point) => point.date === data.today_vn);
+  return {
+    ...data,
+    daily,
+    profit: todayPoint
+      ? { ...data.profit, total_profit: todayPoint.profit }
+      : data.profit,
+  };
+}
+
 function sumTodayRevenue(perApp: Record<string, TodayPerApp>, appName?: string): {
   totalRevenue: number;
   newRevenue: number;
@@ -1323,12 +1321,13 @@ async function fetchFastTodayStatsFromDb(
   appName?: string
 ): Promise<TodayStatsResponse> {
   const today = vnDateIso();
+  const dates = vnDateWindow(today, 30);
   const { startUtc, endUtc } = vnDayBoundsUtc(today);
 
   const appleRate = parseFloat(process.env.APPLE_COMMISSION_RATE || "0.15");
   const metaVat = META_VAT_RATE;
 
-  const [mrrByApp, freshAds, newSubsResult, renewalsResult] = await Promise.all([
+  const [mrrByApp, freshAds, newSubsResult, renewalsResult, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
     getTodayMetaSpend(),
     supabase
@@ -1342,6 +1341,9 @@ async function fetchFastTodayStatsFromDb(
       .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
       .gte("occurred_at", startUtc)
       .lt("occurred_at", endUtc),
+    appName === "GrailScan"
+      ? loadOpenRouterCostsByDate(dates, cachedData?.daily, true)
+      : Promise.resolve({}),
   ]);
 
   if (newSubsResult.error) throw new Error(`Database error: ${newSubsResult.error.message}`);
@@ -1401,7 +1403,7 @@ async function fetchFastTodayStatsFromDb(
   const { totalRevenue, newRevenue, newSubs } = sumTodayRevenue(perApp, appName);
   const profit = profitSummaryFromRevenue({ totalRevenue, newRevenue, newSubs, ads, appleRate, metaVat });
   const cachedByDate = new Map((cachedData?.daily || []).map((point) => [point.date, point]));
-  const cachedDaily = vnDateWindow(today, 30).map((date): DailyPoint => {
+  const cachedDaily = dates.map((date): DailyPoint => {
     const point = cachedByDate.get(date);
     const savedHiggsfieldCost = Number(point?.higgsfield_cost);
     const previousHiggsfieldCost = Number.isFinite(savedHiggsfieldCost) ? savedHiggsfieldCost : 0;
@@ -1500,7 +1502,10 @@ async function fetchFastTodayStatsFromDb(
     daily_refund_cost: dailyRefundCost,
   };
 
-  return { today_vn: today, per_app: perApp, transactions, ads, profit: profitWithRefund, daily };
+  const data = { today_vn: today, per_app: perApp, transactions, ads, profit: profitWithRefund, daily };
+  return appName === "GrailScan"
+    ? overlayOpenRouterCosts(data, openRouterCostsByDate)
+    : data;
 }
 
 async function fetchTodayStats(
@@ -1521,7 +1526,9 @@ async function fetchTodayStats(
     getTodayMetaSpend(),
     getMetaSpendByDay(start, today),
     fetchTransactionLedger(start, endExclusive, appName),
-    appName === "GrailScan" ? fetchOpenRouterCostsByDate() : Promise.resolve({}),
+    appName === "GrailScan"
+      ? loadOpenRouterCostsByDate(dates, cachedData?.daily, false)
+      : Promise.resolve({}),
   ]);
   const ads = preserveCachedMetaSpend(freshAds, cachedData, today);
 
@@ -1553,7 +1560,7 @@ async function fetchTodayStats(
     (todayPoint?.refund_amount || 0) - (todayPoint?.refund_reversed_amount || 0);
   const profitWithRefund = {
     ...profit,
-    total_profit: profit.total_profit - dailyRefundCost,
+    total_profit: todayPoint?.profit ?? profit.total_profit - dailyRefundCost,
     daily_refund_cost: dailyRefundCost,
   };
 
@@ -1612,7 +1619,17 @@ export async function GET(request: NextRequest) {
       if (!forceRefresh) {
         const cached = await readTodayStatsCache(requestedApp);
         if (cached?.data?.today_vn === vnDateIso()) {
-          return NextResponse.json({ ...cached.data, cached: true, updated_at: cached.updatedAt });
+          const data = requestedApp === "GrailScan"
+            ? overlayOpenRouterCosts(
+                cached.data,
+                await loadOpenRouterCostsByDate(
+                  cached.data.daily.map((point) => point.date),
+                  cached.data.daily,
+                  false
+                )
+              )
+            : cached.data;
+          return NextResponse.json({ ...data, cached: true, updated_at: cached.updatedAt });
         }
         if (cachedOnly && cached?.data?.today_vn !== vnDateIso()) {
           return NextResponse.json({ error: "cached today_stats is stale" }, { status: 404 });
@@ -1631,15 +1648,28 @@ export async function GET(request: NextRequest) {
       const cached = await readTodayStatsCache(requestedApp);
       try {
         const refreshed = await fetchTodayStats(requestedApp, cached?.data || null);
-        const data = cached?.data?.today_vn === refreshed.today_vn
+        const merged = cached?.data?.today_vn === refreshed.today_vn
           ? { ...cached.data, daily: refreshed.daily }
           : refreshed;
+        const data = requestedApp === "GrailScan"
+          ? overlayOpenRouterCosts(merged, embeddedOpenRouterCosts(refreshed.daily))
+          : merged;
         await writeTodayStatsCache(data, requestedApp);
         return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
       } catch (refreshError) {
         if (cached?.data?.today_vn === vnDateIso()) {
+          const data = requestedApp === "GrailScan"
+            ? overlayOpenRouterCosts(
+                cached.data,
+                await loadOpenRouterCostsByDate(
+                  cached.data.daily.map((point) => point.date),
+                  cached.data.daily,
+                  false
+                )
+              )
+            : cached.data;
           return NextResponse.json({
-            ...cached.data,
+            ...data,
             cached: true,
             stale: true,
             refresh_error: publicRevenueCatError(refreshError),
