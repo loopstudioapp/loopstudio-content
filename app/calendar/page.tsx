@@ -2,7 +2,7 @@
 
 import { Check, ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FocusView from "./FocusView";
 import PinGate, { hasPin } from "./PinGate";
 import TaskModal from "./TaskModal";
@@ -291,6 +291,11 @@ export default function CalendarPage() {
   const categoryFocusQueue = useMemo(
     () => workCategory ? focusQueue.filter((occurrence) => occurrence.task.category === workCategory) : focusQueue,
     [focusQueue, workCategory],
+  );
+
+  const allTaskFocusQueue = useMemo(
+    () => focusQueue.filter((occurrence) => occurrence.task.priority !== 1),
+    [focusQueue],
   );
 
   const filteredAnytimeList = useMemo(
@@ -892,42 +897,49 @@ export default function CalendarPage() {
 
           {filteredAnytimeList.length ? (
             <div className="space-y-1.5">
-              {filteredAnytimeList.map((occurrence) => {
+              {filteredAnytimeList.map((occurrence, index) => {
                 const accent = CATEGORY_COLOR[occurrence.task.category];
+                const startsPriorityOne = occurrence.task.priority === 1
+                  && index > 0
+                  && filteredAnytimeList[index - 1].task.priority !== 1;
                 return (
-                  <div
-                    key={occurrence.key}
-                    className="flex items-center gap-3 bg-[#2a2a2a] border border-[#333] rounded-lg px-3 py-2.5"
-                  >
-                    <button
-                      onClick={() => toggleDone(occurrence)}
-                      title="Mark done"
-                      className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
-                    />
-                    <button
-                      onClick={() => setModal({
-                        task: occurrence.task,
-                        date: selected,
-                        occurrenceDate: occurrence.completionDate,
-                      })}
-                      className="flex-1 min-w-0 text-left"
+                  <Fragment key={occurrence.key}>
+                    {startsPriorityOne && (
+                      <div role="separator" aria-label="Priority 1 tasks" className="my-4 border-t border-white" />
+                    )}
+                    <div
+                      className="flex items-center gap-3 bg-[#2a2a2a] border border-[#333] rounded-lg px-3 py-2.5"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-white truncate">
-                          {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
-                          {occurrence.task.title}
-                        </span>
-                        {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
-                        <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
-                        <span>·</span>
-                        <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
-                        <span>·</span>
-                        <span>P{occurrence.task.priority}</span>
-                      </div>
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => toggleDone(occurrence)}
+                        title="Mark done"
+                        className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
+                      />
+                      <button
+                        onClick={() => setModal({
+                          task: occurrence.task,
+                          date: selected,
+                          occurrenceDate: occurrence.completionDate,
+                        })}
+                        className="flex-1 min-w-0 text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white truncate">
+                            {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
+                            {occurrence.task.title}
+                          </span>
+                          {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
+                          <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
+                          <span>·</span>
+                          <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
+                          <span>·</span>
+                          <span>P{occurrence.task.priority}</span>
+                        </div>
+                      </button>
+                    </div>
+                  </Fragment>
                 );
               })}
             </div>
@@ -944,7 +956,7 @@ export default function CalendarPage() {
       {/* ── Focus ── */}
       {rangeReady && view === "focus" && (
         <FocusView
-          queue={focusQueue}
+          queue={allTaskFocusQueue}
           onComplete={(occurrence) => toggleDone(occurrence)}
         />
       )}
