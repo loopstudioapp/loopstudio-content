@@ -106,7 +106,7 @@ export default function CalendarPage() {
   const [loadedWindow, setLoadedWindow] = useState<{ from: string; to: string } | null>(null);
   const [workCategory, setWorkCategory] = useState<Category | null>(null);
   const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
-  const [priorityOneCollapsed, setPriorityOneCollapsed] = useState(false);
+  const [priorityOneCollapsed, setPriorityOneCollapsed] = useState(true);
   // null until the cookie has been read, so the gate never flashes.
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
