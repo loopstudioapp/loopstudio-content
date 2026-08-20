@@ -106,6 +106,7 @@ export default function CalendarPage() {
   const [loadedWindow, setLoadedWindow] = useState<{ from: string; to: string } | null>(null);
   const [workCategory, setWorkCategory] = useState<Category | null>(null);
   const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
+  const [priorityOneCollapsed, setPriorityOneCollapsed] = useState(false);
   // null until the cookie has been read, so the gate never flashes.
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -899,46 +900,59 @@ export default function CalendarPage() {
             <div className="space-y-1.5">
               {filteredAnytimeList.map((occurrence, index) => {
                 const accent = CATEGORY_COLOR[occurrence.task.category];
-                const startsPriorityOne = occurrence.task.priority === 1
-                  && index > 0
-                  && filteredAnytimeList[index - 1].task.priority !== 1;
+                const isPriorityOne = occurrence.task.priority === 1;
+                const startsPriorityOne = isPriorityOne
+                  && (index === 0 || filteredAnytimeList[index - 1].task.priority !== 1);
                 return (
                   <Fragment key={occurrence.key}>
                     {startsPriorityOne && (
-                      <div role="separator" aria-label="Priority 1 tasks" className="my-4 border-t border-white" />
-                    )}
-                    <div
-                      className="flex items-center gap-3 bg-[#2a2a2a] border border-[#333] rounded-lg px-3 py-2.5"
-                    >
                       <button
-                        onClick={() => toggleDone(occurrence)}
-                        title="Mark done"
-                        className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
-                      />
-                      <button
-                        onClick={() => setModal({
-                          task: occurrence.task,
-                          date: selected,
-                          occurrenceDate: occurrence.completionDate,
-                        })}
-                        className="flex-1 min-w-0 text-left"
+                        type="button"
+                        aria-expanded={!priorityOneCollapsed}
+                        title={priorityOneCollapsed ? "Show priority 1 tasks" : "Hide priority 1 tasks"}
+                        onClick={() => setPriorityOneCollapsed((collapsed) => !collapsed)}
+                        className="group my-2 flex h-6 w-full items-center"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-white truncate">
-                            {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
-                            {occurrence.task.title}
-                          </span>
-                          {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
-                          <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
-                          <span>·</span>
-                          <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
-                          <span>·</span>
-                          <span>P{occurrence.task.priority}</span>
-                        </div>
+                        <span className="h-px w-full bg-white transition-opacity group-hover:opacity-70" />
+                        <span className="sr-only">
+                          {priorityOneCollapsed ? "Show priority 1 tasks" : "Hide priority 1 tasks"}
+                        </span>
                       </button>
-                    </div>
+                    )}
+                    {(!isPriorityOne || !priorityOneCollapsed) && (
+                      <div
+                        className="flex items-center gap-3 bg-[#2a2a2a] border border-[#333] rounded-lg px-3 py-2.5"
+                      >
+                        <button
+                          onClick={() => toggleDone(occurrence)}
+                          title="Mark done"
+                          className="w-5 h-5 rounded-full border border-[#555] shrink-0 hover:border-[#22c55e] transition-colors"
+                        />
+                        <button
+                          onClick={() => setModal({
+                            task: occurrence.task,
+                            date: selected,
+                            occurrenceDate: occurrence.completionDate,
+                          })}
+                          className="flex-1 min-w-0 text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-white truncate">
+                              {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
+                              {occurrence.task.title}
+                            </span>
+                            {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
+                            <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
+                            <span>·</span>
+                            <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
+                            <span>·</span>
+                            <span>P{occurrence.task.priority}</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
                   </Fragment>
                 );
               })}
