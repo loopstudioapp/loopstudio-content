@@ -795,7 +795,6 @@ export default function CalendarPage() {
                               occurrence.done ? "text-[#b0b0b0] line-through" : "text-white"
                             }`}
                           >
-                            {occurrence.rolledFrom && <span className="text-[#f59e0b]">↷ </span>}
                             {occurrence.task.recurrence !== "none" && (
                               <Repeat2
                                 size={9}
@@ -945,7 +944,6 @@ export default function CalendarPage() {
                         >
                           <div className="flex items-center gap-2">
                             <span className="text-sm text-white truncate">
-                              {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
                               {occurrence.task.title}
                             </span>
                             {occurrence.task.recurrence !== "none" && (
