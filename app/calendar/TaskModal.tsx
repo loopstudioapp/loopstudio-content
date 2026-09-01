@@ -93,7 +93,10 @@ export default function TaskModal({
   const [priority, setPriority] = useState(task?.priority ?? 5);
   const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? defaultEstimate ?? 30));
   const [recurrence, setRecurrence] = useState<Recurrence>(task?.recurrence || "none");
-  const [timed, setTimed] = useState(task ? task.timed : true);
+  // The toolbar's + Task button creates anytime work by default. Creating by
+  // tapping or dragging the calendar grid still carries a concrete time and
+  // therefore opens as a timed task.
+  const [timed, setTimed] = useState(task ? task.timed : Boolean(defaultTime));
   const [pinFirst, setPinFirst] = useState(task?.pin_first ?? false);
   const [date, setDate] = useState(task?.start_date || defaultDate);
   const [time, setTime] = useState(task?.start_time || defaultTime || DEFAULT_TIME);

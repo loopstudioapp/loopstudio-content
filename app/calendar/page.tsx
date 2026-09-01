@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, Flag, Plus } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat2 } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FocusView from "./FocusView";
@@ -796,6 +796,13 @@ export default function CalendarPage() {
                             }`}
                           >
                             {occurrence.rolledFrom && <span className="text-[#f59e0b]">↷ </span>}
+                            {occurrence.task.recurrence !== "none" && (
+                              <Repeat2
+                                size={9}
+                                className="mr-1 inline text-[#d4d4d4]"
+                                aria-label="Recurring task"
+                              />
+                            )}
                             {occurrence.task.title}
                           </p>
                           {height > 30 && (
@@ -941,6 +948,9 @@ export default function CalendarPage() {
                               {occurrence.rolledFrom && <span className="text-[#fbbf24]">↷ </span>}
                               {occurrence.task.title}
                             </span>
+                            {occurrence.task.recurrence !== "none" && (
+                              <Repeat2 size={12} className="shrink-0" style={{ color: accent }} aria-label="Recurring task" />
+                            )}
                             {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">

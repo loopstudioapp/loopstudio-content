@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Flag, Pause, Play, SkipForward } from "lucide-react";
+import { Check, Flag, Pause, Play, Repeat2, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CATEGORY_COLOR,
@@ -157,6 +157,14 @@ export default function FocusView({
             {current.isGate && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-[#f59e0b] bg-[#f59e0b]/10 px-2 py-0.5 rounded-md">
                 <Flag size={10} /> Must finish first
+              </span>
+            )}
+            {current.task.recurrence !== "none" && (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md"
+                style={{ color: accent, background: `${accent}1a` }}
+              >
+                <Repeat2 size={10} /> Recurring
               </span>
             )}
             <span className="ml-auto text-[11px] text-[#8f8f8f]">
