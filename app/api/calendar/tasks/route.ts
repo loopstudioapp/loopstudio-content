@@ -73,6 +73,27 @@ function buildRow(body: Record<string, unknown>) {
   return row;
 }
 
+async function demoteOtherMostImportantTasks(selectedId: string) {
+  return supabase
+    .from("calendar_tasks")
+    .update({ priority: 9 })
+    .eq("priority", 10)
+    .is("deleted_at", null)
+    .neq("id", selectedId)
+    .select("id");
+}
+
+async function mostImportantResponse(task: Record<string, unknown>) {
+  const demoted = await demoteOtherMostImportantTasks(String(task.id));
+  if (demoted.error) {
+    return NextResponse.json({ error: demoted.error.message }, { status: 500 });
+  }
+  return NextResponse.json({
+    task,
+    demoted_ids: (demoted.data || []).map((row) => row.id),
+  });
+}
+
 /** GET /api/calendar/tasks?from=YYYY-MM-DD&to=YYYY-MM-DD */
 export async function GET(request: NextRequest) {
   const from = request.nextUrl.searchParams.get("from");
@@ -220,13 +241,31 @@ export async function POST(request: NextRequest) {
       { status: missing ? 503 : 500 },
     );
   }
-  return NextResponse.json({ task: data });
+  if (data.priority === 10) return mostImportantResponse(data);
+  return NextResponse.json({ task: data, demoted_ids: [] });
 }
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const id = String(body.id || "");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+
+  // The Task view uses this small action so choosing a focus task does not
+  // need to resubmit (and potentially overwrite) the rest of its fields.
+  if (body.action === "choose_most_important") {
+    const { data, error } = await supabase
+      .from("calendar_tasks")
+      .update({ priority: 10 })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return mostImportantResponse(data);
+  }
 
   const row = buildRow(body);
   if (!row.title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -245,7 +284,8 @@ export async function PATCH(request: NextRequest) {
       { status: missing ? 503 : 500 },
     );
   }
-  return NextResponse.json({ task: data });
+  if (data.priority === 10) return mostImportantResponse(data);
+  return NextResponse.json({ task: data, demoted_ids: [] });
 }
 
 /** Soft delete — the row and its completion history stay in the database. */

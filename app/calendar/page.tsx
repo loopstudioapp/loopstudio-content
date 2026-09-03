@@ -4,6 +4,7 @@ import { Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat2 } from "lucide-re
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FocusView from "./FocusView";
+import MostImportantChooser, { MostImportantPrompt } from "./MostImportantChooser";
 import PinGate, { hasPin } from "./PinGate";
 import TaskModal from "./TaskModal";
 import {
@@ -107,6 +108,9 @@ export default function CalendarPage() {
   const [workCategory, setWorkCategory] = useState<Category | null>(null);
   const [anytimeCategory, setAnytimeCategory] = useState<Category | "all">("all");
   const [priorityOneCollapsed, setPriorityOneCollapsed] = useState(true);
+  const [showMostImportantChooser, setShowMostImportantChooser] = useState(false);
+  const [choosingMostImportantId, setChoosingMostImportantId] = useState<string | null>(null);
+  const [mostImportantError, setMostImportantError] = useState<string | null>(null);
   // null until the cookie has been read, so the gate never flashes.
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -294,10 +298,61 @@ export default function CalendarPage() {
     [focusQueue, workCategory],
   );
 
-  const allTaskFocusQueue = useMemo(
-    () => focusQueue.filter((occurrence) => occurrence.task.priority !== 1),
-    [focusQueue],
+  // Choosing the day's P10 must include every unfinished task, including P1
+  // and timed work outside its active window. Selecting one promotes it into
+  // the sole focus slot; the normal time-aware queue remains unchanged for the
+  // category work shortcuts.
+  const mostImportantCandidates = useMemo(() => {
+    const unique = new Map<string, Occurrence>();
+    for (const occurrence of occurrencesOn(tasks, selected, done, today, skips, overrides)) {
+      if (!occurrence.done && !unique.has(occurrence.task.id)) {
+        unique.set(occurrence.task.id, occurrence);
+      }
+    }
+    return [...unique.values()].sort((a, b) =>
+      b.task.priority - a.task.priority ||
+      Number(b.task.pin_first) - Number(a.task.pin_first) ||
+      a.minutes - b.minutes ||
+      a.task.created_at.localeCompare(b.task.created_at),
+    );
+  }, [tasks, selected, done, today, skips, overrides]);
+
+  const mostImportantTasks = useMemo(
+    () => mostImportantCandidates.filter((occurrence) => occurrence.task.priority === 10),
+    [mostImportantCandidates],
   );
+  const priorityTenTaskCount = useMemo(
+    () => tasks.filter((task) => task.priority === 10).length,
+    [tasks],
+  );
+  const hasOneMostImportant = priorityTenTaskCount === 1 && mostImportantTasks.length === 1;
+
+  const chooseMostImportant = useCallback(async (occurrence: Occurrence) => {
+    setChoosingMostImportantId(occurrence.task.id);
+    setMostImportantError(null);
+    try {
+      const response = await fetch("/api/calendar/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "choose_most_important", id: occurrence.task.id }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not choose that task");
+
+      const selectedTask = normalizeTask(result.task);
+      const demoted = new Set<string>(result.demoted_ids || []);
+      setTasks((current) => current.map((task) => {
+        if (task.id === selectedTask.id) return selectedTask;
+        return demoted.has(task.id) ? { ...task, priority: 9 } : task;
+      }));
+      setShowMostImportantChooser(false);
+      await load(true);
+    } catch (err) {
+      setMostImportantError(err instanceof Error ? err.message : "Could not choose that task");
+    } finally {
+      setChoosingMostImportantId(null);
+    }
+  }, [load]);
 
   const filteredAnytimeList = useMemo(
     () => anytimeCategory === "all"
@@ -977,9 +1032,31 @@ export default function CalendarPage() {
 
       {/* ── Focus ── */}
       {rangeReady && view === "focus" && (
-        <FocusView
-          queue={allTaskFocusQueue}
-          onComplete={(occurrence) => toggleDone(occurrence)}
+        mostImportantCandidates.length === 0 ? (
+          <FocusView queue={[]} onComplete={(occurrence) => toggleDone(occurrence)} />
+        ) : hasOneMostImportant ? (
+          <FocusView
+            queue={[mostImportantTasks[0]]}
+            onComplete={(occurrence) => toggleDone(occurrence)}
+          />
+        ) : (
+          <MostImportantPrompt
+            conflicting={priorityTenTaskCount > 1 || mostImportantTasks.length > 1}
+            onChoose={() => {
+              setMostImportantError(null);
+              setShowMostImportantChooser(true);
+            }}
+          />
+        )
+      )}
+
+      {showMostImportantChooser && (
+        <MostImportantChooser
+          candidates={mostImportantCandidates}
+          savingId={choosingMostImportantId}
+          error={mostImportantError}
+          onChoose={chooseMostImportant}
+          onClose={() => setShowMostImportantChooser(false)}
         />
       )}
 
