@@ -2,7 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 
 type Category = "Real Estate" | "Business" | "Other";
-type Status = "Income" | "Upcoming" | "Idle" | "Bad investment";
+type Status = "Income" | "Upcoming" | "Idle" | "Bad investment" | "Liability";
 
 type Investment = {
   name: string;
@@ -26,15 +26,23 @@ const investments: Investment[] = [
     status: "Upcoming",
   },
   {
-    name: "Smart City S105",
-    detail: "Podium retail unit",
+    name: "ALC 307",
+    detail: "Da Nang condotel",
     category: "Real Estate",
-    valueVnd: 6_300_000_000,
-    currentMonthlyVnd: 23_000_000,
+    valueVnd: 7_000_000_000,
+    currentMonthlyVnd: 16_000_000,
     status: "Income",
   },
   {
-    name: "A La Carte Condotel",
+    name: "Smart City S105",
+    detail: "Podium retail unit",
+    category: "Real Estate",
+    valueVnd: 5_600_000_000,
+    currentMonthlyVnd: 0,
+    status: "Idle",
+  },
+  {
+    name: "ALC 710",
     detail: "Da Nang condotel",
     category: "Real Estate",
     valueVnd: 5_000_000_000,
@@ -69,7 +77,8 @@ const investments: Investment[] = [
     detail: "Game studio",
     category: "Business",
     valueVnd: 1_200_000_000,
-    status: "Idle",
+    currentMonthlyVnd: 100_000_000,
+    status: "Income",
   },
   {
     name: "Ket Coffee Shop",
@@ -92,6 +101,14 @@ const investments: Investment[] = [
     valueVnd: 400_000_000,
     status: "Bad investment",
   },
+  {
+    name: "Debt",
+    detail: "Liability",
+    category: "Other",
+    valueVnd: -3_300_000_000,
+    currentMonthlyVnd: 0,
+    status: "Liability",
+  },
 ];
 
 const categoryMeta: Record<Category, { color: string }> = {
@@ -101,6 +118,8 @@ const categoryMeta: Record<Category, { color: string }> = {
 };
 
 const totalValue = investments.reduce((sum, item) => sum + item.valueVnd, 0);
+const assetInvestments = investments.filter((item) => item.valueVnd > 0);
+const grossAssetValue = assetInvestments.reduce((sum, item) => sum + item.valueVnd, 0);
 const currentMonthly = investments.reduce((sum, item) => sum + (item.currentMonthlyVnd || 0), 0);
 const futureMonthly = investments.reduce((sum, item) => sum + (item.futureMonthlyVnd || 0), 0);
 const projectedMonthly = currentMonthly + futureMonthly;
@@ -113,7 +132,7 @@ const badExposure = investments
   .reduce((sum, item) => sum + item.valueVnd, 0);
 
 const categories = (["Real Estate", "Business", "Other"] as Category[]).map((name) => {
-  const holdings = investments.filter((item) => item.category === name);
+  const holdings = assetInvestments.filter((item) => item.category === name);
   return {
     name,
     holdings,
@@ -121,17 +140,25 @@ const categories = (["Real Estate", "Business", "Other"] as Category[]).map((nam
   };
 });
 
+const currentIncomeHoldings = investments
+  .filter((item) => (item.currentMonthlyVnd || 0) > 0)
+  .sort((a, b) => (b.currentMonthlyVnd || 0) - (a.currentMonthlyVnd || 0));
+const cashflowColors = ["#176534", "#6d28d9", "#16626b", "#77520c", "#4f46e5"];
+
 function compactVnd(value: number, digits = 1) {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(digits).replace(/\.0$/, "")}B`;
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000_000) {
+    return `${sign}${(absolute / 1_000_000_000).toFixed(digits).replace(/\.?0+$/, "")}B`;
   }
-  return `${Math.round(value / 1_000_000)}M`;
+  return `${sign}${Math.round(absolute / 1_000_000)}M`;
 }
 
 function usd(valueVnd: number) {
-  const value = valueVnd / USD_TO_VND;
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  return `$${Math.round(value).toLocaleString("en-US")}`;
+  const sign = valueVnd < 0 ? "-" : "";
+  const value = Math.abs(valueVnd) / USD_TO_VND;
+  if (value >= 1_000_000) return `${sign}$${(value / 1_000_000).toFixed(2)}M`;
+  return `${sign}$${Math.round(value).toLocaleString("en-US")}`;
 }
 
 function percentage(value: number, total = totalValue) {
@@ -148,6 +175,7 @@ function StatusBadge({ status }: { status: Status }) {
     Upcoming: "border-[#3b82f6]/30 bg-[#3b82f6]/10 text-[#60a5fa]",
     Idle: "border-[#333] bg-[#1a1a1a] text-[#737373]",
     "Bad investment": "border-[#ef4444]/30 bg-[#ef4444]/10 text-[#f87171]",
+    Liability: "border-[#ef4444]/30 bg-[#ef4444]/10 text-[#f87171]",
   };
 
   return (
@@ -176,7 +204,7 @@ export default function PortfolioPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white text-xs font-black text-black">LS</div>
             <div>
               <p className="text-sm font-semibold text-white">Personal portfolio</p>
-              <p className="text-[10px] text-[#5f5f5f]">10 holdings across 3 asset classes</p>
+              <p className="text-[10px] text-[#5f5f5f]">{investments.length} entries across 3 asset classes</p>
             </div>
           </div>
           <nav aria-label="Main navigation">
@@ -192,7 +220,7 @@ export default function PortfolioPage() {
 
         <section className="grid gap-10 border-b border-[#202020] py-12 lg:grid-cols-[1.35fr_1fr] lg:items-end lg:py-16">
           <div>
-            <p className="mb-4 text-[10px] font-semibold uppercase text-[#737373]">Total portfolio value</p>
+            <p className="mb-4 text-[10px] font-semibold uppercase text-[#737373]">Net portfolio value</p>
             <h1 className="text-[clamp(3.2rem,9vw,7rem)] font-semibold leading-[0.86] text-white">
               {compactVnd(totalValue, 2)}
               <span className="ml-2 text-[0.22em] font-medium text-[#737373]">VND</span>
@@ -223,8 +251,8 @@ export default function PortfolioPage() {
             {categories.map((category) => (
               <div
                 key={category.name}
-                style={{ width: percentage(category.value), backgroundColor: categoryMeta[category.name].color }}
-                title={`${category.name}: ${percentage(category.value)}`}
+                style={{ width: percentage(category.value, grossAssetValue), backgroundColor: categoryMeta[category.name].color }}
+                title={`${category.name}: ${percentage(category.value, grossAssetValue)}`}
               />
             ))}
           </div>
@@ -240,7 +268,7 @@ export default function PortfolioPage() {
                   <p className="mt-2 text-xs text-[#5f5f5f]">{category.holdings.length} {category.holdings.length === 1 ? "holding" : "holdings"}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-lg font-semibold text-white">{percentage(category.value)}</p>
+                  <p className="text-lg font-semibold text-white">{percentage(category.value, grossAssetValue)}</p>
                   <p className="mt-1 text-xs text-[#5f5f5f]">{compactVnd(category.value, 2)} VND</p>
                 </div>
               </div>
@@ -279,13 +307,25 @@ export default function PortfolioPage() {
                 <span className="font-semibold text-white">{compactVnd(currentMonthly)} VND</span>
               </div>
               <div className="flex h-9 overflow-hidden rounded-md bg-[#171717]">
-                <div className="flex items-center justify-center bg-[#176534] text-[10px] font-semibold text-white" style={{ width: `${(100_000_000 / currentMonthly) * 100}%` }}>TPL</div>
-                <div className="flex items-center justify-center bg-[#16626b] text-[10px] font-semibold text-white" style={{ width: `${(60_000_000 / currentMonthly) * 100}%` }}>Loop</div>
-                <div className="flex items-center justify-center bg-[#77520c] text-[10px] font-semibold text-white" style={{ width: `${(20_000_000 / currentMonthly) * 100}%` }}>A La Carte</div>
-                <div className="flex items-center justify-center bg-[#4f46e5] text-[10px] font-semibold text-white" style={{ width: `${(23_000_000 / currentMonthly) * 100}%` }}>S105</div>
+                {currentIncomeHoldings.map((item, index) => (
+                  <div
+                    key={item.name}
+                    className="flex items-center justify-center overflow-hidden whitespace-nowrap px-1 text-[10px] font-semibold text-white"
+                    style={{
+                      width: `${((item.currentMonthlyVnd || 0) / currentMonthly) * 100}%`,
+                      backgroundColor: cashflowColors[index % cashflowColors.length],
+                    }}
+                  >
+                    {item.name === "Loop Studio" ? "Loop" : item.name}
+                  </div>
+                ))}
               </div>
-              <div className="mt-2 grid grid-cols-4 gap-2 text-[10px] text-[#525252]">
-                <span>TPL 100M</span><span className="text-center">Loop 60M</span><span className="text-center">A La Carte 20M</span><span className="text-right">S105 23M</span>
+              <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[10px] text-[#525252]">
+                {currentIncomeHoldings.map((item) => (
+                  <span key={item.name}>
+                    {item.name === "Loop Studio" ? "Loop" : item.name} {compactVnd(item.currentMonthlyVnd || 0)}
+                  </span>
+                ))}
               </div>
             </div>
 
@@ -346,7 +386,8 @@ export default function PortfolioPage() {
                 <tbody>
                   {investments.map((item) => {
                     const cashflow = item.currentMonthlyVnd || item.futureMonthlyVnd || 0;
-                    const cashflowLabel = item.currentMonthlyVnd ? "per month" : item.futureMonthlyVnd ? "future / month" : "no cashflow";
+                    const hasCashflowValue = item.currentMonthlyVnd !== undefined || item.futureMonthlyVnd !== undefined;
+                    const cashflowLabel = item.currentMonthlyVnd !== undefined ? "per month" : item.futureMonthlyVnd ? "future / month" : "no cashflow";
                     const holdingYield = cashflow ? (cashflow * 12 * 100) / item.valueVnd : 0;
                     return (
                       <tr key={item.name} className="border-b border-[#292929] last:border-b-0">
@@ -366,7 +407,7 @@ export default function PortfolioPage() {
                         </td>
                         <td className="px-4 py-5 text-right align-middle">
                           <p className={`whitespace-nowrap text-sm font-semibold tabular-nums ${item.futureMonthlyVnd ? "text-[#60a5fa]" : cashflow ? "text-[#4ade80]" : "text-[#525252]"}`}>
-                            {cashflow ? `${item.futureMonthlyVnd ? "+" : ""}${compactVnd(cashflow)} VND` : "-"}
+                            {hasCashflowValue ? `${item.futureMonthlyVnd ? "+" : ""}${compactVnd(cashflow)} VND` : "-"}
                           </p>
                           <p className="mt-1 text-[10px] text-[#666]">{cashflowLabel}</p>
                         </td>
@@ -389,6 +430,7 @@ export default function PortfolioPage() {
             <div className="md:hidden">
               {investments.map((item) => {
                 const cashflow = item.currentMonthlyVnd || item.futureMonthlyVnd || 0;
+                const hasCashflowValue = item.currentMonthlyVnd !== undefined || item.futureMonthlyVnd !== undefined;
                 const holdingYield = cashflow ? (cashflow * 12 * 100) / item.valueVnd : 0;
                 return (
                   <article key={item.name} className="border-b border-[#292929] px-5 py-5 last:border-b-0">
@@ -415,7 +457,7 @@ export default function PortfolioPage() {
                       <div>
                         <p className="text-[10px] font-semibold uppercase text-[#5f5f5f]">Cashflow</p>
                         <p className={`mt-1.5 text-sm font-semibold tabular-nums ${item.futureMonthlyVnd ? "text-[#60a5fa]" : cashflow ? "text-[#4ade80]" : "text-[#525252]"}`}>
-                          {cashflow ? `${item.futureMonthlyVnd ? "+" : ""}${compactVnd(cashflow)} VND` : "-"}
+                          {hasCashflowValue ? `${item.futureMonthlyVnd ? "+" : ""}${compactVnd(cashflow)} VND` : "-"}
                         </p>
                       </div>
                       <div>
