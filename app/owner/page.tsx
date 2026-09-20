@@ -392,7 +392,7 @@ const COST_SEGMENTS = [
   { key: "apple", label: "Apple", color: "#f5f5f7" },
   { key: "revenueCat", label: "RevenueCat", color: "#f2545b" },
   { key: "openRouter", label: "OpenRouter", color: "#c8ff00" },
-  { key: "higgsfield", label: "Higgsfield", color: "#8b5cf6" },
+  { key: "higgsfield", label: "AI Ads", color: "#8b5cf6" },
   { key: "refunds", label: "Refunds", color: "#ef4444" },
 ] as const;
 
@@ -811,9 +811,9 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
                 )}
               </div>
             </div>
-            <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, RevenueCat, OpenRouter, Higgsfield, and refunds" />
+            <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, RevenueCat, OpenRouter, AI Ads, and refunds" />
             <p className="text-[#525252] text-[10px] mt-2">
-              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Revenue is gross; refunds are deducted in profit
+              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter uses official UTC activity · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
