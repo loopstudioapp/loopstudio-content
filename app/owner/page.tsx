@@ -568,7 +568,7 @@ function fmtVnTime(iso: string): string {
 
 /* ── Profit Grid (Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
 type TaxMode = "normal" | "personal" | "corporate";
-function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean }) {
+function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("normal");
   // Apply the selected tax to a profit figure given its revenue base.
   // - personal: 7% of revenue is taxed (deducted from profit)
@@ -626,7 +626,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
     higgsfield: day.higgsfield_cost || 0,
     refunds: Math.max(0, (day.refund_amount || 0) - (day.refund_reversed_amount || 0)),
   }));
-  const usdToVnd = ads?.usd_rate ?? 0;
+  const usdToVnd = ads?.currency === "VND" ? ads.usd_rate : 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
   const totalSubCost30 = (daily || []).reduce(
     (s, d) => s + (d.adspend_with_vat ?? ((d.cost_per_sub || 0) * (d.new_subs || 0))),
@@ -651,7 +651,7 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
         <div className="flex items-center gap-2 flex-wrap">
           <span className="w-2 h-2 rounded-full bg-[#10b981]" />
           <h3 className="text-white text-sm font-semibold">Profit</h3>
-          <span className="text-[#525252] text-xs">GrailScan · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
+          <span className="text-[#525252] text-xs">{appName} · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
           {ads?.error && (
             <span className="text-[#ef4444] text-[10px]">
               {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · today's profit excludes Meta spend"}
@@ -781,7 +781,9 @@ function ProfitGrid({ profit, ads, daily, loading }: { profit: ProfitSummary | u
             </div>
             <StackedCostChart data={dailyCosts} dates={daily.map((d) => d.date)} />
             <p className="text-[#525252] text-[10px] mt-2">
-              Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Refunds are already netted from revenue and profit
+              {appName === "AskMed"
+                ? "Apple commission, RevenueCat fees and refunds included · Meta and AI costs not connected · No GrailScan operating costs allocated"
+                : "Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Refunds are already netted from revenue and profit"}
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -924,6 +926,54 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
         </div>
       )}
     </div>
+  );
+}
+
+function AskMedRevenueSection() {
+  const [stats, setStats] = useState<TodayStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const url = "/api/revenuecat?type=today_stats&app=AskMed";
+
+  const load = useCallback(async (refresh: boolean, signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      let response = await fetch(`${url}&${refresh ? "fast" : "cached"}=1`, { signal });
+      if (!refresh && response.status === 404) response = await fetch(`${url}&fast=1`, { signal });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || "Failed to load AskMed data");
+      if (!signal?.aborted) setStats(data);
+    } catch (loadError) {
+      if (!signal?.aborted) setError(loadError instanceof Error ? loadError.message : "Failed to load AskMed data");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(false, controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  return (
+    <section className="mb-10">
+      <div className="flex items-center gap-3 mb-5">
+        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">AskMed</h2>
+        <button onClick={() => void load(true)} disabled={loading} className="px-3 py-1 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50">
+          {loading ? "Loading..." : stats ? "↻ Refresh" : "Load Data"}
+        </button>
+        <a href="https://apps.apple.com/us/app/medical-assistant-askmed-ai/id6776077826" target="_blank" rel="noopener noreferrer" className="text-[#737373] hover:text-white" aria-label="AskMed on the App Store"><ExternalLink size={14} /></a>
+      </div>
+      <p className="text-xs text-[#737373] mb-4">RevenueCat connected · Meta and AI costs not connected; profit excludes those costs.</p>
+      {error && <div role="alert" className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{error}</div>}
+      {(stats || !error) && <>
+        <ProfitGrid appName="AskMed" profit={stats?.profit} ads={stats?.ads} daily={stats?.daily} loading={loading && !stats} />
+        <AppStatGrid appName="AskMed" accent="#22c55e" stats={stats?.per_app.AskMed} loading={loading && !stats} />
+        <TodayTxnTable txns={(stats?.transactions || []).filter((transaction) => transaction.app === "AskMed")} loading={loading && !stats} todayVn={stats?.today_vn || vnDate(new Date())} />
+      </>}
+    </section>
   );
 }
 
@@ -1107,6 +1157,8 @@ export default function OwnerDashboard() {
           todayVn={todayStats?.today_vn || vnDate(new Date())}
         />
       </section>
+
+      <AskMedRevenueSection />
 
       <section className="mb-10">
         <div className="flex items-center gap-2 mb-5">

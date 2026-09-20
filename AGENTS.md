@@ -12,7 +12,9 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 
 ## Owner Dashboard Scope
 
-- `/owner` intentionally displays GrailScan only for subscription/app metrics. Do not add Roomy AI, SwipeAway, or unrelated app data to those calculations.
+- `/owner` displays GrailScan and AskMed in separate subscription/app sections. Never mix their revenue, transactions, cache snapshots, or costs. Roomy AI and SwipeAway remain hidden.
+- AskMed uses server-only `REVENUECAT_ASKMED_API_KEY` and `REVENUECAT_ASKMED_PROJECT_ID`; project `proj9d9ff47f`, App Store bundle `com.loopstudio.askmed`, Apple ID `6776077826`. Its production webhook is `/api/webhooks/revenuecat?app=askmed`, authenticated with a dedicated `REVENUECAT_ASKMED_WEBHOOK_SECRET` bearer token. AskMed subscription storage IDs are prefixed `AskMed:` to avoid cross-app collisions.
+- AskMed uses the same cached/fast dashboard and protected historical refresh paths with `app=AskMed`. Import existing subscriptions with protected `POST /api/revenuecat/sync?app=AskMed`. Meta, OpenRouter and Higgsfield currently belong only to GrailScan; AskMed explicitly excludes unconnected Meta/AI costs.
 - Ket Coffee (`/api/fabi/sync`) and Game Studio are intentionally retained as independent owner-dashboard sections; never mix either into GrailScan revenue, subscriptions, or profit.
 - Frontend: `app/owner/page.tsx`.
 - Dashboard API: `app/api/revenuecat/route.ts` with `app=GrailScan`.
@@ -77,6 +79,7 @@ The current system has Meta spend reporting only. Server-side attribution and Me
 ## Verification Expectations
 
 - Run `npx tsc --noEmit` and `npm run build` for dashboard/API changes.
+- Run `node --test tests/askmed-revenue.test.cjs` for AskMed isolation, plan mapping, authentication and webhook routing checks. Local data imports must use the server Supabase service-role key, not the browser anon key; inspect sync errors before claiming an import succeeded.
 - Test provider failure fallback and duplicate-event/idempotency behavior.
 - Reconcile dashboard totals against source APIs before declaring financial calculations correct.
 - Production checks must avoid the RevenueCat `refresh=1` ledger rebuild unless the task specifically requires RevenueCat reconciliation.

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
 export const maxDuration = 300;
@@ -6,6 +6,11 @@ export const maxDuration = 300;
 const RC_BASE = "https://api.revenuecat.com/v2";
 
 const PROJECTS = [
+  {
+    name: "AskMed",
+    apiKey: process.env.REVENUECAT_ASKMED_API_KEY || "",
+    projectId: process.env.REVENUECAT_ASKMED_PROJECT_ID || "",
+  },
   {
     name: "Roomy AI",
     apiKey: process.env.REVENUECAT_API_KEY || "",
@@ -34,6 +39,7 @@ async function syncProject(
   let totalCustomers = 0;
   let totalSubs = 0;
   let errors = 0;
+  const databaseErrors = new Set<string>();
   let hasMore = true;
 
   while (hasMore) {
@@ -46,7 +52,7 @@ async function syncProject(
     const res = await fetch(url.toString(), {
       headers: rcHeaders(apiKey),
     });
-    if (!res.ok) break;
+    if (!res.ok) throw new Error(`RevenueCat customer sync failed (HTTP ${res.status})`);
 
     const json = await res.json();
     const items: { id: string; last_seen_country?: string }[] =
@@ -70,7 +76,7 @@ async function syncProject(
               );
               continue;
             }
-            if (!subRes.ok) return [];
+            if (!subRes.ok) throw new Error(`RevenueCat subscription sync failed (HTTP ${subRes.status})`);
             const subJson = await subRes.json();
             return (subJson.items || []).map(
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,7 +87,7 @@ async function syncProject(
               })
             );
           }
-          return [];
+          throw new Error("RevenueCat subscription sync rate limited");
         })
       );
 
@@ -91,7 +97,7 @@ async function syncProject(
           if (env === "sandbox") continue;
 
           const record = {
-            id: sub.customerId,
+            id: appName === "AskMed" ? `AskMed:${sub.customerId}` : sub.customerId,
             app_user_id: sub.customerId,
             country:
               (sub.country || sub.customerCountry || "")
@@ -122,6 +128,7 @@ async function syncProject(
 
           if (error) {
             errors++;
+            databaseErrors.add(error.code || "unknown");
           } else {
             totalSubs++;
           }
@@ -138,13 +145,22 @@ async function syncProject(
     hasMore = !!json.next_page;
   }
 
-  return { appName, totalCustomers, totalSubs, errors };
+  return { appName, totalCustomers, totalSubs, errors, databaseErrors: Array.from(databaseErrors) };
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const appName = request.nextUrl.searchParams.get("app");
+  if (appName && !PROJECTS.some((project) => project.name === appName)) {
+    return NextResponse.json({ error: "app is not configured" }, { status: 400 });
+  }
+  if (appName === "AskMed" && (!process.env.CRON_SECRET || request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`)) {
+    return NextResponse.json({ error: "Unauthorized maintenance sync" }, { status: 401 });
+  }
   const results = [];
 
   for (const project of PROJECTS) {
+    // Keep legacy unfiltered sync behavior; AskMed imports are explicit.
+    if (appName ? project.name !== appName : project.name === "AskMed") continue;
     if (!project.apiKey || !project.projectId) continue;
 
     try {
@@ -176,7 +192,7 @@ export async function POST() {
   );
 
   return NextResponse.json({
-    ok: true,
+    ok: totalErrors === 0,
     customers_checked: totalCustomers,
     subscriptions_synced: totalSubs,
     errors: totalErrors,

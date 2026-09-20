@@ -35,15 +35,6 @@ function msToTimestamp(ms: number | null): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  // Optional shared secret check
-  const webhookSecret = process.env.REVENUECAT_WEBHOOK_SECRET;
-  if (webhookSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${webhookSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
   let body: RCWebhookBody;
   try {
     body = await request.json();
@@ -77,7 +68,8 @@ export async function POST(request: NextRequest) {
   const SWIPEAWAY_PRODUCTS = ["prodf03355abc6", "prod6b651edf9a"];
 
   let appName = "Roomy AI";
-  if (appParam === "grailscan") appName = "GrailScan";
+  if (appParam === "askmed") appName = "AskMed";
+  else if (appParam === "grailscan") appName = "GrailScan";
   else if (appParam === "swipeaway") appName = "SwipeAway";
   else if (appParam === "roomy_ai" || appParam === "roomyai") appName = "Roomy AI";
   else if (
@@ -86,8 +78,19 @@ export async function POST(request: NextRequest) {
     productId.includes("com.swipeaway")
   ) {
     appName = "SwipeAway";
+  } else if (productId.includes("askmed")) {
+    appName = "AskMed";
   } else if (productId.includes("grail") || productId.includes("scan")) {
     appName = "GrailScan";
+  }
+
+  // Namespacing the new app prevents customer IDs from replacing other apps.
+  const recordId = appName === "AskMed" ? `AskMed:${appUserId}` : appUserId;
+  const webhookSecret = appName === "AskMed"
+    ? process.env.REVENUECAT_ASKMED_WEBHOOK_SECRET
+    : process.env.REVENUECAT_WEBHOOK_SECRET;
+  if ((appName === "AskMed" && !webhookSecret) || (webhookSecret && request.headers.get("authorization") !== `Bearer ${webhookSecret}`)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const adjustment = revenueAdjustmentFromEvent(event);
@@ -97,7 +100,7 @@ export async function POST(request: NextRequest) {
       event.id ||
       event.transaction_id ||
       `${appUserId}:${event.product_id || "unknown"}:${occurredMs}`;
-    const adjustmentId = `${adjustment.kind.toLowerCase()}:${sourceId}`;
+    const adjustmentId = `${adjustment.kind.toLowerCase()}:${appName === "AskMed" ? "AskMed:" : ""}${sourceId}`;
     const { error: adjustmentError } = await supabase
       .from("rc_renewal_events")
       .upsert(
@@ -121,7 +124,7 @@ export async function POST(request: NextRequest) {
   }
 
   const baseRecord = {
-    id: appUserId,
+    id: recordId,
     app_user_id: appUserId,
     country: event.country_code || null,
     store: (event.store || "APP_STORE").toLowerCase(),
@@ -150,13 +153,13 @@ export async function POST(request: NextRequest) {
       const { data: existing } = await supabase
         .from("rc_subscriptions")
         .select("revenue_gross")
-        .eq("id", appUserId)
+        .eq("id", recordId)
         .single();
 
       const prevRevenue = existing?.revenue_gross ?? 0;
 
       upsertData = {
-        id: appUserId,
+        id: recordId,
         app_user_id: appUserId,
         app_name: appName,
         country: event.country_code || null,
@@ -173,7 +176,7 @@ export async function POST(request: NextRequest) {
       // Also log a renewal event row so we can show "today's renewals" on the dashboard.
       // Build a stable id so retries don't duplicate.
       const occurredMs = event.purchased_at_ms || Date.now();
-      const eventId = `renewal:${appUserId}:${event.product_id || "unknown"}:${occurredMs}`;
+      const eventId = `renewal:${recordId}:${event.product_id || "unknown"}:${occurredMs}`;
       await supabase.from("rc_renewal_events").upsert(
         {
           id: eventId,
@@ -194,13 +197,13 @@ export async function POST(request: NextRequest) {
       upsertData =
         adjustment?.kind === "REFUND"
           ? {
-              id: appUserId,
+              id: recordId,
               app_user_id: appUserId,
               app_name: appName,
               updated_at: new Date().toISOString(),
             }
           : {
-              id: appUserId,
+              id: recordId,
               app_user_id: appUserId,
               auto_renewal: "will_not_renew",
               updated_at: new Date().toISOString(),
@@ -211,7 +214,7 @@ export async function POST(request: NextRequest) {
 
     case "REFUND_REVERSED":
       upsertData = {
-        id: appUserId,
+        id: recordId,
         app_user_id: appUserId,
         app_name: appName,
         updated_at: new Date().toISOString(),
@@ -220,7 +223,7 @@ export async function POST(request: NextRequest) {
 
     case "UNCANCELLATION":
       upsertData = {
-        id: appUserId,
+        id: recordId,
         app_user_id: appUserId,
         auto_renewal: "will_renew",
         updated_at: new Date().toISOString(),

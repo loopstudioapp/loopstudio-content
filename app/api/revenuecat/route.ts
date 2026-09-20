@@ -28,6 +28,11 @@ const HIGGSFIELD_DAILY_COST = HIGGSFIELD_MONTHLY_COST / 30;
 // it won't appear here.
 const RC_PROJECTS = [
   {
+    name: "AskMed",
+    apiKey: process.env.REVENUECAT_ASKMED_API_KEY || "",
+    projectId: process.env.REVENUECAT_ASKMED_PROJECT_ID || "",
+  },
+  {
     name: "Roomy AI",
     apiKey: process.env.REVENUECAT_API_KEY || "",
     projectId: process.env.REVENUECAT_PROJECT_ID || "",
@@ -41,7 +46,12 @@ const RC_PROJECTS = [
 
 // Apps available to the owner stats API. The dashboard can request one app
 // without changing the existing unfiltered endpoint behavior.
-const VISIBLE_APPS = new Set(["Roomy AI", "GrailScan"]);
+const VISIBLE_APPS = new Set(["Roomy AI", "GrailScan", "AskMed"]);
+
+// The existing Meta account belongs to GrailScan, not newly connected apps.
+function askMedAds(): MetaSpend {
+  return { configured: false, spend_native: 0, spend_usd: 0, currency: "USD", usd_rate: 1, date: vnDateIso() };
+}
 
 function getEnv() {
   const apiKey = process.env.REVENUECAT_API_KEY;
@@ -56,8 +66,8 @@ function rcHeaders(apiKey: string) {
 
 function planName(productId: string): string {
   if (!productId) return "—";
-  if (productId.includes("weekly") || productId === "prodb2f4f71b2d" || productId === "prod6b651edf9a") return "Weekly";
-  if (productId.includes("yearly") || productId.includes("annual") || productId === "prod64a4d6b792" || productId === "prodf03355abc6") return "Yearly";
+  if (productId.includes("weekly") || productId === "prodb2f4f71b2d" || productId === "prod6b651edf9a" || productId === "prod4b93133020") return "Weekly";
+  if (productId.includes("yearly") || productId.includes("annual") || productId === "prod64a4d6b792" || productId === "prodf03355abc6" || productId === "prod6aed4f3bb5") return "Yearly";
   if (productId.includes("monthly")) return "Monthly";
   return productId;
 }
@@ -1023,7 +1033,8 @@ function buildDailyPointsFromLedger(
 
 function applyGrailScanOperatingCosts(
   daily: DailyPoint[],
-  openRouterCostsByDate: Record<string, number>
+  openRouterCostsByDate: Record<string, number>,
+  higgsfieldDailyCost = HIGGSFIELD_DAILY_COST
 ): DailyPoint[] {
   const trackedRevenue = daily.reduce(
     (sum, point) => sum + point.revenue - point.refund_amount + point.refund_reversed_amount,
@@ -1037,10 +1048,10 @@ function applyGrailScanOperatingCosts(
     const revenuecatCost = revenueAfterRefunds * revenueCatRate;
     return {
       ...point,
-      profit: point.profit - openrouterCost - revenuecatCost - HIGGSFIELD_DAILY_COST,
+      profit: point.profit - openrouterCost - revenuecatCost - higgsfieldDailyCost,
       openrouter_cost: openrouterCost,
       revenuecat_cost: revenuecatCost,
-      higgsfield_cost: HIGGSFIELD_DAILY_COST,
+      higgsfield_cost: higgsfieldDailyCost,
     };
   });
 }
@@ -1329,7 +1340,7 @@ async function fetchFastTodayStatsFromDb(
 
   const [mrrByApp, freshAds, newSubsResult, renewalsResult, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
-    getTodayMetaSpend(),
+    appName === "AskMed" ? Promise.resolve(askMedAds()) : getTodayMetaSpend(),
     supabase
       .from("rc_subscriptions")
       .select("app_user_id, app_name, country, product_id, store, purchased_at, expires_at, revenue_gross")
@@ -1498,7 +1509,9 @@ async function fetchFastTodayStatsFromDb(
   const dailyRefundCost = distributedRefundAmount - distributedRefundReversedAmount;
   const profitWithRefund = {
     ...profit,
-    total_profit: profit.total_profit - dailyRefundCost,
+    total_profit: appName === "AskMed"
+      ? daily.find((point) => point.date === today)?.profit ?? profit.total_profit - dailyRefundCost
+      : profit.total_profit - dailyRefundCost,
     daily_refund_cost: dailyRefundCost,
   };
 
@@ -1523,8 +1536,8 @@ async function fetchTodayStats(
 
   const [mrrByApp, freshAds, spendUsdByDate, ledger, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
-    getTodayMetaSpend(),
-    getMetaSpendByDay(start, today),
+    appName === "AskMed" ? Promise.resolve(askMedAds()) : getTodayMetaSpend(),
+    appName === "AskMed" ? Promise.resolve({} as Record<string, number>) : getMetaSpendByDay(start, today),
     fetchTransactionLedger(start, endExclusive, appName),
     appName === "GrailScan"
       ? loadOpenRouterCostsByDate(dates, cachedData?.daily, false)
@@ -1548,6 +1561,8 @@ async function fetchTodayStats(
   const baseDaily = buildDailyPointsFromLedger(dates, ledger, spendUsdByDate, appleRate, metaVat, appName);
   const daily = appName === "GrailScan"
     ? applyGrailScanOperatingCosts(baseDaily, openRouterCostsByDate)
+    : appName === "AskMed"
+      ? applyGrailScanOperatingCosts(baseDaily, {}, 0)
     : baseDaily;
   const todayLedger = buildTodayLedgerFromTransactions(ledger, today, mrrByApp, appName);
   const perApp = todayLedger.perApp;
@@ -1568,20 +1583,19 @@ async function fetchTodayStats(
 }
 
 export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+  const type = searchParams.get("type");
   const env = getEnv();
-  if (!env) {
+  if (!env && type !== "today_stats") {
     return NextResponse.json(
       { error: "REVENUECAT_API_KEY and REVENUECAT_PROJECT_ID must be set" },
       { status: 500 }
     );
   }
 
-  const { searchParams } = request.nextUrl;
-  const type = searchParams.get("type");
-
   try {
     if (type === "overview") {
-      const data = await fetchOverview(env.apiKey, env.projectId);
+      const data = await fetchOverview(env!.apiKey, env!.projectId);
       return NextResponse.json(data);
     }
 
@@ -1598,6 +1612,9 @@ export async function GET(request: NextRequest) {
       const requestedApp = searchParams.get("app") || undefined;
       if (requestedApp && !VISIBLE_APPS.has(requestedApp)) {
         return NextResponse.json({ error: "app is not configured" }, { status: 400 });
+      }
+      if (requestedApp === "AskMed" && !configuredProjects(requestedApp).length) {
+        return NextResponse.json({ error: "AskMed RevenueCat connection is not configured" }, { status: 503 });
       }
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
