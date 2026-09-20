@@ -12,12 +12,12 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 
 ## Owner Dashboard Scope
 
-- `/owner` displays GrailScan and AskMed in separate subscription/app sections. Never mix their revenue, transactions, cache snapshots, or costs. Roomy AI and SwipeAway remain hidden.
+- `/owner` combines GrailScan and AskMed revenue, subscribers, profit and shared costs. Only their summary cards and Today Subscriptions tables stay separate. Revenue and new-subscriber charts stack both apps with separate legends/tooltips. Roomy AI and SwipeAway remain hidden.
 - AskMed uses server-only `REVENUECAT_ASKMED_API_KEY` and `REVENUECAT_ASKMED_PROJECT_ID`; project `proj9d9ff47f`, App Store bundle `com.loopstudio.askmed`, Apple ID `6776077826`. Its production webhook is `/api/webhooks/revenuecat?app=askmed`, authenticated with a dedicated `REVENUECAT_ASKMED_WEBHOOK_SECRET` bearer token. AskMed subscription storage IDs are prefixed `AskMed:` to avoid cross-app collisions.
-- AskMed uses the same cached/fast dashboard and protected historical refresh paths with `app=AskMed`. Import existing subscriptions with protected `POST /api/revenuecat/sync?app=AskMed`. Meta, OpenRouter and Higgsfield currently belong only to GrailScan; AskMed explicitly excludes unconnected Meta/AI costs.
+- AskMed uses the same cached/fast dashboard and protected historical refresh paths with `app=AskMed`. Import existing subscriptions with protected `POST /api/revenuecat/sync?app=AskMed`. The individual app snapshots remain isolated source ledgers. Meta, OpenRouter and Higgsfield are shared infrastructure: read their existing GrailScan-keyed provider ledger once for combined owner accounting; do not duplicate or allocate another copy to AskMed.
 - Ket Coffee (`/api/fabi/sync`) and Game Studio are intentionally retained as independent owner-dashboard sections; never mix either into GrailScan revenue, subscriptions, or profit.
 - Frontend: `app/owner/page.tsx`.
-- Dashboard API: `app/api/revenuecat/route.ts` with `app=GrailScan`.
+- Dashboard API: `app/api/revenuecat/route.ts` with `scope=owner`. This composes only GrailScan and AskMed through existing cached/fast per-app paths, with accounting in `lib/revenuecat/owner.ts`. Legacy individual app endpoints remain unchanged. Missing/stale source snapshots must not silently become zero or partial combined revenue.
 - The endpoint name is historical: it now composes RevenueCat revenue, Meta spend, refunds, and operating costs.
 - Dates and daily revenue/Meta buckets use `Asia/Ho_Chi_Minh` (GMT+7). OpenRouter activity remains on its official UTC dates.
 
@@ -55,7 +55,7 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 
 - Apple commission defaults to 15% via `APPLE_COMMISSION_RATE`.
 - Meta VAT is 10%.
-- RevenueCat cost is 1% when tracked 30-day revenue exceeds the configured free MTR threshold of `$2,500`.
+- RevenueCat cost is 1% when tracked 30-day revenue exceeds the configured free MTR threshold of `$2,500`; owner accounting evaluates that threshold once on combined GrailScan + AskMed net revenue.
 - Higgsfield is `$50/month`, distributed evenly over 30 days.
 - Net refunds are displayed as a cost and distributed evenly across the 30-day period. Revenue bars remain gross purchase revenue; profit subtracts the distributed refund cost.
 - Daily profit formula is revenue after distributed refunds, less Apple commission, Meta spend including VAT, RevenueCat cost, OpenRouter cost, and Higgsfield cost.

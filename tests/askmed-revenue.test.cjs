@@ -38,7 +38,10 @@ function harness() {
       module, exports: module.exports, process: { env }, console, URL, Date, Map, Set, setTimeout,
       fetch: async () => ({ ok: true, json: async () => ({ metrics: [{ id: 'mrr', value: 88 }] }) }),
       require(name) {
-        if (name === 'next/server') return { NextResponse: { json: (body, options) => ({ body, status: options?.status || 200 }) } };
+        if (name === 'next/server') return {
+          NextRequest: class { constructor(url, options) { this.url = String(url); this.nextUrl = new URL(url); this.headers = options.headers; } },
+          NextResponse: { json: (body, options) => ({ body, status: options?.status || 200, json: async () => body }) },
+        };
         if (name === '@/lib/supabase') return { supabase };
         if (name === '@/lib/meta/ads') return {
           getTodayMetaSpend: async () => { metaCalls++; return { configured: true, spend_usd: 12, spend_native: 12, currency: 'USD', usd_rate: 1, date: '2026-09-20' }; },
@@ -58,6 +61,67 @@ function harness() {
 function request(url, auth, event) {
   return { url, nextUrl: new URL(url), headers: new Headers(auth ? { authorization: auth } : {}), json: async () => ({ event }) };
 }
+
+test('owner route combines only the two app caches, refreshes shared providers once and rejects partial data', async () => {
+  const h = harness();
+  const { GET } = h.load('app/api/revenuecat/route.ts');
+  const response = await GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&fast=1'));
+  assert.equal(response.status, 200);
+  assert.deepEqual(Object.keys(response.body.per_app), ['GrailScan', 'AskMed']);
+  assert.equal(h.metaCalls(), 1);
+  assert.equal(response.body.daily.length, 30);
+  assert.equal(response.body.daily.at(-1).higgsfield_cost, 50 / 30);
+  assert.equal(response.body.profit.total_profit, response.body.daily.at(-1).profit);
+  assert.equal((await GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&cached=1'))).body.cached, true);
+  assert.equal(h.metaCalls(), 1, 'cached owner reads do not fetch Meta again');
+  h.records.delete('__rc_today_stats_cache__:AskMed');
+  assert.equal((await GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&cached=1'))).status, 404);
+  const missing = harness();
+  delete missing.env.REVENUECAT_ASKMED_API_KEY;
+  assert.equal((await missing.load('app/api/revenuecat/route.ts').GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&fast=1'))).status, 503);
+  const fresh = harness().load('app/api/revenuecat/route.ts');
+  assert.equal((await fresh.GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&refresh=1'))).status, 401);
+});
+
+test('combined accounting sums app revenue/refunds, applies one shared cost ledger and combined RevenueCat threshold', () => {
+  const { combineOwnerStats } = harness().load('lib/revenuecat/owner.ts');
+  const snapshot = (app, revenue, newSubs) => ({
+    today_vn: '2026-09-20',
+    per_app: { [app]: { today_revenue: revenue, new_revenue: revenue, new_subs: newSubs, mrr: 88 }, 'Roomy AI': { today_revenue: 99999 } },
+    transactions: [{ id: app, app, occurred_at: '2026-09-20T00:00:00Z' }, { id: 'unrelated', app: 'Roomy AI' }],
+    ads: { configured: true, stale: true, error: 'Meta offline', spend_usd: 10 },
+    profit: { apple_commission_rate: .15, adspend_with_vat: 11 },
+    daily: [{ date: '2026-09-20', revenue, purchase_revenue: revenue, new_subs: newSubs,
+      refund_amount: 20, refund_reversed_amount: 5, refund_count: 1, refund_reversed_count: 1,
+      adspend_with_vat: 11, openrouter_cost: 4, higgsfield_cost: 50 / 30, profit: -999 }],
+  });
+  const grail = snapshot('GrailScan', 1400, 2), ask = snapshot('AskMed', 1300, 3);
+  const before = JSON.stringify([grail, ask]);
+  const result = combineOwnerStats(grail, ask), day = result.daily[0];
+  assert.equal(JSON.stringify([grail, ask]), before, 'individual snapshots stay unchanged');
+  assert.equal(day.revenue, 2700);
+  assert.equal(day.new_subs, 5);
+  assert.equal(day.refund_amount, 40);
+  assert.equal(day.refund_reversed_amount, 10);
+  assert.equal(day.revenuecat_cost, 26.7, 'combined revenue crosses threshold even though neither app alone does');
+  assert.equal(day.adspend_with_vat, 11);
+  assert.equal(day.openrouter_cost, 4);
+  assert.equal(day.higgsfield_cost, 50 / 30);
+  assert.equal(day.profit, 2670 * .85 - 11 - 4 - 50 / 30 - 26.7);
+  assert.equal(result.profit.total_profit, day.profit);
+  assert.equal(result.profit.cost_per_new_sub, 11 / 5);
+  assert.equal(day.per_app.GrailScan.revenue + day.per_app.AskMed.revenue, day.revenue);
+  assert.equal(day.per_app.GrailScan.new_subs + day.per_app.AskMed.new_subs, day.new_subs);
+  assert.equal(result.ads, grail.ads, 'shared stale-spend warning is preserved');
+  assert.equal(result.transactions.length, 2);
+  assert.deepEqual(Object.keys(result.per_app), ['GrailScan', 'AskMed']);
+  assert.throws(() => combineOwnerStats(grail, { ...ask, today_vn: '2026-09-19' }));
+  assert.throws(() => combineOwnerStats(grail, { ...ask, daily: [] }));
+  const zero = combineOwnerStats(snapshot('GrailScan', 0, 0), snapshot('AskMed', 0, 0));
+  assert.equal(zero.profit.cost_per_new_sub, 0);
+  assert.equal(zero.daily[0].revenuecat_cost, 0);
+  assert.ok(Number.isFinite(zero.daily[0].profit));
+});
 
 test('AskMed fast dashboard stays isolated and uses its own cache without Meta', async () => {
   const h = harness();

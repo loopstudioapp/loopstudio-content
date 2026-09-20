@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
 import { supabase } from "@/lib/supabase";
 import {
   adjustmentKindFromLedgerId,
@@ -1159,7 +1160,7 @@ type ProfitSummary = {
   daily_refund_cost: number; // 30-day net refunds amortized evenly per day
 };
 
-type TodayStatsResponse = {
+export type TodayStatsResponse = {
   today_vn: string;
   per_app: Record<string, TodayPerApp>;
   transactions: TodayTxn[];
@@ -1582,7 +1583,7 @@ async function fetchTodayStats(
   return { today_vn: today, per_app: perApp, transactions: txns, ads, profit: profitWithRefund, daily };
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = request.nextUrl;
   const type = searchParams.get("type");
   const env = getEnv();
@@ -1609,6 +1610,29 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "today_stats") {
+      if (searchParams.get("scope") === "owner") {
+        // Reuse the existing per-app cache/fast paths in-process. Never include
+        // unrelated apps or rebuild a transaction ledger on normal refresh.
+        const sources = await Promise.all(OWNER_APPS.map(async app => {
+          const url = new URL(request.url);
+          url.searchParams.delete("scope");
+          url.searchParams.set("app", app);
+          const response = await GET(new NextRequest(url, { headers: request.headers }));
+          return { app, status: response.status, data: await response.json() };
+        }));
+        const failed = sources.find(source => source.status !== 200);
+        if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
+        const [grail, askmed] = sources.map(source => source.data);
+        return NextResponse.json({
+          ...combineOwnerStats(grail, askmed),
+          cached: sources.every(source => source.data.cached),
+          stale: sources.some(source => source.data.stale),
+          updated_at: [grail.updated_at, askmed.updated_at].sort()[0],
+          sources: Object.fromEntries(sources.map(({ app, data }) => [app, {
+            updated_at: data.updated_at, cached: data.cached, stale: data.stale || false,
+          }])),
+        });
+      }
       const requestedApp = searchParams.get("app") || undefined;
       if (requestedApp && !VISIBLE_APPS.has(requestedApp)) {
         return NextResponse.json({ error: "app is not configured" }, { status: 400 });

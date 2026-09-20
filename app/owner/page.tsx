@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
+import type { AppBreakdown } from "@/lib/revenuecat/owner";
 
 /* ── Types ── */
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
@@ -14,6 +15,7 @@ type TodayTxn = { id: string; country: string; app: string; plan: string; produc
 type MetaSpend = { configured: boolean; spend_native: number; spend_usd: number; currency: string; usd_rate: number; date: string; stale?: boolean; error?: string };
 type ProfitSummary = { total_revenue: number; new_revenue: number; new_subs: number; apple_commission_rate: number; meta_vat_rate: number; net_revenue: number; net_new_revenue: number; adspend_usd: number; adspend_with_vat: number; total_profit: number; new_profit: number; cost_per_new_sub: number; daily_refund_cost?: number };
 type DailyPoint = {
+  per_app?: AppBreakdown;
   date: string;
   revenue: number;
   profit: number;
@@ -42,8 +44,12 @@ type GameStudioResponse = {
   error?: string;
 };
 const META_VAT_RATE = 0.10;
-const OWNER_APP = "GrailScan";
-const TODAY_STATS_URL = `/api/revenuecat?type=today_stats&app=${encodeURIComponent(OWNER_APP)}`;
+const OWNER_APP = "GrailScan + AskMed";
+const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
+const APP_SEGMENTS = [
+  { key: "GrailScan", label: "GrailScan", color: "#a855f7" },
+  { key: "AskMed", label: "AskMed", color: "#22c55e" },
+] as const;
 
 function gameStudioTime(value: string): string {
   const date = new Date(value);
@@ -390,7 +396,11 @@ const COST_SEGMENTS = [
   { key: "refunds", label: "Refunds", color: "#ef4444" },
 ] as const;
 
-function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: string[] }) {
+function StackedBreakdownChart<K extends string>({ data, dates, segments, label, valueLabel = fmtCompactCur, tooltipValue = fmtApiCost }: {
+  data: Record<K, number>[]; dates: string[];
+  segments: readonly { key: K; label: string; color: string }[];
+  label: string; valueLabel?: (value: number) => string; tooltipValue?: (value: number) => string;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
 
@@ -399,7 +409,7 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
   const pad = { top: 25, right: 8, bottom: 26, left: 38 };
   const plotW = w - pad.left - pad.right;
   const plotH = h - pad.top - pad.bottom;
-  const totals = data.map((day) => COST_SEGMENTS.reduce((sum, segment) => sum + day[segment.key], 0));
+  const totals = data.map((day) => segments.reduce((sum, segment) => sum + day[segment.key], 0));
   const rawMax = Math.max(...totals, 1);
   const magnitude = 10 ** Math.floor(Math.log10(rawMax));
   const chartMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
@@ -415,9 +425,17 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
           viewBox={`0 0 ${w} ${h}`}
           className="block w-full cursor-crosshair"
           role="img"
-          aria-label="Meta, Apple, RevenueCat, OpenRouter, Higgsfield, and refund costs by day for the last 30 days"
-          onMouseLeave={() => setHover(null)}
-          onMouseMove={(e) => {
+          aria-label={label}
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setHover(null);
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setHover(index => Math.max(0, Math.min(data.length - 1, (index ?? data.length - 1) + (event.key === "ArrowLeft" ? -1 : 1))));
+            }
+          }}
+          onPointerLeave={(event) => { if (event.pointerType === "mouse") setHover(null); }}
+          onPointerMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * w;
             const index = Math.floor((x - pad.left) / slot);
@@ -429,7 +447,7 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
             return (
               <g key={value}>
                 <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke="#2f2f2f" strokeWidth="1" />
-                <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{fmtCompactCur(value)}</text>
+                <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{valueLabel(value)}</text>
               </g>
             );
           })}
@@ -438,9 +456,10 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
             const active = hover === i;
             let cumulative = 0;
             return (
-              <g key={`${dates[i]}-${i}`}>
+              <g key={`${dates[i]}-${i}`} onPointerDown={() => setHover(i)}>
+                <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="transparent" />
                 {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="#f59e0b" opacity="0.08" />}
-                {COST_SEGMENTS.map((segment) => {
+                {segments.map((segment) => {
                   const value = day[segment.key];
                   const bottom = yOf(cumulative);
                   cumulative += value;
@@ -458,7 +477,7 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
                   ) : null;
                 })}
                 <text x={x} y={Math.max(10, yOf(totals[i]) - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
-                  {fmtCompactCur(totals[i])}
+                  {valueLabel(totals[i])}
                 </text>
                 <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">
                   {dates[i]?.slice(5)}
@@ -477,15 +496,15 @@ function StackedCostChart({ data, dates }: { data: DailyCostBreakdown[]; dates: 
           >
             <div className="flex items-center justify-between gap-5 mb-1.5">
               <p className="text-[#a3a3a3] text-[10px] whitespace-nowrap">{dates[hover]}</p>
-              <p className="text-white text-xs font-bold whitespace-nowrap">{fmtCur2(totals[hover])}</p>
+              <p className="text-white text-xs font-bold whitespace-nowrap">{tooltipValue(totals[hover])}</p>
             </div>
-            {COST_SEGMENTS.map((segment) => (
+            {segments.map((segment) => (
               <div key={segment.key} className="flex items-center justify-between gap-5 text-[10px] leading-5">
                 <span className="flex items-center gap-1.5 text-[#a3a3a3] whitespace-nowrap">
                   <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
                   {segment.label}
                 </span>
-                <span className="text-white font-medium">{fmtApiCost(data[hover][segment.key])}</span>
+                <span className="text-white font-medium">{tooltipValue(data[hover][segment.key])}</span>
               </div>
             ))}
           </div>
@@ -567,6 +586,18 @@ function fmtVnTime(iso: string): string {
 }
 
 /* ── Profit Grid (Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
+function AppChartLegend({ daily, metric }: { daily: DailyPoint[]; metric: "revenue" | "new_subs" }) {
+  return <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
+    {APP_SEGMENTS.map(segment => {
+      const total = daily.reduce((sum, day) => sum + (day.per_app?.[segment.key][metric] || 0), 0);
+      return <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
+        <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
+        {segment.label} <span className="text-white font-medium">{metric === "revenue" ? fmtCur2(total) : fmtNum(total)}</span>
+      </span>;
+    })}
+  </div>;
+}
+
 type TaxMode = "normal" | "personal" | "corporate";
 function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("normal");
@@ -616,7 +647,7 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
   const totalCost30 =
     metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
-  const dailyCosts = (daily || []).map((day) => ({
+  const dailyCosts: DailyCostBreakdown[] = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
     apple:
       (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) *
@@ -720,11 +751,12 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
                 )}
               </div>
             </div>
-            <DailyBarChart
-              data={daily.map((d) => d.revenue)}
+            <AppChartLegend daily={daily} metric="revenue" />
+            <StackedBreakdownChart
+              data={daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.revenue || 0, AskMed: d.per_app?.AskMed.revenue || 0 }))}
               dates={daily.map((d) => d.date)}
-              color="#22c55e"
-              label="Revenue"
+              segments={APP_SEGMENTS}
+              label="30-day revenue by app: GrailScan and AskMed"
               valueLabel={fmtCompactCur}
               tooltipValue={fmtCur2}
             />
@@ -779,11 +811,9 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
                 )}
               </div>
             </div>
-            <StackedCostChart data={dailyCosts} dates={daily.map((d) => d.date)} />
+            <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, RevenueCat, OpenRouter, Higgsfield, and refunds" />
             <p className="text-[#525252] text-[10px] mt-2">
-              {appName === "AskMed"
-                ? "Apple commission, RevenueCat fees and refunds included · Meta and AI costs not connected · No GrailScan operating costs allocated"
-                : "Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Refunds are already netted from revenue and profit"}
+              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter uses official UTC activity · Higgsfield $50/month prorated daily · Revenue is gross; refunds are deducted in profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -791,11 +821,12 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
               <p className="text-[#d946ef] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
               <p className="text-white text-2xl font-bold">{fmtNum(totalNewSubs30)}</p>
             </div>
-            <DailyBarChart
-              data={daily.map((d) => d.new_subs || 0)}
+            <AppChartLegend daily={daily} metric="new_subs" />
+            <StackedBreakdownChart
+              data={daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.new_subs || 0, AskMed: d.per_app?.AskMed.new_subs || 0 }))}
               dates={daily.map((d) => d.date)}
-              color="#d946ef"
-              label="New subscriptions"
+              segments={APP_SEGMENTS}
+              label="30-day new subscriptions by app: GrailScan and AskMed"
               valueLabel={(value) => value.toFixed(0)}
               tooltipValue={(value) => `${value.toFixed(0)} new ${value === 1 ? "sub" : "subs"}`}
             />
@@ -929,60 +960,13 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
   );
 }
 
-function AskMedRevenueSection() {
-  const [stats, setStats] = useState<TodayStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const url = "/api/revenuecat?type=today_stats&app=AskMed";
-
-  const load = useCallback(async (refresh: boolean, signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    try {
-      let response = await fetch(`${url}&${refresh ? "fast" : "cached"}=1`, { signal });
-      if (!refresh && response.status === 404) response = await fetch(`${url}&fast=1`, { signal });
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || "Failed to load AskMed data");
-      if (!signal?.aborted) setStats(data);
-    } catch (loadError) {
-      if (!signal?.aborted) setError(loadError instanceof Error ? loadError.message : "Failed to load AskMed data");
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(false, controller.signal);
-    return () => controller.abort();
-  }, [load]);
-
-  return (
-    <section className="mb-10">
-      <div className="flex items-center gap-3 mb-5">
-        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">AskMed</h2>
-        <button onClick={() => void load(true)} disabled={loading} className="px-3 py-1 text-[10px] text-[#737373] border border-[#262626] rounded-lg hover:text-white hover:border-[#404040] transition-colors disabled:opacity-50">
-          {loading ? "Loading..." : stats ? "↻ Refresh" : "Load Data"}
-        </button>
-        <a href="https://apps.apple.com/us/app/medical-assistant-askmed-ai/id6776077826" target="_blank" rel="noopener noreferrer" className="text-[#737373] hover:text-white" aria-label="AskMed on the App Store"><ExternalLink size={14} /></a>
-      </div>
-      <p className="text-xs text-[#737373] mb-4">RevenueCat connected · Meta and AI costs not connected; profit excludes those costs.</p>
-      {error && <div role="alert" className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{error}</div>}
-      {(stats || !error) && <>
-        <ProfitGrid appName="AskMed" profit={stats?.profit} ads={stats?.ads} daily={stats?.daily} loading={loading && !stats} />
-        <AppStatGrid appName="AskMed" accent="#22c55e" stats={stats?.per_app.AskMed} loading={loading && !stats} />
-        <TodayTxnTable txns={(stats?.transactions || []).filter((transaction) => transaction.app === "AskMed")} loading={loading && !stats} todayVn={stats?.today_vn || vnDate(new Date())} />
-      </>}
-    </section>
-  );
-}
 
 /* ── Main ── */
 export default function OwnerDashboard() {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // GrailScan-only stats and transactions for the owner dashboard.
+  // Combined app financials with shared infrastructure counted once.
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
   const [todayStatsLoading, setTodayStatsLoading] = useState(true);
   const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
@@ -993,7 +977,7 @@ export default function OwnerDashboard() {
   const [gameStudioLoading, setGameStudioLoading] = useState(true);
   const [gameStudioError, setGameStudioError] = useState<string | null>(null);
 
-  // Ket Coffee stays independent from the GrailScan-only app metrics.
+  // Ket Coffee stays independent from the app metrics.
   useEffect(() => {
     fetch("/api/fabi/sync?cached=1")
       .then((response) => response.json())
@@ -1023,7 +1007,7 @@ export default function OwnerDashboard() {
     loadGameStudio();
   }, [loadGameStudio]);
 
-  // Load today's GrailScan stats on mount.
+  // Load both app snapshots through the combined cached/fast endpoint.
   useEffect(() => {
     let cancelled = false;
 
@@ -1040,11 +1024,11 @@ export default function OwnerDashboard() {
 
         const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
         const d = await fast.json();
-        if (!fast.ok || d.error) throw new Error(d.error || "Failed to load GrailScan data");
+        if (!fast.ok || d.error) throw new Error(d.error || "Failed to load app revenue");
         if (!cancelled) setTodayStats(d);
       } catch (error) {
         if (!cancelled) {
-          setTodayStatsError(error instanceof Error ? error.message : "Failed to load GrailScan data");
+          setTodayStatsError(error instanceof Error ? error.message : "Failed to load app revenue");
         }
       } finally {
         if (!cancelled) setTodayStatsLoading(false);
@@ -1091,7 +1075,7 @@ export default function OwnerDashboard() {
       if (!fast.ok || data.error) throw new Error(data.error || "Fast refresh failed");
       setTodayStats(data);
     } catch (error) {
-      setTodayStatsError(error instanceof Error ? error.message : "Failed to refresh GrailScan data");
+      setTodayStatsError(error instanceof Error ? error.message : "Failed to refresh app revenue");
     } finally {
       setTodayStatsLoading(false);
     }
@@ -1123,7 +1107,7 @@ export default function OwnerDashboard() {
       {/* ═══ REVENUE ═══ */}
       <section className="mb-10">
         <div className="flex items-center gap-3 mb-5">
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">GrailScan</h2>
+          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">GrailScan + AskMed</h2>
           <button
             onClick={loadRevenueCat}
             disabled={todayStatsLoading}
@@ -1137,6 +1121,7 @@ export default function OwnerDashboard() {
           <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{todayStatsError}</div>
         )}
 
+        {(todayStats || !todayStatsError) && <>
         <ProfitGrid
           profit={todayStats?.profit}
           ads={todayStats?.ads}
@@ -1144,21 +1129,21 @@ export default function OwnerDashboard() {
           loading={todayStatsLoading && !todayStats}
         />
 
-        <AppStatGrid
-          appName={OWNER_APP}
-          accent="#a855f7"
-          stats={todayStats?.per_app[OWNER_APP]}
-          loading={todayStatsLoading && !todayStats}
-        />
-
-        <TodayTxnTable
-          txns={(todayStats?.transactions || []).filter((transaction) => transaction.app === OWNER_APP)}
-          loading={todayStatsLoading && !todayStats}
-          todayVn={todayStats?.today_vn || vnDate(new Date())}
-        />
+        {APP_SEGMENTS.map(app => <div key={app.key} className="mt-8">
+          <AppStatGrid
+            appName={app.label}
+            accent={app.color}
+            stats={todayStats?.per_app[app.key]}
+            loading={todayStatsLoading && !todayStats}
+          />
+          <TodayTxnTable
+            txns={(todayStats?.transactions || []).filter(transaction => transaction.app === app.key)}
+            loading={todayStatsLoading && !todayStats}
+            todayVn={todayStats?.today_vn || vnDate(new Date())}
+          />
+        </div>)}
+        </>}
       </section>
-
-      <AskMedRevenueSection />
 
       <section className="mb-10">
         <div className="flex items-center gap-2 mb-5">
