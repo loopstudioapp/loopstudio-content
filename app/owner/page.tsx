@@ -46,9 +46,11 @@ type GameStudioResponse = {
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
+// App Store branding, using the apps' primary theme colors:
+// GrailScan Theme.primaryTeal; AskMed OnboardingTheme.primary (RGB .07/.36/.71).
 const APP_SEGMENTS = [
-  { key: "GrailScan", label: "GrailScan", color: "#a855f7" },
-  { key: "AskMed", label: "AskMed", color: "#22c55e" },
+  { key: "GrailScan", label: "GrailScan", color: "#00b894" },
+  { key: "AskMed", label: "AskMed", color: "#125cb5" },
 ] as const;
 
 function gameStudioTime(value: string): string {
