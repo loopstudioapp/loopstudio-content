@@ -846,7 +846,7 @@ export default function CalendarPage() {
                           }}
                         >
                           <p
-                            className={`w-full pr-5 text-[11px] font-medium leading-tight truncate ${
+                            className={`w-full shrink-0 pr-5 text-[11px] font-medium leading-tight whitespace-normal [overflow-wrap:anywhere] ${
                               occurrence.done ? "text-[#b0b0b0] line-through" : "text-white"
                             }`}
                           >
@@ -860,7 +860,15 @@ export default function CalendarPage() {
                             {occurrence.task.title}
                           </p>
                           {height > 30 && (
-                            <p className="w-full text-[10px] text-[#d4d4d4] truncate">{fmtTime(occurrence.time)}</p>
+                            <p className="w-full shrink-0 text-[10px] leading-tight text-[#d4d4d4] whitespace-normal">
+                              {fmtTime(occurrence.time)} – {fmtTime(minutesToTime((occurrence.minutes + occurrence.task.estimate_minutes) % (24 * 60)))}
+                            </p>
+                          )}
+
+                          {height > 45 && occurrence.task.description && (
+                            <p className="mt-1 w-full shrink-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[10px] leading-tight text-[#d4d4d4]">
+                              {occurrence.task.description}
+                            </p>
                           )}
 
                           {/*
@@ -913,12 +921,17 @@ export default function CalendarPage() {
               boxShadow: "0 6px 18px rgba(0,0,0,0.55)",
             }}
           >
-            <p className="text-[11px] font-medium leading-tight text-white truncate">
+            <p className="text-[11px] font-medium leading-tight text-white whitespace-normal [overflow-wrap:anywhere]">
               {taskMove.occurrence.task.title}
             </p>
             {height > 30 && (
-              <p className="text-[10px] text-[#d4d4d4] truncate">
-                {fmtTime(minutesToTime(taskMove.minutes))}
+              <p className="text-[10px] leading-tight text-[#d4d4d4] whitespace-normal">
+                {fmtTime(minutesToTime(taskMove.minutes))} – {fmtTime(minutesToTime((taskMove.minutes + taskMove.occurrence.task.estimate_minutes) % (24 * 60)))}
+              </p>
+            )}
+            {height > 45 && taskMove.occurrence.task.description && (
+              <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-[10px] leading-tight text-[#d4d4d4]">
+                {taskMove.occurrence.task.description}
               </p>
             )}
           </div>
