@@ -125,8 +125,8 @@ export default function FocusView({
 
   const total = current.task.estimate_minutes * 60;
   const remaining = total - elapsed;
-  const overtime = remaining < 0;
-  const progress = Math.min(1, elapsed / Math.max(total, 1));
+  const overtime = current.timed && remaining < 0;
+  const progress = current.timed ? Math.min(1, elapsed / Math.max(total, 1)) : 1;
   const accent = CATEGORY_COLOR[current.task.category];
 
   // Ring geometry
@@ -163,7 +163,7 @@ export default function FocusView({
               </span>
             )}
             <span className="ml-auto text-[11px] text-[#8f8f8f]">
-              P{current.task.priority} · {fmtTime(current.time)}
+              P{current.task.priority} · {current.timed ? fmtTime(current.time) : "Anytime"}
             </span>
           </div>
 
@@ -193,10 +193,10 @@ export default function FocusView({
                 className="text-4xl font-bold tabular-nums"
                 style={{ color: overtime ? "#ef4444" : "#ffffff" }}
               >
-                {clock(remaining)}
+                {clock(current.timed ? remaining : elapsed)}
               </p>
               <p className="text-[11px] text-[#8f8f8f] mt-1 uppercase tracking-wider">
-                {overtime ? "Over estimate" : `of ${fmtDuration(current.task.estimate_minutes)}`}
+                {!current.timed ? "Elapsed time" : overtime ? "Over estimate" : `of ${fmtDuration(current.task.estimate_minutes)}`}
               </p>
             </div>
           </div>

@@ -1022,8 +1022,6 @@ export default function CalendarPage() {
                           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
                             <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
                             <span>·</span>
-                            <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
-                            <span>·</span>
                             <span>P{occurrence.task.priority}</span>
                           </div>
                         </button>

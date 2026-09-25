@@ -264,7 +264,7 @@ export default function TaskModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className={`grid ${timed ? "grid-cols-2" : "grid-cols-1"} gap-4`}>
             <div>
               <label className={labelCls}>Priority · {priority}</label>
               <input
@@ -276,7 +276,7 @@ export default function TaskModal({
                 className="w-full accent-[#22c55e]"
               />
             </div>
-            <div>
+            {timed && <div>
               <label className={labelCls}>Estimate (min)</label>
               <input
                 type="number"
@@ -285,7 +285,7 @@ export default function TaskModal({
                 onChange={(event) => setEstimate(event.target.value)}
                 className={inputCls}
               />
-            </div>
+            </div>}
           </div>
 
           <div>

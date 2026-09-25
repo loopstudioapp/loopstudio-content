@@ -104,7 +104,7 @@ export default function MostImportantChooser({
                         <Clock3 size={11} />
                         {occurrence.timed ? fmtTime(occurrence.time) : "Anytime"}
                       </span>
-                      <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>
+                      {occurrence.timed && <span>{fmtDuration(occurrence.task.estimate_minutes)}</span>}
                       {occurrence.task.recurrence !== "none" && (
                         <span className="inline-flex items-center gap-1" style={{ color: accent }}>
                           <Repeat2 size={11} /> Recurring
