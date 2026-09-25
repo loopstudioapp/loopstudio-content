@@ -1011,6 +1011,13 @@ export default function CalendarPage() {
                           className="flex-1 min-w-0 text-left"
                         >
                           <div className="flex items-center gap-2">
+                            <span
+                              className="inline-flex h-5 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/5 text-[11px] font-semibold tabular-nums text-[#d4d4d4]"
+                              aria-label={`Priority ${occurrence.task.priority}`}
+                              title={`Priority ${occurrence.task.priority}`}
+                            >
+                              {occurrence.task.priority}
+                            </span>
                             <span className="text-sm text-white truncate">
                               {occurrence.task.title}
                             </span>
@@ -1019,10 +1026,8 @@ export default function CalendarPage() {
                             )}
                             {occurrence.isGate && <Flag size={12} className="text-[#fbbf24] shrink-0" />}
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#8a8a8a]">
+                          <div className="mt-0.5 pl-9 text-[11px] text-[#8a8a8a]">
                             <span style={{ color: accent }}>{CATEGORY_LABEL[occurrence.task.category]}</span>
-                            <span>·</span>
-                            <span>P{occurrence.task.priority}</span>
                           </div>
                         </button>
                       </div>
