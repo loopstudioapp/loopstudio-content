@@ -34,6 +34,20 @@ import {
 
 type View = "week" | "focus";
 
+// Cool, subdued low priorities warm up toward the solid red top priority.
+const PRIORITY_BADGE_CLASSES: Record<number, string> = {
+  1: "border-slate-400/15 bg-slate-400/5 text-slate-400",
+  2: "border-blue-300/20 bg-blue-300/5 text-blue-300",
+  3: "border-cyan-300/20 bg-cyan-300/5 text-cyan-300",
+  4: "border-teal-300/20 bg-teal-300/10 text-teal-300",
+  5: "border-lime-300/20 bg-lime-300/10 text-lime-300",
+  6: "border-yellow-300/25 bg-yellow-300/10 text-yellow-300",
+  7: "border-amber-400/30 bg-amber-400/15 text-amber-300",
+  8: "border-orange-400/35 bg-orange-400/15 text-orange-300",
+  9: "border-rose-400/40 bg-rose-400/20 text-rose-200",
+  10: "border-red-400/60 bg-red-700 text-white",
+};
+
 const HOUR_HEIGHT = 60;
 // The grid starts at 07:00 — the small hours are sleep time and just added
 // dead space. Everything vertical is measured from here.
@@ -1012,7 +1026,7 @@ export default function CalendarPage() {
                         >
                           <div className="flex items-center gap-2">
                             <span
-                              className="inline-flex h-5 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/5 text-[11px] font-semibold tabular-nums text-[#d4d4d4]"
+                              className={`inline-flex h-5 w-7 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold tabular-nums ${PRIORITY_BADGE_CLASSES[occurrence.task.priority] ?? PRIORITY_BADGE_CLASSES[1]}`}
                               aria-label={`Priority ${occurrence.task.priority}`}
                               title={`Priority ${occurrence.task.priority}`}
                             >
