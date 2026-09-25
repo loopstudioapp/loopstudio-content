@@ -93,10 +93,9 @@ export default function TaskModal({
   const [priority, setPriority] = useState(task?.priority ?? 5);
   const [estimate, setEstimate] = useState(String(task?.estimate_minutes ?? defaultEstimate ?? 30));
   const [recurrence, setRecurrence] = useState<Recurrence>(task?.recurrence || "none");
-  // The toolbar's + Task button creates anytime work by default. Creating by
-  // tapping or dragging the calendar grid still carries a concrete time and
-  // therefore opens as a timed task.
-  const [timed, setTimed] = useState(task ? task.timed : Boolean(defaultTime));
+  // The entry point determines timing: + Task is Anytime, while a grid tap or
+  // drag supplies a scheduled time. Editing preserves the task's saved type.
+  const timed = task ? task.timed : Boolean(defaultTime);
   const [pinFirst, setPinFirst] = useState(task?.pin_first ?? false);
   const [date, setDate] = useState(task?.start_date || defaultDate);
   const [time, setTime] = useState(task?.start_time || defaultTime || DEFAULT_TIME);
@@ -286,28 +285,6 @@ export default function TaskModal({
                 className={inputCls}
               />
             </div>}
-          </div>
-
-          <div>
-            <label className={labelCls}>Timing</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { value: true, label: "At a time" },
-                { value: false, label: "Anytime" },
-              ].map((option) => (
-                <button
-                  key={String(option.value)}
-                  onClick={() => setTimed(option.value)}
-                  className={`py-1.5 px-2 text-xs rounded-lg border transition-colors ${
-                    timed === option.value
-                      ? "border-[#404040] text-white bg-[#1c1c1c]"
-                      : "border-[#3a3a3a] text-[#b0b0b0] hover:text-white"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/*
