@@ -1688,11 +1688,21 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (!run) return NextResponse.json({ ok: true, skipped: true, app: requestedApp, dates });
         try {
           transactionLedgerCache = null;
-          const ledger = await fetchTransactionLedger(dates[0], addVnDays(dates.at(-1)!, 1), requestedApp, false);
+          // Replace the old closing snapshot's shared Meta bookkeeping too:
+          // otherwise removing that cron would leave yesterday's spend at the
+          // last manual refresh. Never fetch/duplicate it for AskMed or a repair.
+          const [ledger, closingSpend] = await Promise.all([
+            fetchTransactionLedger(dates[0], addVnDays(dates.at(-1)!, 1), requestedApp, false),
+            requestedApp === "GrailScan" && days === "1"
+              ? getMetaSpendByDay(dates[0], dates[0])
+              : Promise.resolve({} as Record<string, number>),
+          ]);
           const points = buildDailyPointsFromLedger(dates, ledger, {}, 0, 0, requestedApp);
           const corrected = points.map(({ date, revenue, new_subs, refund_source_amount, refund_count,
             refund_source_reversed_amount, refund_reversed_count }) => ({ date, revenue, new_subs,
-            refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count }));
+            refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count,
+            ...(Number.isFinite(closingSpend[date]) ? { adspend_with_vat: closingSpend[date] * (1 + META_VAT_RATE) } : {}),
+          }));
           await finishReconciliation(requestedApp, run, corrected);
           return NextResponse.json({ ok: true, app: requestedApp, dates, daily: corrected });
         } catch (error) {

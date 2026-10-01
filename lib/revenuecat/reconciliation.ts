@@ -9,6 +9,9 @@ export type ReconciledDay = {
   refund_count: number;
   refund_source_reversed_amount: number;
   refund_reversed_count: number;
+  // Only the nightly GrailScan job closes the shared Meta cost for yesterday.
+  // Omit on provider failures and on historical revenue-only repairs.
+  adspend_with_vat?: number;
 };
 type Run = {
   status: "running" | "complete" | "failed";

@@ -98,6 +98,15 @@ test('zero revenue is a valid complete correction, not an error fallback',()=>{
   assert.equal(overlayReconciledDays(snapshot(),[correction('2026-09-30',0)]).daily[0].revenue,0);
 });
 
+test('nightly closing spend can update yesterday without changing other shared providers or today',()=>{
+  const {overlayReconciledDays}=harness().load('lib/revenuecat/reconciliation.ts');
+  const out=overlayReconciledDays(snapshot(),[{...correction(),adspend_with_vat:33}]);
+  assert.equal(out.daily[0].adspend_with_vat,33);
+  assert.equal(out.daily[0].cost_per_sub,33/15);
+  assert.equal(out.daily[0].profit,(996.327-5)*.85-33-3-2);
+  assert.equal(out.daily[1].adspend_with_vat,20);
+});
+
 test('publish complete batch atomically; duplicate run skips; a failure preserves corrected days',async()=>{
   const h=harness(),api=h.load('lib/revenuecat/reconciliation.ts');
   const run=await api.beginReconciliation('AskMed',['2026-09-30']);
