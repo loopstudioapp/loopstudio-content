@@ -1684,7 +1684,7 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (days !== "1" && days !== "30") return NextResponse.json({ error: "days must be 1 or 30" }, { status: 400 });
         if (!configuredProjects(requestedApp).length) throw new Error("RevenueCat connection is not configured");
         const dates = previousVnDates(Number(days));
-        const run = await beginReconciliation(requestedApp, dates);
+        const run = await beginReconciliation(requestedApp, dates, searchParams.get("force") === "1");
         if (!run) return NextResponse.json({ ok: true, skipped: true, app: requestedApp, dates });
         try {
           transactionLedgerCache = null;
@@ -1760,6 +1760,16 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
       const cached = await readTodayStatsCache(requestedApp);
       try {
         const refreshed = await fetchTodayStats(requestedApp, cached?.data || null);
+        // An explicit full-discovery maintenance refresh must also replace older
+        // authoritative corrections, not hide its new results under the overlay.
+        if (requestedApp === "AskMed" || requestedApp === "GrailScan") {
+          const history = refreshed.daily.filter(day => day.date < refreshed.today_vn);
+          const run = await beginReconciliation(requestedApp, history.map(day => day.date), true);
+          if (run) await finishReconciliation(requestedApp, run, history.map(({ date, revenue, new_subs,
+            refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count }) => ({
+            date, revenue, new_subs, refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count,
+          })));
+        }
         const merged = cached?.data?.today_vn === refreshed.today_vn
           ? { ...cached.data, daily: refreshed.daily }
           : refreshed;

@@ -115,6 +115,9 @@ test('publish complete batch atomically; duplicate run skips; a failure preserve
   await api.finishReconciliation('AskMed',run,[correction()]);
   assert.equal(h.writes.at(-1).length,2,'day and completion marker in same statement');
   assert.equal(await api.beginReconciliation('AskMed',['2026-09-30']),null);
+  const forced = await api.beginReconciliation('AskMed',['2026-09-30'],true);
+  assert.equal(forced.status,'running','manual repair can revisit a completed day');
+  await api.finishReconciliation('AskMed',forced,[correction()]);
   const preserved=JSON.stringify(h.records.get('__rc_reconciled_day__:AskMed:2026-09-30'));
   const next=await api.beginReconciliation('AskMed',['2026-09-29','2026-09-30']);
   await api.finishReconciliation('AskMed',next,null);

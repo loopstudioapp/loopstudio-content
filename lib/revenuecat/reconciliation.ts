@@ -33,12 +33,12 @@ export function previousVnDates(days: number, now = new Date()): string[] {
   return Array.from({ length: days }, (_, i) => new Date(midnight - (days - i) * 86400000).toISOString().slice(0, 10));
 }
 
-export async function beginReconciliation(app: string, dates: string[]): Promise<Run | null> {
+export async function beginReconciliation(app: string, dates: string[], force = false): Promise<Run | null> {
   const { data, error } = await supabase.from("pinterest_topics")
     .select("description_template,prompt_seed").eq("id", runId(app)).maybeSingle();
   if (error) throw new Error("Cannot read reconciliation status");
   const previous: Run | null = data ? JSON.parse(data.description_template) : null;
-  if (previous?.status === "complete" && dates.every(date => previous.dates.includes(date))) return null;
+  if (!force && previous?.status === "complete" && dates.every(date => previous.dates.includes(date))) return null;
   if (previous?.status === "running" && Date.now() - Date.parse(previous.started_at) < 10 * 60000) {
     throw new Error("Reconciliation already running");
   }
