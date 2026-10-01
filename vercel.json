@@ -29,12 +29,12 @@
       "schedule": "0 16 * * *"
     },
     {
-      "path": "/api/revenuecat?type=today_stats&app=GrailScan&fast=1",
-      "schedule": "59 16 * * *"
+      "path": "/api/revenuecat?type=today_stats&app=GrailScan&reconcile=1",
+      "schedule": "0 18 * * *"
     },
     {
-      "path": "/api/revenuecat?type=today_stats&app=AskMed&fast=1",
-      "schedule": "58 16 * * *"
+      "path": "/api/revenuecat?type=today_stats&app=AskMed&reconcile=1",
+      "schedule": "0 18 * * *"
     },
     {
       "path": "/api/openrouter-costs?refresh=1",

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
+import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
 import { supabase } from "@/lib/supabase";
 import {
   adjustmentKindFromLedgerId,
@@ -656,7 +657,11 @@ async function rcJson<T>(apiKey: string, url: string): Promise<T> {
   let lastMessage = "RevenueCat request failed";
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, { headers: rcHeaders(apiKey) });
+    // Stay below RevenueCat's 480/minute/project limit, even with six workers.
+    const scheduled = Math.max(Date.now(), rcNextRequest.get(apiKey) || 0);
+    rcNextRequest.set(apiKey, scheduled + 145);
+    await sleep(Math.max(0, scheduled - Date.now()));
+    const res = await fetch(url, { headers: rcHeaders(apiKey), cache: "no-store", signal: AbortSignal.timeout(20000) });
     if (res.ok) return (await res.json()) as T;
 
     lastStatus = res.status;
@@ -670,6 +675,8 @@ async function rcJson<T>(apiKey: string, url: string): Promise<T> {
   throw new RevenueCatApiError(lastStatus, lastMessage);
 }
 
+const rcNextRequest = new Map<string, number>();
+
 async function fetchRcList<T>(apiKey: string, firstUrl: string): Promise<T[]> {
   const items: T[] = [];
   let nextUrl: string | null = firstUrl;
@@ -677,10 +684,13 @@ async function fetchRcList<T>(apiKey: string, firstUrl: string): Promise<T[]> {
 
   while (nextUrl && pages < 200) {
     const json: RcList<T> = await rcJson<RcList<T>>(apiKey, nextUrl);
-    items.push(...(json.items || []));
+    if (!Array.isArray(json.items)) throw new Error("Incomplete RevenueCat list response");
+    items.push(...json.items);
     nextUrl = json.next_page ? rcPageUrl(json.next_page) : null;
     pages++;
   }
+
+  if (nextUrl) throw new Error("RevenueCat pagination limit reached; refusing partial totals");
 
   return items;
 }
@@ -704,12 +714,15 @@ async function fetchDbCustomerSeeds(): Promise<{
   seedsByApp: Map<string, CustomerSeed[]>;
   firstPaidAtByCustomer: Map<string, string>;
 }> {
-  const { data, error } = await supabase
-    .from("rc_subscriptions")
-    .select("app_user_id, app_name, country, purchased_at")
-    .eq("environment", "production");
-
-  if (error) throw new Error(`Database error: ${error.message}`);
+  const data: { app_user_id: string; app_name: string; country: string; purchased_at: string }[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const page = await supabase.from("rc_subscriptions")
+      .select("app_user_id, app_name, country, purchased_at")
+      .eq("environment", "production").order("id").range(offset, offset + 499);
+    if (page.error) throw new Error(`Database error: ${page.error.message}`);
+    data.push(...(page.data || []));
+    if ((page.data || []).length < 500) break;
+  }
 
   const seedMapsByApp = new Map<string, Map<string, CustomerSeed>>();
   const firstPaidAtByCustomer = new Map<string, string>();
@@ -768,7 +781,8 @@ async function fetchCustomerTransactionEvents(
   project: RcProject,
   seed: CustomerSeed,
   startMs: number,
-  endMs: number
+  endMs: number,
+  strict = false
 ): Promise<{ events: TransactionEvent[]; firstPaidAt: string | null }> {
   const encodedCustomerId = encodeURIComponent(seed.userId);
   let firstPaidMs: number | null = null;
@@ -819,7 +833,9 @@ async function fetchCustomerTransactionEvents(
           ? "REFUND_REVERSED"
           : undefined;
       const productId = body.product_id || "";
-      const eventId = customerEvent.id || `${project.name}:${seed.userId}:${productId}:${eventMs}:${gross}`;
+      const eventId = isPurchase && body.transaction_id
+        ? `${project.name}:${body.store || "app_store"}:${body.transaction_id}`
+        : customerEvent.id || `${project.name}:${seed.userId}:${productId}:${eventMs}:${gross}`;
 
       events.push({
         id: adjustmentKind ? `${adjustmentKind.toLowerCase()}:${eventId}` : eventId,
@@ -837,7 +853,7 @@ async function fetchCustomerTransactionEvents(
       });
     }
   } catch (err) {
-    if (err instanceof RevenueCatApiError && err.status === 404) {
+    if (!strict && err instanceof RevenueCatApiError && err.status === 404) {
       return { events: [], firstPaidAt: null };
     }
     throw err;
@@ -849,7 +865,8 @@ async function fetchCustomerTransactionEvents(
 async function fetchTransactionLedger(
   startDate: string,
   endExclusiveDate: string,
-  appName?: string
+  appName?: string,
+  discoverAllCustomers = true
 ): Promise<TransactionLedger> {
   const { startUtc } = vnDayBoundsUtc(startDate);
   const { startUtc: endUtc } = vnDayBoundsUtc(endExclusiveDate);
@@ -857,7 +874,7 @@ async function fetchTransactionLedger(
   const endMs = new Date(endUtc).getTime();
   const projects = configuredProjects(appName);
   const projectKey = projects.map((project) => `${project.name}:${project.projectId}`).join("|");
-  const cacheKey = `${projectKey}:${startUtc}:${endUtc}`;
+  const cacheKey = `${projectKey}:${startUtc}:${endUtc}:${discoverAllCustomers}`;
 
   if (transactionLedgerCache && transactionLedgerCache.key === cacheKey && Date.now() - transactionLedgerCache.timestamp < CACHE_TTL) {
     return transactionLedgerCache.data;
@@ -874,7 +891,10 @@ async function fetchTransactionLedger(
       seedMap.set(seed.userId, seed);
     }
 
-    for (const seed of await fetchRevenueCatCustomerSeeds(project)) {
+    // The nightly job verifies all webhook-registered subscribers, including
+    // expired/cancelled customers. Do not scan thousands of nonpaying installs
+    // every night. The explicit legacy full-discovery refresh remains available.
+    for (const seed of discoverAllCustomers ? await fetchRevenueCatCustomerSeeds(project) : []) {
       const existing = seedMap.get(seed.userId);
       seedMap.set(seed.userId, {
         ...seed,
@@ -884,7 +904,7 @@ async function fetchTransactionLedger(
 
     const seeds = Array.from(seedMap.values());
     const results = await mapLimit(seeds, TRANSACTION_CONCURRENCY, (seed) =>
-      fetchCustomerTransactionEvents(project, seed, startMs, endMs)
+      fetchCustomerTransactionEvents(project, seed, startMs, endMs, !discoverAllCustomers)
     );
 
     for (let i = 0; i < results.length; i++) {
@@ -901,14 +921,14 @@ async function fetchTransactionLedger(
     }
   }
 
-  const { data: adjustmentRows, error: adjustmentError } = await supabase
-    .from("rc_renewal_events")
-    .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
-    .gte("occurred_at", startUtc)
-    .lt("occurred_at", endUtc);
-
-  if (adjustmentError) {
-    throw new Error(`Database error: ${adjustmentError.message}`);
+  const adjustmentRows: RenewalEventRow[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const page = await supabase.from("rc_renewal_events")
+      .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
+      .gte("occurred_at", startUtc).lt("occurred_at", endUtc).order("id").range(offset, offset + 499);
+    if (page.error) throw new Error(`Database error: ${page.error.message}`);
+    adjustmentRows.push(...(page.data || []));
+    if ((page.data || []).length < 500) break;
   }
 
   const eventIds = new Set(events.map((event) => event.id.toLowerCase()));
@@ -950,7 +970,9 @@ async function fetchTransactionLedger(
   }
 
   const dedupedEvents = Array.from(
-    new Map(events.map((event) => [event.id.toLowerCase(), event])).values()
+    new Map(events.map((event) => [event.adjustmentKind
+      ? `${event.app}:${event.userId}:${event.productId}:${event.adjustmentKind}:${event.purchasedMs}:${event.gross.toFixed(3)}`
+      : event.id.toLowerCase(), event])).values()
   ).sort((a, b) => a.purchasedMs - b.purchasedMs);
   const data = { events: dedupedEvents, firstPaidAtByCustomer };
   transactionLedgerCache = { key: cacheKey, data, timestamp: Date.now() };
@@ -1167,6 +1189,7 @@ export type TodayStatsResponse = {
   ads: MetaSpend;
   profit: ProfitSummary;
   daily: DailyPoint[];
+  reconciliation_warning?: string | null;
 };
 
 function todayStatsCacheKey(appName?: string): string {
@@ -1193,7 +1216,7 @@ async function readTodayStatsCache(appName?: string): Promise<{ data: TodayStats
 }
 
 async function writeTodayStatsCache(data: TodayStatsResponse, appName?: string) {
-  await supabase.from("pinterest_topics").upsert(
+  const { error } = await supabase.from("pinterest_topics").upsert(
     {
       id: todayStatsCacheKey(appName),
       category: "system",
@@ -1204,6 +1227,7 @@ async function writeTodayStatsCache(data: TodayStatsResponse, appName?: string) 
     },
     { onConflict: "id" }
   );
+  if (error) throw new Error("Dashboard snapshot could not be saved");
 }
 
 function embeddedOpenRouterCosts(daily: DailyPoint[] | undefined): Record<string, number> {
@@ -1584,6 +1608,12 @@ async function fetchTodayStats(
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const response = await handleGet(request);
+  response.headers?.set("Cache-Control", "no-store");
+  return response;
+}
+
+async function handleGet(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = request.nextUrl;
   const type = searchParams.get("type");
   const env = getEnv();
@@ -1611,6 +1641,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     if (type === "today_stats") {
       if (searchParams.get("scope") === "owner") {
+        if (searchParams.get("reconcile") === "1") {
+          return NextResponse.json({ error: "Reconcile each owner app separately" }, { status: 400 });
+        }
         // Reuse the existing per-app cache/fast paths in-process. Never include
         // unrelated apps or rebuild a transaction ledger on normal refresh.
         const sources = await Promise.all(OWNER_APPS.map(async app => {
@@ -1640,6 +1673,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (requestedApp === "AskMed" && !configuredProjects(requestedApp).length) {
         return NextResponse.json({ error: "AskMed RevenueCat connection is not configured" }, { status: 503 });
       }
+      if (searchParams.get("reconcile") === "1") {
+        if (!process.env.CRON_SECRET || request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+          return NextResponse.json({ error: "Unauthorized revenue reconciliation" }, { status: 401 });
+        }
+        if (requestedApp !== "AskMed" && requestedApp !== "GrailScan") {
+          return NextResponse.json({ error: "Reconciliation requires one owner app" }, { status: 400 });
+        }
+        const days = searchParams.get("days") || "1";
+        if (days !== "1" && days !== "30") return NextResponse.json({ error: "days must be 1 or 30" }, { status: 400 });
+        if (!configuredProjects(requestedApp).length) throw new Error("RevenueCat connection is not configured");
+        const dates = previousVnDates(Number(days));
+        const run = await beginReconciliation(requestedApp, dates);
+        if (!run) return NextResponse.json({ ok: true, skipped: true, app: requestedApp, dates });
+        try {
+          transactionLedgerCache = null;
+          const ledger = await fetchTransactionLedger(dates[0], addVnDays(dates.at(-1)!, 1), requestedApp, false);
+          const points = buildDailyPointsFromLedger(dates, ledger, {}, 0, 0, requestedApp);
+          const corrected = points.map(({ date, revenue, new_subs, refund_source_amount, refund_count,
+            refund_source_reversed_amount, refund_reversed_count }) => ({ date, revenue, new_subs,
+            refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count }));
+          await finishReconciliation(requestedApp, run, corrected);
+          return NextResponse.json({ ok: true, app: requestedApp, dates, daily: corrected });
+        } catch (error) {
+          await finishReconciliation(requestedApp, run, null);
+          console.error("Revenue reconciliation failed", requestedApp, publicRevenueCatError(error));
+          return NextResponse.json({ error: "Revenue reconciliation failed; previous totals preserved" }, { status: 502 });
+        }
+      }
       const cachedOnly = searchParams.get("cached") === "1";
       const forceRefresh = searchParams.get("refresh") === "1";
       const fastTodayStats = searchParams.get("fast") === "1";
@@ -1654,7 +1715,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const cached = await readTodayStatsCache(requestedApp);
         const data = await fetchFastTodayStatsFromDb(cached?.data || null, requestedApp);
         await writeTodayStatsCache(data, requestedApp);
-        return NextResponse.json({ ...data, cached: false, fast: true, updated_at: new Date().toISOString() });
+        return NextResponse.json({ ...await withReconciliation(data, requestedApp), cached: false, fast: true, updated_at: new Date().toISOString() });
       }
 
       if (!forceRefresh) {
@@ -1670,7 +1731,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                 )
               )
             : cached.data;
-          return NextResponse.json({ ...data, cached: true, updated_at: cached.updatedAt });
+          return NextResponse.json({ ...await withReconciliation(data, requestedApp), cached: true, updated_at: cached.updatedAt });
         }
         if (cachedOnly && cached?.data?.today_vn !== vnDateIso()) {
           return NextResponse.json({ error: "cached today_stats is stale" }, { status: 404 });
@@ -1679,7 +1740,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const data = await fetchFastTodayStatsFromDb(cached?.data || null, requestedApp);
         await writeTodayStatsCache(data, requestedApp);
         return NextResponse.json({
-          ...data,
+          ...await withReconciliation(data, requestedApp),
           cached: false,
           fast: true,
           updated_at: new Date().toISOString(),
@@ -1696,7 +1757,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           ? overlayOpenRouterCosts(merged, embeddedOpenRouterCosts(refreshed.daily))
           : merged;
         await writeTodayStatsCache(data, requestedApp);
-        return NextResponse.json({ ...data, cached: false, updated_at: new Date().toISOString() });
+        return NextResponse.json({ ...await withReconciliation(data, requestedApp), cached: false, updated_at: new Date().toISOString() });
       } catch (refreshError) {
         if (cached?.data?.today_vn === vnDateIso()) {
           const data = requestedApp === "GrailScan"
@@ -1710,7 +1771,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               )
             : cached.data;
           return NextResponse.json({
-            ...data,
+            ...await withReconciliation(data, requestedApp),
             cached: true,
             stale: true,
             refresh_error: publicRevenueCatError(refreshError),

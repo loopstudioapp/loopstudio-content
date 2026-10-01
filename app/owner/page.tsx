@@ -30,7 +30,7 @@ type DailyPoint = {
   refund_reversed_amount?: number;
   refund_reversed_count?: number;
 };
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[] };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; reconciliation_warning?: string | null };
 type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
 type GameStudioPage = { key: string; name: string; url: string; summary: string; posts: GameStudioPost[] };
 type GameStudioData = { generated_at: string; window_start: string; overall_summary: string; total_posts: number; pages: GameStudioPage[] };
@@ -1121,6 +1121,9 @@ export default function OwnerDashboard() {
 
         {todayStatsError && (
           <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{todayStatsError}</div>
+        )}
+        {todayStats?.reconciliation_warning && (
+          <div role="status" className="bg-[#141414] border border-[#f59e0b]/20 rounded-xl p-5 text-[#f59e0b] text-sm mb-4">{todayStats.reconciliation_warning}</div>
         )}
 
         {(todayStats || !todayStatsError) && <>

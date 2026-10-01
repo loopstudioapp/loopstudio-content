@@ -52,6 +52,7 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
   const today = daily.find(d => d.date === grail.today_vn);
   if (!today) throw new Error("Today's combined chart point is missing");
   return {
+    reconciliation_warning: [grail.reconciliation_warning, askmed.reconciliation_warning].filter(Boolean).join(" ") || null,
     today_vn: grail.today_vn,
     per_app: perApp,
     transactions: [
