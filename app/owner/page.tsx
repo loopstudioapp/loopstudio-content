@@ -645,14 +645,12 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
   const cpns = profit?.cost_per_new_sub ?? 0;
   const adspend = profit?.adspend_with_vat ?? 0;
   const keptPct = ((1 - (profit?.apple_commission_rate ?? 0.15)) * 100).toFixed(1);
-  const keptSource =
-    proceeds?.source === "apple" ? "from Apple's reports" : proceeds?.source === "saved" ? "last saved from Apple's reports" : "default, Apple's reports unavailable";
   const vatPct = Math.round((profit?.meta_vat_rate ?? META_VAT_RATE) * 100);
   const profitColor = (n: number) => (n >= 0 ? "text-[#22c55e]" : "text-[#ef4444]");
   const taxNote = taxRate > 0 ? ` · −${Math.round(taxRate * 100)}% personal tax` : "";
   const taxBtns: { key: TaxMode; label: string }[] = [
     { key: "pre", label: "Before tax" },
-    { key: "auto", label: autoKnown ? `Auto (${Math.round(autoRate * 100)}%)` : "Auto (—)" },
+    { key: "auto", label: "Auto" },
     { key: "15", label: "15%" },
     { key: "17", label: "17%" },
     { key: "20", label: "20%" },
@@ -713,7 +711,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
         <div className="flex items-center gap-2 flex-wrap">
           <span className="w-2 h-2 rounded-full bg-[#10b981]" />
           <h3 className="text-white text-sm font-semibold">Profit</h3>
-          <span className="text-[#525252] text-xs">{appName} · today GMT+7 · net of Apple + local taxes ({keptPct}%, {keptSource}){taxNote}</span>
+          <span className="text-[#525252] text-xs">{appName} · today GMT+7 · net of Apple ({keptPct}%){taxNote}</span>
           {ads?.error && (
             <span className="text-[#ef4444] text-[10px]">
               {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · today's profit excludes Meta spend"}
@@ -737,7 +735,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
           ))}
         </div>
         <span className="text-[#525252] text-[10px] text-right">
-          {proceeds?.ytd_year ?? new Date().getFullYear()} revenue so far {autoKnown ? fmtVndShort(ytdVnd) : "—"} of ₫50B · VAT not included, confirm with an accountant
+          {proceeds?.ytd_year ?? new Date().getFullYear()} revenue so far {autoKnown ? fmtVndShort(ytdVnd) : "—"} of ₫50B · VAT not included
         </span>
         </div>
       </div>
