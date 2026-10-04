@@ -58,7 +58,8 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 
 ## Profit And Chart Rules
 
-- Apple commission defaults to 15% via `APPLE_COMMISSION_RATE`.
+- Owner profit uses Apple's real proceeds share, not a flat 15%: `lib/appstore/proceeds.ts` reads App Store Connect Sales Reports (`ASC_SALES_KEY_ID`, `ASC_SALES_ISSUER_ID`, `ASC_SALES_PRIVATE_KEY`, `ASC_VENDOR_NUMBER`). Each app/Vietnam day uses proceeds ÷ customer price over the trailing 14 report days (refunds included). Settled reports are cached permanently as `__asc_sales_report__:DAILY|MONTHLY:DATE` and the summary (per-day shares, 2026 YTD proceeds in USD/VND) as `__asc_proceeds_summary__` in `pinterest_topics`, refreshed when older than 12 h. A failed refresh keeps the last summary, then falls back to 0.85. Per-app endpoints still use `APPLE_COMMISSION_RATE` (default 15%).
+- The owner tax toggle is Vietnam personal tax only: Auto picks 0/15/17/20% from YTD Apple proceeds across all apps (≤₫500M, ≤₫3B, ≤₫50B, above) and applies it flat to a period's total profit; a manual rate is remembered per device.
 - Meta VAT is 10%.
 - RevenueCat cost is 1% when tracked 30-day revenue exceeds the configured free MTR threshold of `$2,500`; owner accounting evaluates that threshold once on combined GrailScan + AskMed net revenue.
 - Higgsfield is `$50/month`, distributed evenly over 30 days.

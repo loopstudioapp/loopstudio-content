@@ -3,9 +3,11 @@ import type { DailyPoint, TodayStatsResponse } from "@/app/api/revenuecat/route"
 export const OWNER_APPS = ["GrailScan", "AskMed"] as const;
 export type OwnerApp = (typeof OWNER_APPS)[number];
 export type AppBreakdown = Record<OwnerApp, { revenue: number; new_subs: number }>;
+/** Share of gross revenue Apple pays out, per app: today's and per Vietnam day. */
+export type KeptShares = { current: Record<OwnerApp, number>; by_date?: Record<OwnerApp, Record<string, number>> };
 
 /** Combine app ledgers, not their profits: the provider ledger is shared. */
-export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsResponse) {
+export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsResponse, kept?: KeptShares) {
   if (grail.today_vn !== askmed.today_vn || !grail.per_app.GrailScan || !askmed.per_app.AskMed) {
     throw new Error("Both app snapshots must cover the same reporting day");
   }
@@ -14,12 +16,17 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
     throw new Error("Both apps must have a complete matching daily history");
   }
   const appleRate = grail.profit.apple_commission_rate;
-  const daily = grail.daily.map((g): DailyPoint & { per_app: AppBreakdown } => {
+  // Apple's real proceeds (after its 15% and local taxes); the flat rate is only a fallback.
+  const keptFor = (app: OwnerApp, date: string) => kept?.by_date?.[app]?.[date] ?? kept?.current[app] ?? 1 - appleRate;
+  const afterRefunds = (day: DailyPoint) => day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0);
+  const daily = grail.daily.map((g): DailyPoint & { per_app: AppBreakdown; apple_cost: number } => {
     const a = askDays.get(g.date)!;
     const revenue = g.revenue + a.revenue;
     const newSubs = g.new_subs + a.new_subs;
+    const appleCost = afterRefunds(g) * (1 - keptFor("GrailScan", g.date)) + afterRefunds(a) * (1 - keptFor("AskMed", g.date));
     return {
       ...g,
+      apple_cost: appleCost,
       revenue,
       purchase_revenue: (g.purchase_revenue ?? g.revenue) + (a.purchase_revenue ?? a.revenue),
       new_subs: newSubs,
@@ -40,17 +47,22 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
   const trackedRevenue = daily.reduce((sum, d) => sum + d.revenue - d.refund_amount + d.refund_reversed_amount, 0);
   const rcRate = trackedRevenue > 2500 ? 0.01 : 0;
   for (const d of daily) {
-    const afterRefunds = d.revenue - d.refund_amount + d.refund_reversed_amount;
-    d.revenuecat_cost = rcRate ? afterRefunds * rcRate : 0;
-    d.profit = afterRefunds * (1 - appleRate) - d.adspend_with_vat
+    const net = afterRefunds(d);
+    d.revenuecat_cost = rcRate ? net * rcRate : 0;
+    d.profit = net - d.apple_cost - d.adspend_with_vat
       - d.openrouter_cost - d.higgsfield_cost - d.revenuecat_cost;
   }
+  // Blended 30-day share Apple keeps, for labels and older clients.
+  const net30 = daily.reduce((sum, d) => sum + afterRefunds(d), 0);
+  const blendedAppleRate = net30 > 0 ? daily.reduce((sum, d) => sum + d.apple_cost, 0) / net30 : appleRate;
   const perApp = { GrailScan: grail.per_app.GrailScan, AskMed: askmed.per_app.AskMed };
   const totalRevenue = perApp.GrailScan.today_revenue + perApp.AskMed.today_revenue;
   const newRevenue = perApp.GrailScan.new_revenue + perApp.AskMed.new_revenue;
   const newSubs = perApp.GrailScan.new_subs + perApp.AskMed.new_subs;
   const today = daily.find(d => d.date === grail.today_vn);
   if (!today) throw new Error("Today's combined chart point is missing");
+  const netOf = (key: "today_revenue" | "new_revenue") =>
+    perApp.GrailScan[key] * keptFor("GrailScan", grail.today_vn) + perApp.AskMed[key] * keptFor("AskMed", grail.today_vn);
   return {
     reconciliation_warning: [grail.reconciliation_warning, askmed.reconciliation_warning].filter(Boolean).join(" ") || null,
     today_vn: grail.today_vn,
@@ -66,10 +78,11 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
       total_revenue: totalRevenue,
       new_revenue: newRevenue,
       new_subs: newSubs,
-      net_revenue: totalRevenue * (1 - appleRate),
-      net_new_revenue: newRevenue * (1 - appleRate),
+      apple_commission_rate: blendedAppleRate,
+      net_revenue: netOf("today_revenue"),
+      net_new_revenue: netOf("new_revenue"),
       total_profit: today.profit,
-      new_profit: newRevenue * (1 - appleRate) - grail.profit.adspend_with_vat,
+      new_profit: netOf("new_revenue") - grail.profit.adspend_with_vat,
       cost_per_new_sub: newSubs > 0 ? grail.profit.adspend_with_vat / newSubs : 0,
       daily_refund_cost: today.refund_amount - today.refund_reversed_amount,
     },

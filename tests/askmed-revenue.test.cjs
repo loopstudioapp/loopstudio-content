@@ -48,6 +48,7 @@ function harness() {
         };
         if (name === '@/lib/openrouter/costs') return { readOpenRouterDailyCosts: async () => ({}), refreshOpenRouterCurrentCost: async () => ({}) };
         if (name.startsWith('@/')) return load(name.replace('@/', '') + '.ts');
+        if (name.startsWith('node:')) return require(name);
         throw new Error('Unexpected import ' + name);
       },
     };

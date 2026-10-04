@@ -49,6 +49,7 @@ function harness() {
         if(name==='next/server') return {NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
         if(name==='@/lib/meta/ads'||name==='@/lib/openrouter/costs') return {};
         if(name.startsWith('@/')) return load(name.slice(2)+'.ts');
+        if(name.startsWith('node:')) return require(name);
         throw Error(name);
       }
     }, {filename:file}); modules.set(relative,module.exports); return module.exports;

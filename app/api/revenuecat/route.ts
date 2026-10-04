@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
+import { getAppleProceeds } from "@/lib/appstore/proceeds";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
 import { supabase } from "@/lib/supabase";
 import {
@@ -1646,6 +1647,9 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         }
         // Reuse the existing per-app cache/fast paths in-process. Never include
         // unrelated apps or rebuild a transaction ledger on normal refresh.
+        // Apple's real proceeds share comes from its cached sales reports and
+        // never fails the dashboard (last saved value, then 85%).
+        const proceedsPromise = getAppleProceeds();
         const sources = await Promise.all(OWNER_APPS.map(async app => {
           const url = new URL(request.url);
           url.searchParams.delete("scope");
@@ -1656,8 +1660,10 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         const failed = sources.find(source => source.status !== 200);
         if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
         const [grail, askmed] = sources.map(source => source.data);
+        const proceeds = await proceedsPromise;
         return NextResponse.json({
-          ...combineOwnerStats(grail, askmed),
+          ...combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date }),
+          apple_proceeds: proceeds,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),
           updated_at: [grail.updated_at, askmed.updated_at].sort()[0],

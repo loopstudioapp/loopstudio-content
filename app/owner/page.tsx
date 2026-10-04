@@ -29,8 +29,10 @@ type DailyPoint = {
   refund_count?: number;
   refund_reversed_amount?: number;
   refund_reversed_count?: number;
+  apple_cost?: number;
 };
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; reconciliation_warning?: string | null };
+type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; reconciliation_warning?: string | null };
 type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
 type GameStudioPage = { key: string; name: string; url: string; summary: string; posts: GameStudioPost[] };
 type GameStudioData = { generated_at: string; window_start: string; overall_summary: string; total_posts: number; pages: GameStudioPage[] };
@@ -556,6 +558,11 @@ function fmtVnd(n: number): string {
 function fmtVndFull(n: number): string {
   return n.toLocaleString("en-US") + "₫";
 }
+function fmtVndShort(n: number): string {
+  if (n >= 1_000_000_000) return "₫" + (n / 1_000_000_000).toFixed(2).replace(/\.?0+$/, "") + "B";
+  if (n >= 1_000_000) return "₫" + Math.round(n / 1_000_000) + "M";
+  return "₫" + Math.round(n).toLocaleString("en-US");
+}
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
@@ -600,36 +607,62 @@ function AppChartLegend({ daily, metric }: { daily: DailyPoint[]; metric: "reven
   </div>;
 }
 
-type TaxMode = "normal" | "personal" | "corporate";
-function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; loading: boolean; appName?: string }) {
-  const [taxMode, setTaxMode] = useState<TaxMode>("normal");
-  // Apply the selected tax to a profit figure given its revenue base.
-  // - personal: 7% of revenue is taxed (deducted from profit)
-  // - corporate: 20% of profit (only when profitable; no tax on a loss)
-  const applyTax = (profitVal: number, revenueVal: number): number => {
-    if (taxMode === "personal") return profitVal - 0.07 * revenueVal;
-    if (taxMode === "corporate") return profitVal > 0 ? profitVal * 0.8 : profitVal;
-    return profitVal;
+// Vietnam 2026 personal business tax: one flat rate on the whole profit,
+// picked by year-to-date revenue (Apple proceeds, every app on the account).
+type TaxMode = "pre" | "auto" | "15" | "17" | "20";
+const TAX_MODE_KEY = "owner.taxMode";
+function autoTaxRate(ytdVnd: number): number {
+  if (ytdVnd <= 500_000_000) return 0;
+  if (ytdVnd <= 3_000_000_000) return 0.15;
+  if (ytdVnd <= 50_000_000_000) return 0.17;
+  return 0.2;
+}
+function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; loading: boolean; appName?: string }) {
+  const [taxMode, setTaxMode] = useState<TaxMode>("auto");
+  // A manual rate is remembered on this device until Auto is picked again.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TAX_MODE_KEY);
+      if (saved === "15" || saved === "17" || saved === "20") setTaxMode(saved);
+    } catch {}
+  }, []);
+  const chooseTax = (mode: TaxMode) => {
+    setTaxMode(mode);
+    try {
+      if (mode === "auto") localStorage.removeItem(TAX_MODE_KEY);
+      else if (mode !== "pre") localStorage.setItem(TAX_MODE_KEY, mode);
+    } catch {}
   };
+  const ytdVnd = proceeds?.ytd_proceeds_vnd ?? 0;
+  const autoKnown = Boolean(proceeds?.ytd_through);
+  const autoRate = autoTaxRate(ytdVnd);
+  const taxRate = taxMode === "pre" ? 0 : taxMode === "auto" ? autoRate : Number(taxMode) / 100;
+  // Tax applies to a period's total profit (loss days reduce it); a loss is not taxed.
+  const applyTax = (profitVal: number): number => (profitVal > 0 ? profitVal * (1 - taxRate) : profitVal);
 
-  const totalProfit = applyTax(profit?.total_profit ?? 0, profit?.total_revenue ?? 0);
-  const newProfit = applyTax(profit?.new_profit ?? 0, profit?.new_revenue ?? 0);
+  const totalProfit = applyTax(profit?.total_profit ?? 0);
+  const newProfit = applyTax(profit?.new_profit ?? 0);
   const cpns = profit?.cost_per_new_sub ?? 0;
   const adspend = profit?.adspend_with_vat ?? 0;
-  const applePct = Math.round((profit?.apple_commission_rate ?? 0.15) * 100);
+  const keptPct = ((1 - (profit?.apple_commission_rate ?? 0.15)) * 100).toFixed(1);
+  const keptSource =
+    proceeds?.source === "apple" ? "from Apple's reports" : proceeds?.source === "saved" ? "last saved from Apple's reports" : "default, Apple's reports unavailable";
   const vatPct = Math.round((profit?.meta_vat_rate ?? META_VAT_RATE) * 100);
   const profitColor = (n: number) => (n >= 0 ? "text-[#22c55e]" : "text-[#ef4444]");
-  const taxNote =
-    taxMode === "personal" ? " · −7% personal tax" : taxMode === "corporate" ? " · −20% corporate tax" : "";
+  const taxNote = taxRate > 0 ? ` · −${Math.round(taxRate * 100)}% personal tax` : "";
   const taxBtns: { key: TaxMode; label: string }[] = [
-    { key: "normal", label: "Normal" },
-    { key: "personal", label: "Personal 7%" },
-    { key: "corporate", label: "Corporate 20%" },
+    { key: "pre", label: "Before tax" },
+    { key: "auto", label: autoKnown ? `Auto (${Math.round(autoRate * 100)}%)` : "Auto (—)" },
+    { key: "15", label: "15%" },
+    { key: "17", label: "17%" },
+    { key: "20", label: "20%" },
   ];
-  // Per-day profit with tax applied (for the 30-day profit chart)
-  const taxedProfit = (daily || []).map((d) => applyTax(d.profit, d.revenue));
+  // Per-day profit scaled by the 30-day total's tax factor, so the chart adds up to the total.
+  const profit30 = (daily || []).reduce((sum, day) => sum + day.profit, 0);
+  const taxFactor30 = profit30 > 0 ? 1 - taxRate : 1;
+  const taxedProfit = (daily || []).map((d) => d.profit * taxFactor30);
   const totalRevenue30 = (daily || []).reduce((sum, day) => sum + day.revenue, 0);
-  const totalProfit30 = taxedProfit.reduce((sum, value) => sum + value, 0);
+  const totalProfit30 = applyTax(profit30);
   const refundAmount30 = (daily || []).reduce((sum, day) => sum + (day.refund_amount || 0), 0);
   const refundReversedAmount30 = (daily || []).reduce(
     (sum, day) => sum + (day.refund_reversed_amount || 0),
@@ -639,21 +672,17 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
   const openRouterCost30 = (daily || []).reduce((sum, day) => sum + (day.openrouter_cost || 0), 0);
   const revenueCatCost30 = (daily || []).reduce((sum, day) => sum + (day.revenuecat_cost || 0), 0);
   const higgsfieldCost30 = (daily || []).reduce((sum, day) => sum + (day.higgsfield_cost || 0), 0);
-  const appleCost30 = (daily || []).reduce(
-    (sum, day) =>
-      sum +
-      (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) *
-        (profit?.apple_commission_rate ?? 0.15),
-    0
-  );
+  // Apple's cut plus local taxes, from its reports per app and day.
+  const appleCostFor = (day: DailyPoint) =>
+    day.apple_cost ??
+    (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) * (profit?.apple_commission_rate ?? 0.15);
+  const appleCost30 = (daily || []).reduce((sum, day) => sum + appleCostFor(day), 0);
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
   const totalCost30 =
     metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
   const dailyCosts: DailyCostBreakdown[] = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
-    apple:
-      (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) *
-      (profit?.apple_commission_rate ?? 0.15),
+    apple: appleCostFor(day),
     revenueCat: day.revenuecat_cost || 0,
     openRouter: day.openrouter_cost || 0,
     higgsfield: day.higgsfield_cost || 0,
@@ -684,18 +713,19 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
         <div className="flex items-center gap-2 flex-wrap">
           <span className="w-2 h-2 rounded-full bg-[#10b981]" />
           <h3 className="text-white text-sm font-semibold">Profit</h3>
-          <span className="text-[#525252] text-xs">{appName} · today GMT+7 · net of {applePct}% Apple{taxNote}</span>
+          <span className="text-[#525252] text-xs">{appName} · today GMT+7 · net of Apple + local taxes ({keptPct}%, {keptSource}){taxNote}</span>
           {ads?.error && (
             <span className="text-[#ef4444] text-[10px]">
               {ads.stale ? "Meta unavailable · using saved spend" : "Meta unavailable · today's profit excludes Meta spend"}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1 flex-wrap justify-end">
           {taxBtns.map((b) => (
             <button
               key={b.key}
-              onClick={() => setTaxMode(b.key)}
+              onClick={() => chooseTax(b.key)}
               className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
                 taxMode === b.key
                   ? "text-white border-[#10b981] bg-[#10b981]/10"
@@ -705,6 +735,10 @@ function ProfitGrid({ profit, ads, daily, loading, appName = OWNER_APP }: { prof
               {b.label}
             </button>
           ))}
+        </div>
+        <span className="text-[#525252] text-[10px] text-right">
+          {proceeds?.ytd_year ?? new Date().getFullYear()} revenue so far {autoKnown ? fmtVndShort(ytdVnd) : "—"} of ₫50B · VAT not included, confirm with an accountant
+        </span>
         </div>
       </div>
       {loading ? (
@@ -1131,6 +1165,7 @@ export default function OwnerDashboard() {
           profit={todayStats?.profit}
           ads={todayStats?.ads}
           daily={todayStats?.daily}
+          proceeds={todayStats?.apple_proceeds}
           loading={todayStatsLoading && !todayStats}
         />
 
