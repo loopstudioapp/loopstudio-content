@@ -33,18 +33,6 @@ type DailyPoint = {
 };
 type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
 type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; reconciliation_warning?: string | null };
-type GameStudioPost = { id: string; text: string; url: string; created_at: string; likes: number; comments: number; shares: number };
-type GameStudioPage = { key: string; name: string; url: string; summary: string; posts: GameStudioPost[] };
-type GameStudioData = { generated_at: string; window_start: string; overall_summary: string; total_posts: number; pages: GameStudioPage[] };
-type GameStudioResponse = {
-  ok: boolean;
-  data: GameStudioData | null;
-  updated_at?: string;
-  next_refresh_at?: string;
-  refresh_skipped?: boolean;
-  refresh_error?: string;
-  error?: string;
-};
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
@@ -54,133 +42,6 @@ const APP_SEGMENTS = [
   { key: "GrailScan", label: "GrailScan", color: "#00b894" },
   { key: "AskMed", label: "AskMed", color: "#125cb5" },
 ] as const;
-
-function gameStudioTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function GameStudioPageCard({ page }: { page: GameStudioPage }) {
-  return (
-    <article className="bg-[#141414] border border-[#262626] rounded-lg overflow-hidden">
-      <div className="p-4 border-b border-[#262626]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <a
-              href={page.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex max-w-full min-w-0 items-center gap-1.5 text-sm font-semibold text-white hover:text-[#22c55e]"
-            >
-              <span className="min-w-0 truncate">{page.name}</span>
-              <ExternalLink size={12} className="shrink-0" />
-            </a>
-            <p className="text-xs leading-5 text-[#737373] mt-1 break-words">{page.summary}</p>
-          </div>
-          <span className="shrink-0 min-w-7 h-7 px-2 inline-flex items-center justify-center bg-[#0f2419] text-[#22c55e] text-xs font-bold rounded-md">
-            {page.posts.length}
-          </span>
-        </div>
-      </div>
-
-      <div className="divide-y divide-[#222]">
-        {page.posts.map((post) => (
-          <a
-            key={post.id}
-            href={post.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block p-4 hover:bg-[#181818] transition-colors"
-          >
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <time className="text-[10px] text-[#525252]">{gameStudioTime(post.created_at)} GMT+7</time>
-              <ExternalLink size={11} className="shrink-0 text-[#404040]" />
-            </div>
-            <p className="text-xs leading-5 text-[#b3b3b3] whitespace-pre-wrap break-words">
-              {post.text || "Media post without a text caption."}
-            </p>
-            <div className="flex items-center gap-4 mt-3 text-[10px] text-[#525252]">
-              <span className="inline-flex items-center gap-1"><ThumbsUp size={11} />{post.likes}</span>
-              <span className="inline-flex items-center gap-1"><MessageCircle size={11} />{post.comments}</span>
-              <span className="inline-flex items-center gap-1"><Share2 size={11} />{post.shares}</span>
-            </div>
-          </a>
-        ))}
-        {!page.posts.length && (
-          <p className="p-6 text-center text-xs text-[#525252]">No posts in the last 24 hours.</p>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function GameStudioSection({
-  response,
-  loading,
-  error,
-}: {
-  response: GameStudioResponse | null;
-  loading: boolean;
-  error: string | null;
-}) {
-  const data = response?.data;
-
-  return (
-    <section className="pb-8">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-        <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Game Studio</h2>
-        {data && <span className="text-[10px] text-[#525252]">{data.total_posts} posts · last 24 hours</span>}
-      </div>
-
-      {error && (
-        <div className="border-y border-[#ef4444]/20 py-3 text-[#ef4444] text-sm mb-4">{error}</div>
-      )}
-
-      {loading && !data && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {[0, 1, 2, 3].map((item) => (
-            <div key={item} className="h-48 bg-[#141414] border border-[#262626] rounded-lg animate-pulse" />
-          ))}
-        </div>
-      )}
-
-      {!loading && !data && !error && (
-        <div className="border-y border-[#262626] py-8 text-center">
-          <p className="text-sm text-[#737373]">No Facebook update cache yet.</p>
-          <p className="text-xs text-[#525252] mt-1">The feed refreshes automatically at 00:00 GMT+7.</p>
-        </div>
-      )}
-
-      {data && (
-        <>
-          <div className="space-y-4 lg:hidden">
-            {data.pages.map((page) => (
-              <GameStudioPageCard key={page.key} page={page} />
-            ))}
-          </div>
-
-          <div className="hidden lg:grid lg:grid-cols-2 lg:items-start gap-4">
-            {[0, 1].map((column) => (
-              <div key={column} className="space-y-4">
-                {data.pages
-                  .filter((_, index) => index % 2 === column)
-                  .map((page) => <GameStudioPageCard key={page.key} page={page} />)}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
 
 /* ── Interactive Chart with Hover Tooltip ── */
 function Chart({ data, dates, color, label, h = 80, zeroLine = false }: { data: number[]; dates: string[]; color: string; label: string; h?: number; zeroLine?: boolean }) {
@@ -1007,9 +868,6 @@ export default function OwnerDashboard() {
   const [fabi, setFabi] = useState<FabiData | null>(null);
   const [fabiLoading, setFabiLoading] = useState(false);
   const [fabiError, setFabiError] = useState<string | null>(null);
-  const [gameStudio, setGameStudio] = useState<GameStudioResponse | null>(null);
-  const [gameStudioLoading, setGameStudioLoading] = useState(true);
-  const [gameStudioError, setGameStudioError] = useState<string | null>(null);
 
   // Ket Coffee stays independent from the app metrics.
   useEffect(() => {
@@ -1020,26 +878,6 @@ export default function OwnerDashboard() {
       })
       .catch(() => {});
   }, []);
-
-  const loadGameStudio = useCallback(async () => {
-    setGameStudioLoading(true);
-    setGameStudioError(null);
-    try {
-      const response = await fetch("/api/game-studio", { cache: "no-store" });
-      const result = await response.json() as GameStudioResponse;
-      if (!response.ok || !result.ok) throw new Error(result.error || "Could not load Game Studio updates");
-      setGameStudio(result);
-      if (result.refresh_error) setGameStudioError(result.refresh_error);
-    } catch (loadError) {
-      setGameStudioError(loadError instanceof Error ? loadError.message : "Could not load Game Studio updates");
-    } finally {
-      setGameStudioLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadGameStudio();
-  }, [loadGameStudio]);
 
   // Load both app snapshots through the combined cached/fast endpoint.
   useEffect(() => {
@@ -1224,11 +1062,6 @@ export default function OwnerDashboard() {
         )}
       </section>
 
-      <GameStudioSection
-        response={gameStudio}
-        loading={gameStudioLoading}
-        error={gameStudioError}
-      />
     </div>
   );
 }
