@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase, Employee } from "@/lib/supabase";
+import type { Employee } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 
@@ -24,12 +24,11 @@ export default function ProfilePicker() {
 
   useEffect(() => {
     // PINs never leave the server: only the profile fields are loaded here.
-    supabase
-      .from("employees")
-      .select("id, name, avatar_color, created_at")
-      .order("name")
-      .then(({ data }) => {
-        setEmployees((data as Profile[]) || []);
+    fetch("/api/auth/profiles", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : []))
+      .catch(() => [])
+      .then((data: Profile[]) => {
+        setEmployees(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   }, []);

@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase, Employee, Account, DailyMetric } from "@/lib/supabase";
+import type { Employee, Account } from "@/lib/supabase";
+import * as staffApi from "@/lib/staff-api";
+import type { MetricPair } from "@/lib/staff-api";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-
-type MetricPair = { latest: DailyMetric | null; previous: DailyMetric | null };
 
 const AVATAR_COLORS = [
   "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444",
@@ -46,35 +46,20 @@ export default function OwnerTikTokDashboard() {
   }, [router]);
 
   const load = async () => {
-    const [{ data: emps }, { data: accs }] = await Promise.all([
-      supabase.from("employees").select("*").order("name"),
-      supabase.from("accounts").select("*").order("angle").order("username"),
+    const [emps, data] = await Promise.all([
+      staffApi.fetchEmployees().catch(() => [] as Employee[]),
+      staffApi.fetchAccountsWithMetrics().catch(() => ({ accounts: [] as Account[], metrics: {} as Record<string, MetricPair> })),
     ]);
-    setEmployees(emps || []);
-    setAccounts(accs || []);
-
-    const metricsMap: Record<string, MetricPair> = {};
-    if (accs) {
-      await Promise.all(
-        accs.map(async (acc: Account) => {
-          const { data: m } = await supabase
-            .from("daily_metrics")
-            .select("*")
-            .eq("account_id", acc.id)
-            .order("date", { ascending: false })
-            .limit(2);
-          metricsMap[acc.id] = { latest: m?.[0] || null, previous: m?.[1] || null };
-        })
-      );
-    }
-    setMetrics(metricsMap);
+    setEmployees(emps);
+    setAccounts(data.accounts);
+    setMetrics(data.metrics);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const reassign = async (accountId: string, newEmployeeId: string) => {
-    await supabase.from("accounts").update({ employee_id: newEmployeeId }).eq("id", accountId);
+    await staffApi.updateAccount(accountId, { employee_id: newEmployeeId }).catch((e) => console.error(e));
     setAccounts((prev) =>
       prev.map((a) => (a.id === accountId ? { ...a, employee_id: newEmployeeId } : a))
     );
@@ -91,9 +76,9 @@ export default function OwnerTikTokDashboard() {
   const saveEmployee = async () => {
     if (!empForm.name || !empForm.pin || empForm.pin.length !== 4) return;
     if (editingEmpId) {
-      await supabase.from("employees").update({ name: empForm.name, pin: empForm.pin }).eq("id", editingEmpId);
+      await staffApi.updateEmployee(editingEmpId, { name: empForm.name, pin: empForm.pin }).catch((e) => console.error(e));
     } else {
-      await supabase.from("employees").insert({ ...empForm, avatar_color: getNextColor() });
+      await staffApi.createEmployee({ ...empForm, avatar_color: getNextColor() }).catch((e) => console.error(e));
     }
     setEmpForm({ name: "", pin: "" });
     setEditingEmpId(null);
@@ -109,7 +94,7 @@ export default function OwnerTikTokDashboard() {
 
   const deleteEmployee = async (id: string) => {
     if (!confirm(t("deleteEmployeeConfirm"))) return;
-    await supabase.from("employees").delete().eq("id", id);
+    await staffApi.deleteEmployee(id).catch((e) => console.error(e));
     load();
   };
 
@@ -142,9 +127,9 @@ export default function OwnerTikTokDashboard() {
     const payload = { ...accForm, angle: parseInt(accForm.angle) };
 
     if (editingId) {
-      await supabase.from("accounts").update(payload).eq("id", editingId);
+      await staffApi.updateAccount(editingId, payload).catch((e) => console.error(e));
     } else {
-      await supabase.from("accounts").insert(payload);
+      await staffApi.createAccount(payload).catch((e) => console.error(e));
     }
 
     setAccForm(emptyAccForm);
@@ -155,9 +140,7 @@ export default function OwnerTikTokDashboard() {
 
   const deleteAccount = async (id: string) => {
     if (!confirm(t("deleteAccountConfirm"))) return;
-    await supabase.from("content_generations").delete().eq("account_id", id);
-    await supabase.from("daily_metrics").delete().eq("account_id", id);
-    await supabase.from("accounts").delete().eq("id", id);
+    await staffApi.deleteAccount(id).catch((e) => console.error(e));
     load();
   };
 

@@ -20,6 +20,7 @@ const ADMIN_ONLY_PREFIXES = [
 const PUBLIC_API_EXACT = new Set([
   "/api/auth/login",
   "/api/auth/logout",
+  "/api/auth/profiles", // login picker: names and colors only, never PINs
   "/api/webhooks/revenuecat",
 ]);
 const PUBLIC_API_PREFIXES = ["/api/cron/"];
@@ -32,6 +33,11 @@ const CRON_API_PATHS = new Set([
   "/api/openrouter-costs",
   "/api/game-studio",
 ]);
+
+// A member (staff) session may only reach the APIs its pages use; each handler
+// also scopes the data to that member. Everything else (revenue, costs, staff
+// PINs, calendar, Pinterest...) needs an admin or Kien session or a token.
+const MEMBER_API_PREFIXES = ["/api/accounts", "/api/generate-content"];
 
 function isRoute(pathname: string, prefix: string) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -47,8 +53,12 @@ async function guardApi(request: NextRequest, pathname: string) {
   if (CRON_API_PATHS.has(pathname) && (await bearerMatches(authorization, process.env.CRON_SECRET))) {
     return NextResponse.next();
   }
-  if (await verifyOwnerSession(request.cookies.get(OWNER_SESSION_COOKIE)?.value)) {
-    return NextResponse.next();
+  const session = await verifyOwnerSession(request.cookies.get(OWNER_SESSION_COOKIE)?.value);
+  if (session) {
+    if (session.role !== "member" || MEMBER_API_PREFIXES.some((prefix) => isRoute(pathname, prefix))) {
+      return NextResponse.next();
+    }
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

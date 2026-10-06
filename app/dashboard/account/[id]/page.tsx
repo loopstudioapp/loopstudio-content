@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { supabase, Account, DailyMetric } from "@/lib/supabase";
+import type { Account, DailyMetric } from "@/lib/supabase";
+import { fetchAccountDetail } from "@/lib/staff-api";
 import { formatNumber, formatDelta, ANGLE_NAMES } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
@@ -21,13 +22,12 @@ export default function AccountDetail({ params }: { params: Promise<{ id: string
     if (!hasAdmin && !match) { router.push("/"); return; }
     setEmployeeId(match ? match[2] : "admin");
 
-    Promise.all([
-      supabase.from("accounts").select("*").eq("id", id).single(),
-      supabase.from("daily_metrics").select("*").eq("account_id", id).order("date", { ascending: false }),
-    ]).then(([accRes, metRes]) => {
-      setAccount(accRes.data);
-      setAllMetrics(metRes.data || []);
-    });
+    fetchAccountDetail(id)
+      .then((data) => {
+        setAccount(data.account);
+        setAllMetrics(data.metrics);
+      })
+      .catch((e) => console.error(e));
   }, [id]);
 
   if (!account) {
