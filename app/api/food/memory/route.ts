@@ -1,4 +1,4 @@
-import { isAdminRequest } from "@/lib/owner-auth";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   cleanAliases,
@@ -14,12 +14,13 @@ import {
   upsertFoodMemory,
 } from "@/lib/food-memory-store";
 
-function isAuthorized(request: Request) {
-  return isAdminRequest(request);
+async function isAuthorized() {
+  const cookieStore = await cookies();
+  return cookieStore.get("admin")?.value === "1";
 }
 
 export async function GET(request: Request) {
-  if (!(await isAuthorized(request))) {
+  if (!(await isAuthorized())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await isAuthorized(request))) {
+  if (!(await isAuthorized())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1,4 +1,4 @@
-import { isAdminRequest } from "@/lib/owner-auth";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   cleanAliases,
@@ -162,7 +162,8 @@ async function findMemory(detection: FoodDetection): Promise<FoodMemory | null> 
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminRequest(request))) {
+  const cookieStore = await cookies();
+  if (cookieStore.get("admin")?.value !== "1") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

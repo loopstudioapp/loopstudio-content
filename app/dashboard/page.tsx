@@ -26,7 +26,7 @@ export default function Dashboard() {
     const eid = getCookie("employee_id");
     const ename = getCookie("employee_name");
     if (!eid) { router.push("/"); return; }
-    setEmployeeName(ename ? decodeURIComponent(ename) : "");
+    setEmployeeName(ename || "");
 
     supabase
       .from("accounts")
@@ -95,8 +95,7 @@ export default function Dashboard() {
             {lang === "en" ? "VN" : "EN"}
           </button>
           <button
-            onClick={async () => {
-              await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+            onClick={() => {
               document.cookie = "employee_id=; path=/; max-age=0";
               document.cookie = "employee_name=; path=/; max-age=0";
               router.push("/");
