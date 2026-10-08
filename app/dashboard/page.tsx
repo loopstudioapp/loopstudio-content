@@ -2,9 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { Account } from "@/lib/supabase";
-import { fetchAccountsWithMetrics } from "@/lib/staff-api";
-import type { MetricPair } from "@/lib/staff-api";
+import { supabase, Account, DailyMetric } from "@/lib/supabase";
 import { ANGLE_NAMES, ANGLE_COLORS, formatNumber, formatDelta } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import Link from "next/link";
@@ -13,6 +11,8 @@ function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return match ? decodeURIComponent(match[2]) : null;
 }
+
+type MetricPair = { latest: DailyMetric | null; previous: DailyMetric | null };
 
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -28,12 +28,32 @@ export default function Dashboard() {
     if (!eid) { router.push("/"); return; }
     setEmployeeName(ename ? decodeURIComponent(ename) : "");
 
-    // The server scopes a member session to its own accounts.
-    fetchAccountsWithMetrics()
-      .catch(() => ({ accounts: [] as Account[], metrics: {} as Record<string, MetricPair> }))
-      .then((data) => {
-        setAccounts(data.accounts);
-        setMetrics(data.metrics);
+    supabase
+      .from("accounts")
+      .select("*")
+      .eq("employee_id", eid)
+      .order("angle")
+      .order("username")
+      .then(async ({ data: accs }) => {
+        setAccounts(accs || []);
+        const metricsMap: Record<string, MetricPair> = {};
+        if (accs) {
+          await Promise.all(
+            accs.map(async (acc) => {
+              const { data: m } = await supabase
+                .from("daily_metrics")
+                .select("*")
+                .eq("account_id", acc.id)
+                .order("date", { ascending: false })
+                .limit(2);
+              metricsMap[acc.id] = {
+                latest: m?.[0] || null,
+                previous: m?.[1] || null,
+              };
+            })
+          );
+        }
+        setMetrics(metricsMap);
         setLoading(false);
       });
   }, [router]);

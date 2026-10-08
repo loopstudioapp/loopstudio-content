@@ -2,17 +2,17 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let _supabase: SupabaseClient | null = null;
 
-// Server-only client with the service-role key. The anon key has no access to
-// these tables (RLS + revoked grants), so browser pages must use the API routes.
 export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
   get(_, prop) {
     if (!_supabase) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (typeof window !== "undefined" || !url || !key) {
-        throw new Error("Supabase is server-only and needs SUPABASE_SERVICE_ROLE_KEY");
-      }
-      _supabase = createClient(url, key, {
+      // On the server, use the service-role key (bypasses RLS) so locked-down
+      // tables stay accessible to API routes. In the browser this env var is
+      // undefined (not NEXT_PUBLIC), so it falls back to the anon key and any
+      // RLS-protected table is correctly off-limits to the public.
+      const key =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      _supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
         auth: { persistSession: false, autoRefreshToken: false },
       });
     }

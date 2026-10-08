@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Employee, Account } from "@/lib/supabase";
-import * as staffApi from "@/lib/staff-api";
+import { supabase, Employee, Account } from "@/lib/supabase";
 import { ANGLE_NAMES } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
@@ -38,8 +37,8 @@ export default function AccountsPage() {
   }, [router]);
 
   const load = () => {
-    staffApi.fetchEmployees().then(setEmployees).catch(() => setEmployees([]));
-    staffApi.fetchAccounts().then(setAccounts).catch(() => setAccounts([]));
+    supabase.from("employees").select("*").order("name").then(({ data }) => setEmployees(data || []));
+    supabase.from("accounts").select("*").order("angle").order("username").then(({ data }) => setAccounts(data || []));
   };
 
   useEffect(load, []);
@@ -54,9 +53,9 @@ export default function AccountsPage() {
   const saveEmployee = async () => {
     if (!empForm.name || !empForm.pin || empForm.pin.length !== 4) return;
     if (editingEmpId) {
-      await staffApi.updateEmployee(editingEmpId, { name: empForm.name, pin: empForm.pin }).catch((e) => console.error(e));
+      await supabase.from("employees").update({ name: empForm.name, pin: empForm.pin }).eq("id", editingEmpId);
     } else {
-      await staffApi.createEmployee({ ...empForm, avatar_color: getNextColor() }).catch((e) => console.error(e));
+      await supabase.from("employees").insert({ ...empForm, avatar_color: getNextColor() });
     }
     setEmpForm({ name: "", pin: "" });
     setEditingEmpId(null);
@@ -72,7 +71,7 @@ export default function AccountsPage() {
 
   const deleteEmployee = async (id: string) => {
     if (!confirm(t("deleteEmployeeConfirm"))) return;
-    await staffApi.deleteEmployee(id).catch((e) => console.error(e));
+    await supabase.from("employees").delete().eq("id", id);
     load();
   };
 
@@ -105,9 +104,9 @@ export default function AccountsPage() {
     const payload = { ...accForm, angle: parseInt(accForm.angle) };
 
     if (editingId) {
-      await staffApi.updateAccount(editingId, payload).catch((e) => console.error(e));
+      await supabase.from("accounts").update(payload).eq("id", editingId);
     } else {
-      await staffApi.createAccount(payload).catch((e) => console.error(e));
+      await supabase.from("accounts").insert(payload);
     }
 
     setAccForm(emptyAccForm);
@@ -118,7 +117,9 @@ export default function AccountsPage() {
 
   const deleteAccount = async (id: string) => {
     if (!confirm(t("deleteAccountConfirm"))) return;
-    await staffApi.deleteAccount(id).catch((e) => console.error(e));
+    await supabase.from("content_generations").delete().eq("account_id", id);
+    await supabase.from("daily_metrics").delete().eq("account_id", id);
+    await supabase.from("accounts").delete().eq("id", id);
     load();
   };
 
