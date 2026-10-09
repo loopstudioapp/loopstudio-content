@@ -1,24 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/pull-metrics",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/fabi/sync",
-      "schedule": "0 16 * * *"
-    },
-    {
-      "path": "/api/revenuecat?type=today_stats&app=GrailScan&reconcile=1",
-      "schedule": "0 18 * * *"
-    },
-    {
-      "path": "/api/revenuecat?type=today_stats&app=AskMed&reconcile=1",
-      "schedule": "0 18 * * *"
-    },
-    {
-      "path": "/api/openrouter-costs?refresh=1",
-      "schedule": "5 0 * * *"
-    }
-  ]
+  "crons": []
 }
