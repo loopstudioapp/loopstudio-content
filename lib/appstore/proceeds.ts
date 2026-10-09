@@ -1,4 +1,4 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { sign } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { supabase } from "@/lib/supabase";
 
@@ -57,8 +57,10 @@ function salesToken(config: ReturnType<typeof salesConfig>): string {
   const unsigned = `${encode({ alg: "ES256", kid: config.keyId, typ: "JWT" })}.${encode({
     iss: config.issuerId, iat: now, exp: now + 900, aud: "appstoreconnect-v1",
   })}`;
+  // Pass the PEM itself: Cloudflare workerd rejects a KeyObject inside the
+  // { key, dsaEncoding } options (Node accepts both).
   const signature = sign("sha256", Buffer.from(unsigned), {
-    key: createPrivateKey(config.privateKey),
+    key: config.privateKey,
     dsaEncoding: "ieee-p1363",
   });
   return `${unsigned}.${signature.toString("base64url")}`;
