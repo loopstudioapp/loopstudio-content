@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "content-loopstudio",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    // Used by OpenNext and by the cron handler (each job = its own request).
+    { "binding": "WORKER_SELF_REFERENCE", "service": "content-loopstudio" }
+  ],
+  "limits": {
+    // Paid plan maximum (5 min CPU). Vercel ran these routes with maxDuration 300.
+    "cpu_ms": 300000,
+    // The nightly RevenueCat reconcile reads events for every known subscriber
+    // (paginated, plus Supabase calls); the paid default is 10,000.
+    "subrequests": 50000
+  },
+  "triggers": {
+    // Same schedules as vercel.json (UTC). Jobs per schedule: cloudflare/cron.ts
+    "crons": ["0 0 * * *", "5 0 * * *", "0 16 * * *", "0 18 * * *"]
+  },
+  // No routes / custom domain yet; test on *.workers.dev first.
+  "workers_dev": true,
+  "observability": { "enabled": true }
+}
