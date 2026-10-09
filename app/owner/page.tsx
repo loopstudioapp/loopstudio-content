@@ -969,7 +969,6 @@ export default function OwnerDashboard() {
         {isAdmin && (
           <div className="flex items-center gap-2">
             <Link href="/calendar" className={btnCls}>Calendar</Link>
-            <Link href="/food" className={btnCls}>Food</Link>
             <Link href="/grailscan" className={btnCls}>Server</Link>
             <Link href="/portfolio" className={btnCls}>Portfolio</Link>
           </div>

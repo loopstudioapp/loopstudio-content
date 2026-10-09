@@ -5,26 +5,6 @@
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/cron/post-reminder",
-      "schedule": "0 1 * * *"
-    },
-    {
-      "path": "/api/cron/post-reminder",
-      "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/cron/post-reminder",
-      "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/cron/pinterest-pipeline",
-      "schedule": "0 18 * * *"
-    },
-    {
-      "path": "/api/cron/pinterest-retry",
-      "schedule": "0 19 * * *"
-    },
-    {
       "path": "/api/fabi/sync",
       "schedule": "0 16 * * *"
     },
@@ -39,10 +19,6 @@
     {
       "path": "/api/openrouter-costs?refresh=1",
       "schedule": "5 0 * * *"
-    },
-    {
-      "path": "/api/game-studio?refresh=1",
-      "schedule": "0 17 * * *"
     }
   ]
 }
