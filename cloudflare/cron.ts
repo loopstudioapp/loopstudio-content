@@ -3,8 +3,6 @@
 // `Authorization: Bearer $CRON_SECRET` header Vercel sends. The routes keep
 // validating CRON_SECRET themselves.
 export const CRON_JOBS: Record<string, string[]> = {
-  // 00:00 UTC: RevenueCat summary to Telegram
-  "0 0 * * *": ["/api/cron/pull-metrics"],
   // 00:05 UTC: OpenRouter 30-day cost reconciliation
   "5 0 * * *": ["/api/openrouter-costs?refresh=1"],
   // 16:00 UTC: Ket Coffee (FABi) sales sync for today

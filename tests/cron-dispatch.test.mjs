@@ -38,10 +38,10 @@ test("jobs are GETs with the Vercel bearer header", async () => {
 });
 
 test("no secret means no header, and failures are reported", async () => {
-  const results = await runCronJobs("0 0 * * *", async (req) => {
+  const results = await runCronJobs("5 0 * * *", async (req) => {
     assert.equal(req.headers.get("authorization"), null);
     return new Response('{"error":"Unauthorized"}', { status: 401 });
   }, undefined);
-  assert.deepEqual(results.map((r) => [r.path, r.status, r.ok]), [["/api/cron/pull-metrics", 401, false]]);
+  assert.deepEqual(results.map((r) => [r.path, r.status, r.ok]), [["/api/openrouter-costs?refresh=1", 401, false]]);
   await assert.rejects(runCronJobs("1 2 * * *", async () => new Response(""), "x"));
 });
