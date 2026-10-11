@@ -70,6 +70,14 @@ async function supabaseCount(table: string): Promise<number> {
 
 async function supabaseRows(table: string): Promise<Record<string, unknown>[]> {
   const { url, headers } = supabaseConfig();
+  // Up to 1000 rows: one unordered read, so D1 gets the rows in Postgres'
+  // storage order and unordered queries / ORDER BY ties come back the same way.
+  const first = await fetch(`${url}/rest/v1/${table}?select=*&limit=1000`, { headers });
+  if (!first.ok) throw new Error(`${table}: read HTTP ${first.status} ${(await first.text()).slice(0, 200)}`);
+  const unordered = (await first.json()) as Record<string, unknown>[];
+  if (unordered.length < 1000) return unordered;
+
+  // Larger tables: stable primary-key pages (no rows skipped or repeated).
   const order = TABLES[table].pk.map((column) => `${column}.asc`).join(",");
   const rows: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += 1000) {
