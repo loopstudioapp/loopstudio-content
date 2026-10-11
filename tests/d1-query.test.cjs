@@ -91,7 +91,7 @@ test('timestamps are normalized so range filters compare by time', async () => {
   assert.equal(error, null);
   // '+07:00' midnight is 17:00 UTC the day before, so it is inside the range.
   assert.deepEqual(data.map((r) => r.id), ['1', '2', '4']);
-  assert.equal(data[0].occurred_at, '2026-10-03T17:00:00.000Z');
+  assert.equal(data[0].occurred_at, '2026-10-03T17:00:00+00:00');
 });
 
 test('booleans and json round-trip; insert returns defaults', async () => {
@@ -158,4 +158,23 @@ test('composite conflict keys, delete, and unknown tables/columns', async () => 
   assert.equal((await db.from('nope').select('*')).error.code, 'PGRST205');
   assert.equal((await db.from('calendar_tasks').select('nope')).error.code, 'PGRST204');
   assert.equal((await db.from('calendar_tasks').update({ nope: 1 }).eq('id', 'x')).error.code, 'PGRST204');
+});
+
+test('timestamps keep microseconds and read back in Postgres spelling', async () => {
+  const { db, d1 } = load();
+  await db.from('employees').insert([
+    { id: 'a', name: 'A', pin: '1', created_at: '2026-03-16T07:52:30.073379+00:00' },
+    { id: 'b', name: 'B', pin: '1', created_at: '2026-10-11T13:48:49+00:00' },
+    { id: 'c', name: 'C', pin: '1', created_at: new Date('2026-10-11T13:48:49.120Z').toISOString() },
+  ]);
+  // Alone (a multi-row write sends missing keys as null, like PostgREST): column default.
+  await db.from('employees').insert({ id: 'd', name: 'D', pin: '1' });
+  const raw = d1.sqlite.prepare('SELECT id, created_at FROM employees ORDER BY id').all();
+  assert.equal(raw[0].created_at, '2026-03-16T07:52:30.073379Z');
+  assert.equal(raw[1].created_at, '2026-10-11T13:48:49.000000Z');
+  assert.match(raw[3].created_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+  const { data } = await db.from('employees').select('id, created_at').order('id');
+  assert.deepEqual(data.slice(0, 3).map((r) => r.created_at), [
+    '2026-03-16T07:52:30.073379+00:00', '2026-10-11T13:48:49+00:00', '2026-10-11T13:48:49.12+00:00',
+  ]);
 });

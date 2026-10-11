@@ -7,9 +7,10 @@
 //   eq, neq, gt, gte, lt, lte, is, in, order, limit, range, single, maybeSingle
 //
 // Value handling (schema: d1/migrations/):
-// - timestamps are stored as ISO "YYYY-MM-DDTHH:MM:SS.sssZ"; writes and
+// - timestamps are stored as UTC "YYYY-MM-DDTHH:MM:SS.ffffffZ"; writes and
 //   filter values on timestamp columns are normalized to that format, so
 //   text comparison equals time comparison (Postgres compared timestamps).
+//   Reads return Postgres' spelling ("...SS[.fff]+00:00").
 // - booleans are stored as 0/1 and returned as true/false.
 // - json columns are stored as JSON text and returned parsed.
 // - Unknown tables/columns return the PostgREST error codes the routes check.
@@ -113,14 +114,40 @@ class QueryError extends Error {
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 
-/** Postgres timestamptz accepted many spellings; store one sortable form. */
+const TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?(?:\.(\d+))?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+
+/**
+ * Postgres timestamptz accepted many spellings; store one fixed-width UTC form,
+ * "YYYY-MM-DDTHH:MM:SS.ffffffZ" (microseconds, like Postgres), so text order
+ * is time order.
+ */
 export function normalizeTimestamp(value: unknown): unknown {
   if (value === null || value === undefined) return value;
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "number") return new Date(value).toISOString();
+  if (value instanceof Date || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : `${date.toISOString().slice(0, 23)}000Z`;
+  }
   if (typeof value !== "string") return value;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
+  const match = value.trim().match(TIMESTAMP);
+  if (!match) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? value : `${new Date(parsed).toISOString().slice(0, 23)}000Z`;
+  }
+  const [, day, hourMinute, second = "00", fraction = "", zone] = match;
+  let offset = !zone || zone.toUpperCase() === "Z" ? "Z" : zone;
+  if (/^[+-]\d{2}$/.test(offset)) offset += ":00";
+  else if (/^[+-]\d{4}$/.test(offset)) offset = `${offset.slice(0, 3)}:${offset.slice(3)}`;
+  const base = Date.parse(`${day}T${hourMinute}:${second}${offset}`);
+  if (Number.isNaN(base)) return value;
+  return `${new Date(base).toISOString().slice(0, 19)}.${fraction.slice(0, 6).padEnd(6, "0")}Z`;
+}
+
+/** Stored form back to what PostgREST returned: "...SS[.fff]+00:00". */
+export function displayTimestamp(value: string): string {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$/);
+  if (!match) return value;
+  const fraction = (match[2] || "").replace(/0+$/, "");
+  return `${match[1]}${fraction ? `.${fraction}` : ""}+00:00`;
 }
 
 function encodeValue(kind: Kind, value: unknown): unknown {
@@ -145,6 +172,7 @@ function decodeRow(info: TableInfo, row: Record<string, unknown>): Record<string
     const kind = info.columns[key];
     if (value === null || value === undefined) out[key] = null;
     else if (kind === "bool") out[key] = Boolean(value);
+    else if (kind === "ts" && typeof value === "string") out[key] = displayTimestamp(value);
     else if (kind === "json" && typeof value === "string") {
       try {
         out[key] = JSON.parse(value);
