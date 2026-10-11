@@ -10,6 +10,12 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - After a verified code change, create a scoped commit with a descriptive body, push `main`, deploy production, and verify the production API/UI. Never commit credentials, `.DS_Store`, or `tsconfig.tsbuildinfo` noise.
 - Latest architecture change as of 2026-08-17: commit `c7c6f1a` separates OpenRouter reconciliation from RevenueCat.
 
+## Data Store (since 2026-10-11)
+
+- Owner dashboard tables live in Cloudflare D1 `content-dashboard` (binding `DB`, schema `d1/migrations/`, apply with `npx wrangler d1 migrations apply content-dashboard --remote`). Code reads/writes them through `lib/db.ts` (`db.from(...)`, same call shape as supabase-js). Where this file says "Supabase tables" for rc_subscriptions, rc_renewal_events, pinterest_topics, calendar_*, fabi_* and employees, read D1.
+- Calendar images: R2 bucket `content-dashboard-images` (binding `IMAGES`), served by `/api/calendar/image/<name>`.
+- The old Supabase project `ffcrulihwcjksmjjpwal` and its env vars are kept untouched (read-only in practice) until the owner approves deleting them. `/api/grailscan/*` still reads the GrailScan Supabase project.
+
 ## Owner Dashboard Scope
 
 - `/owner` combines GrailScan and AskMed revenue, subscribers, profit and shared costs. Only their summary cards and Today Subscriptions tables stay separate. Revenue and new-subscriber charts stack both apps with separate legends/tooltips. Roomy AI and SwipeAway remain hidden.
