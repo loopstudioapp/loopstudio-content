@@ -45,7 +45,7 @@ function harness() {
       setTimeout: fn => { fn(); }, process:{env:{CRON_SECRET:'secret',REVENUECAT_ASKMED_API_KEY:'fake',REVENUECAT_ASKMED_PROJECT_ID:'ask'}},
       fetch: async (...args) => { fetchCalls++; return h.fetch(...args); },
       require(name) {
-        if(name==='@/lib/supabase') return {supabase};
+        if(name==='@/lib/db') return {db:supabase};
         if(name==='next/server') return {NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
         if(name==='@/lib/meta/ads'||name==='@/lib/openrouter/costs') return {};
         if(name.startsWith('@/')) return load(name.slice(2)+'.ts');

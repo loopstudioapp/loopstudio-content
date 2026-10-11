@@ -32,7 +32,7 @@ function harness(env = {}) {
       module, exports: module.exports, process: { env }, console: { error() {} }, URL, Date, Map, Set, Buffer, Intl,
       fetch: async () => { throw new Error('no network in tests'); },
       require(name) {
-        if (name === '@/lib/supabase') return { supabase };
+        if (name === '@/lib/db') return { db: supabase };
         if (name.startsWith('@/')) return load(name.slice(2) + '.ts');
         if (name.startsWith('node:')) return require(name);
         throw new Error('Unexpected import ' + name);

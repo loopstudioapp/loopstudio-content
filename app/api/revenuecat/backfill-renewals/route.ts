@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -45,7 +45,7 @@ async function backfillProject(appName: string, apiKey: string, projectId: strin
   // Iterate every active sub. We don't pre-filter by purchased_at because
   // a sub purchased 5–25 days ago could have renewed multiple times in
   // that window — those renewals are what we want.
-  const { data: subs } = await supabase
+  const { data: subs } = await db
     .from("rc_subscriptions")
     .select("app_user_id, country, product_id, store, revenue_gross, purchased_at")
     .eq("app_name", appName)
@@ -121,7 +121,7 @@ async function backfillProject(appName: string, apiKey: string, projectId: strin
         const occurredIso = new Date(periodMs).toISOString();
         const eventId = `backfill:${row.app_user_id}:${productId}:${periodMs}`;
 
-        const { error: dbErr } = await supabase.from("rc_renewal_events").upsert(
+        const { error: dbErr } = await db.from("rc_renewal_events").upsert(
           {
             id: eventId,
             app_user_id: row.app_user_id,

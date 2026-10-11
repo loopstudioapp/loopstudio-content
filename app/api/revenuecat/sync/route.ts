@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export const maxDuration = 300;
 
@@ -122,7 +122,7 @@ async function syncProject(
             updated_at: new Date().toISOString(),
           };
 
-          const { error } = await supabase
+          const { error } = await db
             .from("rc_subscriptions")
             .upsert(record, { onConflict: "id" });
 

@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 const OPENROUTER_CACHE_PREFIX = "__openrouter_daily_cost__";
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/keys";
@@ -59,7 +59,7 @@ async function writeOpenRouterDailyCosts(
   }));
 
   if (rows.length > 0) {
-    const { error } = await supabase.from("pinterest_topics").upsert(rows, { onConflict: "id" });
+    const { error } = await db.from("pinterest_topics").upsert(rows, { onConflict: "id" });
     if (error) throw new Error(`OpenRouter cache write failed: ${error.message}`);
   }
   return updatedAt;
@@ -72,7 +72,7 @@ export async function readOpenRouterDailyCosts(
   if (dates.length === 0) return { costsByDate: {}, updatedAt: null };
 
   const ids = dates.map((date) => cacheId(appName, date));
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("pinterest_topics")
     .select("id, description_template, prompt_seed")
     .in("id", ids);

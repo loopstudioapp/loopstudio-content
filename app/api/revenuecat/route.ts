@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
 import { getAppleProceeds } from "@/lib/appstore/proceeds";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import {
   adjustmentKindFromLedgerId,
   type RevenueAdjustmentKind,
@@ -127,13 +127,13 @@ async function fetchOverview(apiKey: string, projectId: string) {
 
   // Get accurate Roomy AI trial/sub counts from DB
   const [trialsResult, subsResult] = await Promise.all([
-    supabase
+    db
       .from("rc_subscriptions")
       .select("id", { count: "exact", head: true })
       .eq("status", "trialing")
       .eq("auto_renewal", "will_renew")
       .eq("environment", "production"),
-    supabase
+    db
       .from("rc_subscriptions")
       .select("id", { count: "exact", head: true })
       .eq("status", "active")
@@ -181,7 +181,7 @@ interface SubInfo {
 async function fetchSubscribers(filter: string) {
   const statusFilter = filter === "trial" ? "trialing" : "active";
 
-  let query = supabase
+  let query = db
     .from("rc_subscriptions")
     .select("*")
     .eq("status", statusFilter)
@@ -717,7 +717,7 @@ async function fetchDbCustomerSeeds(): Promise<{
 }> {
   const data: { app_user_id: string; app_name: string; country: string; purchased_at: string }[] = [];
   for (let offset = 0; ; offset += 500) {
-    const page = await supabase.from("rc_subscriptions")
+    const page = await db.from("rc_subscriptions")
       .select("app_user_id, app_name, country, purchased_at")
       .eq("environment", "production").order("id").range(offset, offset + 499);
     if (page.error) throw new Error(`Database error: ${page.error.message}`);
@@ -924,7 +924,7 @@ async function fetchTransactionLedger(
 
   const adjustmentRows: RenewalEventRow[] = [];
   for (let offset = 0; ; offset += 500) {
-    const page = await supabase.from("rc_renewal_events")
+    const page = await db.from("rc_renewal_events")
       .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
       .gte("occurred_at", startUtc).lt("occurred_at", endUtc).order("id").range(offset, offset + 499);
     if (page.error) throw new Error(`Database error: ${page.error.message}`);
@@ -1198,7 +1198,7 @@ function todayStatsCacheKey(appName?: string): string {
 }
 
 async function readTodayStatsCache(appName?: string): Promise<{ data: TodayStatsResponse; updatedAt: string } | null> {
-  const { data } = await supabase
+  const { data } = await db
     .from("pinterest_topics")
     .select("description_template, prompt_seed")
     .eq("id", todayStatsCacheKey(appName))
@@ -1217,7 +1217,7 @@ async function readTodayStatsCache(appName?: string): Promise<{ data: TodayStats
 }
 
 async function writeTodayStatsCache(data: TodayStatsResponse, appName?: string) {
-  const { error } = await supabase.from("pinterest_topics").upsert(
+  const { error } = await db.from("pinterest_topics").upsert(
     {
       id: todayStatsCacheKey(appName),
       category: "system",
@@ -1367,13 +1367,13 @@ async function fetchFastTodayStatsFromDb(
   const [mrrByApp, freshAds, newSubsResult, renewalsResult, openRouterCostsByDate] = await Promise.all([
     fetchMrrByApp(appName),
     appName === "AskMed" ? Promise.resolve(askMedAds()) : getTodayMetaSpend(),
-    supabase
+    db
       .from("rc_subscriptions")
       .select("app_user_id, app_name, country, product_id, store, purchased_at, expires_at, revenue_gross")
       .eq("environment", "production")
       .gte("purchased_at", startUtc)
       .lt("purchased_at", endUtc),
-    supabase
+    db
       .from("rc_renewal_events")
       .select("id, app_user_id, app_name, country, product_id, store, occurred_at, revenue")
       .gte("occurred_at", startUtc)
@@ -1412,7 +1412,7 @@ async function fetchFastTodayStatsFromDb(
   }
   const renewalUserIds = Array.from(new Set(renewalRows.map((row) => row.app_user_id).filter(Boolean))) as string[];
   const renewalSubsResult = renewalUserIds.length > 0
-    ? await supabase
+    ? await db
         .from("rc_subscriptions")
         .select("app_user_id, app_name, purchased_at")
         .eq("environment", "production")

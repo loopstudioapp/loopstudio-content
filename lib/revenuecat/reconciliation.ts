@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import type { TodayStatsResponse } from "@/app/api/revenuecat/route";
 
 export type ReconciledDay = {
@@ -34,7 +34,7 @@ export function previousVnDates(days: number, now = new Date()): string[] {
 }
 
 export async function beginReconciliation(app: string, dates: string[], force = false): Promise<Run | null> {
-  const { data, error } = await supabase.from("pinterest_topics")
+  const { data, error } = await db.from("pinterest_topics")
     .select("description_template,prompt_seed").eq("id", runId(app)).maybeSingle();
   if (error) throw new Error("Cannot read reconciliation status");
   const previous: Run | null = data ? JSON.parse(data.description_template) : null;
@@ -46,11 +46,11 @@ export async function beginReconciliation(app: string, dates: string[], force = 
   const row = record(runId(app), run, run.started_at);
   // Compare-and-set prevents duplicate cron invocations from starting two scans.
   if (data) {
-    const result = await supabase.from("pinterest_topics").update(row)
+    const result = await db.from("pinterest_topics").update(row)
       .eq("id", runId(app)).eq("prompt_seed", data.prompt_seed).select("id");
     if (result.error || result.data?.length !== 1) throw new Error("Reconciliation already running");
   } else {
-    const result = await supabase.from("pinterest_topics").insert(row);
+    const result = await db.from("pinterest_topics").insert(row);
     if (result.error) throw new Error("Cannot start reconciliation");
   }
   return run;
@@ -65,7 +65,7 @@ export async function finishReconciliation(app: string, run: Run, days: Reconcil
   // Failure updates only status: never erase or partially replace saved financials.
   const rows = (days || []).map(day => record(dayId(app, day.date), day, stamp));
   rows.push(record(runId(app), { ...run, status: days ? "complete" : "failed", finished_at: stamp }, stamp));
-  const { error } = await supabase.from("pinterest_topics").upsert(rows, { onConflict: "id" });
+  const { error } = await db.from("pinterest_topics").upsert(rows, { onConflict: "id" });
   if (error) throw new Error("Cannot save reconciliation; previous values preserved");
 }
 
@@ -98,7 +98,7 @@ export function overlayReconciledDays(data: TodayStatsResponse, corrections: Rec
 export async function withReconciliation(data: TodayStatsResponse, app?: string) {
   if (app !== "GrailScan" && app !== "AskMed") return data;
   const ids = [...data.daily.map(day => dayId(app, day.date)), runId(app)];
-  const result = await supabase.from("pinterest_topics")
+  const result = await db.from("pinterest_topics")
     .select("id,description_template,prompt_seed").in("id", ids);
   if (result.error) return { ...data, reconciliation_warning: `${app}: revenue reconciliation status unavailable. Showing saved data.` };
   try {

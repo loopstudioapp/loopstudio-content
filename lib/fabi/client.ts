@@ -5,7 +5,7 @@
  * Auth: cached JWT (7-day lifetime) + static access_token + fabi_type header.
  */
 
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 const BASE = "https://posapi.ipos.vn";
 const STATIC_KEY = process.env.FABI_STATIC_ACCESS_TOKEN || "5c885b2ef8c34fb7b1d1fad11eef7bec";
@@ -127,7 +127,7 @@ async function login(): Promise<AuthCache> {
     store_uids: storeUids,
   };
 
-  await supabase.from("fabi_auth_cache").upsert(
+  await db.from("fabi_auth_cache").upsert(
     {
       id: "singleton",
       token: cache.token,
@@ -144,7 +144,7 @@ async function login(): Promise<AuthCache> {
 }
 
 async function getValidAuth(): Promise<AuthCache> {
-  const { data: row } = await supabase
+  const { data: row } = await db
     .from("fabi_auth_cache")
     .select("token, token_expires_at, brand_uid, company_uid, store_uids")
     .eq("id", "singleton")
@@ -292,7 +292,7 @@ export async function persistDailySales(rows: DailyOverview[]): Promise<void> {
     invoice_count: r.invoice_count,
     fetched_at: new Date().toISOString(),
   }));
-  await supabase.from("fabi_daily_sales").upsert(upserts, { onConflict: "date,store_uid" });
+  await db.from("fabi_daily_sales").upsert(upserts, { onConflict: "date,store_uid" });
 }
 
 /**
@@ -300,7 +300,7 @@ export async function persistDailySales(rows: DailyOverview[]): Promise<void> {
  */
 export async function readDailySales(days: number): Promise<DailyOverview[]> {
   const range = vnDateRange(days);
-  const { data } = await supabase
+  const { data } = await db
     .from("fabi_daily_sales")
     .select("date, revenue_net, revenue_gross, discount_amount, invoice_count")
     .gte("date", range[0])

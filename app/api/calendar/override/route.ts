@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const task = await supabase
+  const task = await db
     .from("calendar_tasks")
     .select("id, recurrence")
     .eq("id", taskId)
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Only recurring tasks can have occurrence overrides" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("calendar_task_overrides")
     .upsert(
       {
@@ -82,7 +82,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "task_id and occurrence_date are required" }, { status: 400 });
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from("calendar_task_overrides")
     .delete()
     .eq("task_id", taskId)

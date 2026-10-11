@@ -42,7 +42,7 @@ function harness() {
           NextRequest: class { constructor(url, options) { this.url = String(url); this.nextUrl = new URL(url); this.headers = options.headers; } },
           NextResponse: { json: (body, options) => ({ body, status: options?.status || 200, json: async () => body }) },
         };
-        if (name === '@/lib/supabase') return { supabase };
+        if (name === '@/lib/db') return { db: supabase };
         if (name === '@/lib/meta/ads') return {
           getTodayMetaSpend: async () => { metaCalls++; return { configured: true, spend_usd: 12, spend_native: 12, currency: 'USD', usd_rate: 1, date: '2026-09-20' }; },
         };

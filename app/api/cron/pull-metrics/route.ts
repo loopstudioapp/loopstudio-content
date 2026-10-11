@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 // Daily RevenueCat summary sent to Telegram. The TikTok, Lemon8 and Pinterest
 // parts of this report were retired on 2026-10-09 (see
@@ -32,13 +32,13 @@ async function fetchRevenueCatReport(): Promise<RCReportData | null> {
 
     // Get trial/sub counts from DB directly (same logic as /api/revenuecat)
     const [trialsResult, subsResult] = await Promise.all([
-      supabase
+      db
         .from("rc_subscriptions")
         .select("id", { count: "exact", head: true })
         .eq("status", "trialing")
         .eq("auto_renewal", "will_renew")
         .eq("environment", "production"),
-      supabase
+      db
         .from("rc_subscriptions")
         .select("id", { count: "exact", head: true })
         .eq("status", "active")
@@ -51,7 +51,7 @@ async function fetchRevenueCatReport(): Promise<RCReportData | null> {
     const currentRevenue = m.revenue ?? 0;
 
     // Calculate yesterday's revenue from stored value
-    const { data: prevRow } = await supabase
+    const { data: prevRow } = await db
       .from("pinterest_topics")
       .select("times_used")
       .eq("id", "__rc_revenue_tracker__")
@@ -61,7 +61,7 @@ async function fetchRevenueCatReport(): Promise<RCReportData | null> {
     const yesterdayRevenue = Math.max(0, currentRevenue - prevRevenueCents / 100);
 
     // Store today's cumulative (in cents) for tomorrow's diff
-    await supabase.from("pinterest_topics").upsert(
+    await db.from("pinterest_topics").upsert(
       { id: "__rc_revenue_tracker__", category: "system", title_template: "Revenue Tracker", description_template: "system", prompt_seed: "system", times_used: Math.round(currentRevenue * 100) },
       { onConflict: "id" }
     );
