@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export async function POST(req: Request) {
   const { employee_id, pin } = await req.json();
-  const { data } = await supabase
+  const { data } = await db
     .from("employees")
     .select("id, name, pin")
     .eq("id", employee_id)

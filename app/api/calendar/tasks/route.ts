@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +74,7 @@ function buildRow(body: Record<string, unknown>) {
 }
 
 async function demoteOtherMostImportantTasks(selectedId: string) {
-  return supabase
+  return db
     .from("calendar_tasks")
     .update({ priority: 9 })
     .eq("priority", 10)
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
   const from = request.nextUrl.searchParams.get("from");
   const to = request.nextUrl.searchParams.get("to");
 
-  const tasksQuery = supabase
+  const tasksQuery = db
     .from("calendar_tasks")
     .select("*")
     .is("deleted_at", null)
@@ -108,25 +108,25 @@ export async function GET(request: NextRequest) {
   // An override matters when either its original occurrence or its moved
   // display date touches the visible range. Query both directions so moving an
   // occurrence across a week boundary neither duplicates nor loses it.
-  let originalOverridesQuery = supabase
+  let originalOverridesQuery = db
     .from("calendar_task_overrides")
     .select("task_id, occurrence_date, display_date, start_time");
   if (from) originalOverridesQuery = originalOverridesQuery.gte("occurrence_date", from);
   if (to) originalOverridesQuery = originalOverridesQuery.lte("occurrence_date", to);
 
-  let displayedOverridesQuery = supabase
+  let displayedOverridesQuery = db
     .from("calendar_task_overrides")
     .select("task_id, occurrence_date, display_date, start_time");
   if (from) displayedOverridesQuery = displayedOverridesQuery.gte("display_date", from);
   if (to) displayedOverridesQuery = displayedOverridesQuery.lte("display_date", to);
 
-  let completionsQuery = supabase
+  let completionsQuery = db
     .from("calendar_task_completions")
     .select("task_id, occurrence_date");
   if (from) completionsQuery = completionsQuery.gte("occurrence_date", from);
   if (to) completionsQuery = completionsQuery.lte("occurrence_date", to);
 
-  let skipsQuery = supabase.from("calendar_task_skips").select("task_id, occurrence_date");
+  let skipsQuery = db.from("calendar_task_skips").select("task_id, occurrence_date");
   if (from) skipsQuery = skipsQuery.gte("occurrence_date", from);
   if (to) skipsQuery = skipsQuery.lte("occurrence_date", to);
 
@@ -180,19 +180,19 @@ export async function GET(request: NextRequest) {
   // independent of one another and can share a second parallel round trip.
   const [carried, movedCompletions, movedSkips] = await Promise.all([
     oneOffIds.length
-      ? supabase
+      ? db
         .from("calendar_task_completions")
         .select("task_id, occurrence_date")
         .in("task_id", oneOffIds)
       : Promise.resolve(null),
     overrideDates.length
-      ? supabase
+      ? db
       .from("calendar_task_completions")
       .select("task_id, occurrence_date")
         .in("occurrence_date", overrideDates)
       : Promise.resolve(null),
     !skips.error && overrideDates.length
-      ? supabase
+      ? db
         .from("calendar_task_skips")
         .select("task_id, occurrence_date")
         .in("occurrence_date", overrideDates)
@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
   const row = buildRow(body);
   if (!row.title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
-  const { data, error } = await supabase.from("calendar_tasks").insert(row).select().single();
+  const { data, error } = await db.from("calendar_tasks").insert(row).select().single();
   if (error) {
     const missing = isMissingTable(error) || isMissingColumn(error);
     const hint = isMissingTable(error) ? SETUP_HINT : COLUMN_HINT;
@@ -253,7 +253,7 @@ export async function PATCH(request: NextRequest) {
   // The Task view uses this small action so choosing a focus task does not
   // need to resubmit (and potentially overwrite) the rest of its fields.
   if (body.action === "choose_most_important") {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("calendar_tasks")
       .update({ priority: 10 })
       .eq("id", id)
@@ -270,7 +270,7 @@ export async function PATCH(request: NextRequest) {
   const row = buildRow(body);
   if (!row.title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("calendar_tasks")
     .update(row)
     .eq("id", id)
@@ -293,7 +293,7 @@ export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  const { error } = await supabase
+  const { error } = await db
     .from("calendar_tasks")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", id);

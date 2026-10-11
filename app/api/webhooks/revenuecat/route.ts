@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import { revenueAdjustmentFromEvent } from "@/lib/revenuecat/adjustments";
 
 interface RCEvent {
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
       event.transaction_id ||
       `${appUserId}:${event.product_id || "unknown"}:${occurredMs}`;
     const adjustmentId = `${adjustment.kind.toLowerCase()}:${appName === "AskMed" ? "AskMed:" : ""}${sourceId}`;
-    const { error: adjustmentError } = await supabase
+    const { error: adjustmentError } = await db
       .from("rc_renewal_events")
       .upsert(
         {
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
 
     case "RENEWAL": {
       // Renewals: add revenue, extend expiry, but keep original purchased_at
-      const { data: existing } = await supabase
+      const { data: existing } = await db
         .from("rc_subscriptions")
         .select("revenue_gross")
         .eq("id", recordId)
@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
       // Build a stable id so retries don't duplicate.
       const occurredMs = event.purchased_at_ms || Date.now();
       const eventId = `renewal:${recordId}:${event.product_id || "unknown"}:${occurredMs}`;
-      await supabase.from("rc_renewal_events").upsert(
+      await db.from("rc_renewal_events").upsert(
         {
           id: eventId,
           app_user_id: appUserId,
@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, skipped: "unknown_event", type: event.type });
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from("rc_subscriptions")
     .upsert(upsertData, { onConflict: "id" });
 

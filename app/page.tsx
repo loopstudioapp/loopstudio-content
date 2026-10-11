@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase, Employee } from "@/lib/supabase";
+import type { Employee } from "@/lib/db";
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 
@@ -29,12 +29,11 @@ export default function ProfilePicker() {
   };
 
   useEffect(() => {
-    supabase
-      .from("employees")
-      .select("*")
-      .order("name")
-      .then(({ data }) => {
-        setEmployees(data || []);
+    fetch("/api/employees", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : []))
+      .catch(() => [])
+      .then((data: Employee[]) => {
+        setEmployees(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   }, []);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "task_id and occurrence_date are required" }, { status: 400 });
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from("calendar_task_completions")
     .upsert(
       { task_id: taskId, occurrence_date: date, completed_at: new Date().toISOString() },
@@ -36,7 +36,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "task_id and occurrence_date are required" }, { status: 400 });
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from("calendar_task_completions")
     .delete()
     .eq("task_id", taskId)

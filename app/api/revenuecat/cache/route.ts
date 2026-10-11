@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 const CACHE_KEY = "__rc_dashboard_cache__";
 
 // GET — read cached RevenueCat data from DB
 export async function GET() {
-  const { data } = await supabase
+  const { data } = await db
     .from("pinterest_topics")
     .select("description_template, prompt_seed")
     .eq("id", CACHE_KEY)
@@ -27,7 +27,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
-  await supabase.from("pinterest_topics").upsert(
+  await db.from("pinterest_topics").upsert(
     {
       id: CACHE_KEY,
       category: "system",

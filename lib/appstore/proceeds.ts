@@ -1,6 +1,6 @@
 import { sign } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 
 // Apple's real payout share, read from App Store Connect Sales Reports.
 // Apple keeps 15% (Small Business Program) after first deducting local
@@ -167,7 +167,7 @@ async function loadReports(
   requests: { frequency: Frequency; date: string; settled: boolean }[]
 ): Promise<Map<string, ReportResult>> {
   const ids = requests.map(r => reportId(r.frequency, r.date));
-  const { data, error } = await supabase.from("pinterest_topics")
+  const { data, error } = await db.from("pinterest_topics")
     .select("id,description_template").in("id", ids);
   if (error) throw new Error("Cannot read saved App Store sales reports");
   const results = new Map<string, ReportResult>();
@@ -190,7 +190,7 @@ async function loadReports(
     }];
   });
   if (rows.length) {
-    const { error: writeError } = await supabase.from("pinterest_topics").upsert(rows, { onConflict: "id" });
+    const { error: writeError } = await db.from("pinterest_topics").upsert(rows, { onConflict: "id" });
     if (writeError) throw new Error("Cannot save App Store sales reports");
   }
   return results;
@@ -324,7 +324,7 @@ function defaultProceeds(error?: string): AppleProceeds {
 export async function getAppleProceeds(): Promise<AppleProceeds> {
   let saved: AppleProceeds | null = null;
   try {
-    const { data } = await supabase.from("pinterest_topics")
+    const { data } = await db.from("pinterest_topics")
       .select("description_template").eq("id", SUMMARY_ID).maybeSingle();
     if (data?.description_template) saved = JSON.parse(data.description_template);
   } catch {
@@ -333,7 +333,7 @@ export async function getAppleProceeds(): Promise<AppleProceeds> {
   if (saved?.updated_at && Date.now() - Date.parse(saved.updated_at) < SUMMARY_TTL_MS) return saved;
   try {
     const fresh = await computeAppleProceeds(saved);
-    await supabase.from("pinterest_topics").upsert({
+    await db.from("pinterest_topics").upsert({
       id: SUMMARY_ID, category: "system", title_template: "App Store proceeds summary",
       description_template: JSON.stringify(fresh), prompt_seed: fresh.updated_at, times_used: 0,
     }, { onConflict: "id" });

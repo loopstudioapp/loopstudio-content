@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import {
   getOverview,
   getOverviewRange,
@@ -28,7 +28,7 @@ async function handle(req: NextRequest) {
 
   try {
     if (clearAuth) {
-      await supabase.from("fabi_auth_cache").delete().eq("id", "singleton");
+      await db.from("fabi_auth_cache").delete().eq("id", "singleton");
     }
 
     if (!cached) {
