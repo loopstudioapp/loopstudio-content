@@ -204,19 +204,16 @@ const addDays = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 
 /**
- * Download report instances not read before and save Apple dates not saved
- * yet: the one-time history once, then ongoing daily files from the last
- * 35 days. Saved days (including the website seed) are never overwritten.
+ * Download report instances not read before (the one-time history once, then
+ * ongoing daily files from the last 35 days) and save their dates. Apple's
+ * official file replaces a saved day, including a website seed stand-in;
+ * the latest Apple file wins.
  */
 export async function syncAskMedChannels(now = new Date()) {
   const config = salesConfig();
   const since = addDays(now.toISOString().slice(0, 10), -ONGOING_WINDOW_DAYS);
-  const [savedDays, savedInstances] = await Promise.all([
-    db.from("askmed_channel_daily").select("date"),
-    db.from("askmed_channel_instances").select("id"),
-  ]);
-  if (savedDays.error || savedInstances.error) throw new Error("Cannot read saved AskMed channel data");
-  const storedDates = new Set<string>((savedDays.data || []).map((row: { date: string }) => row.date));
+  const savedInstances = await db.from("askmed_channel_instances").select("id");
+  if (savedInstances.error) throw new Error("Cannot read saved AskMed channel data");
   const fetchedIds = new Set<string>((savedInstances.data || []).map((row: { id: string }) => row.id));
 
   const instances: Instance[] = [];
@@ -232,7 +229,7 @@ export async function syncAskMedChannels(now = new Date()) {
       for (const item of found) {
         const processingDate = typeof item.attributes?.processingDate === "string" ? item.attributes.processingDate.slice(0, 10) : null;
         if (fetchedIds.has(item.id)) continue;
-        if (request.kind === "ONGOING" && processingDate && (processingDate < since || storedDates.has(processingDate))) continue;
+        if (request.kind === "ONGOING" && processingDate && processingDate < since) continue;
         instances.push({ id: item.id, kind: request.kind, processingDate });
       }
     }
@@ -244,7 +241,7 @@ export async function syncAskMedChannels(now = new Date()) {
 
   const newDays = new Map<string, ChannelTotals>();
   results.forEach(result => {
-    for (const [date, totals] of Object.entries(result.days)) if (!storedDates.has(date)) newDays.set(date, totals);
+    for (const [date, totals] of Object.entries(result.days)) newDays.set(date, totals);
   });
   const stamp = new Date().toISOString();
   if (newDays.size) {

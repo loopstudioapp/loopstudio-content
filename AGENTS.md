@@ -53,13 +53,6 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - Spend uses the ad account's daily timezone, is converted to USD using `open.er-api.com`, and receives 10% Meta VAT in profit calculations.
 - A Meta outage preserves valid same-day cached spend when available and marks it stale; it must not silently replace known spend with zero.
 
-### AskMed Meta / Organic Revenue Split
-
-- The 30-Day Revenue chart splits AskMed into "AskMed Meta Ads" and "AskMed Organic" (New Subs keeps one AskMed segment). Each Vietnam day's RevenueCat AskMed revenue is multiplied by the same Apple date's Meta share, so totals never change.
-- Source: App Store Connect Analytics Reports, report "App Store Purchases Standard" (requests ONGOING `8114e534-…` and ONE_TIME_SNAPSHOT `f0f20834-…`), DAILY instances only, same ASC_SALES_* key. Code: `lib/appstore/channels.ts`; table `askmed_channel_daily` (+ `askmed_channel_instances`, files already read), migration `0002`.
-- Owner rules: Meta = App Referrer + Web Referrer; Organic = App Store Search + App Store Browse (the ASC website calls Browse "Other"); Institutional, Unavailable and anything else are shared in that day's Meta:Organic ratio. Days without Apple data use the trailing 7 saved days' share and say "estimated" in the tooltip.
-- Fetch: cron at 00:05 and 16:00 UTC, or on demand `GET /api/appstore/askmed-channels?refresh=1` with `Authorization: Bearer $CRON_SECRET`. Only new files are downloaded and saved days are never overwritten. History 2026-09-19 to 10-11 came from the ASC website: `d1/seed/askmed-channel-daily-2026-09-19_10-11.sql`.
-
 ### OpenRouter
 
 - Implementation: `lib/openrouter/costs.ts` and `app/api/openrouter-costs/route.ts`.

@@ -209,11 +209,11 @@ test('seed loads the website data and is never applied over saved rows', async (
   assert.deepEqual(days, REAL);
 });
 
-test('sync reads each new daily file once and never overwrites saved days', async () => {
+test('sync reads each new daily file once; Apple's file replaces a saved (seed) day', async () => {
   const calls = [];
   const gz = (lines) => zlib.gzipSync([HEADER.join('\t'), ...lines].join('\n'));
   const files = {
-    'https://files.test/snap-1011': gz([row('2026-10-11', 'App Referrer', 1)]), // seeded day: kept as is
+    'https://files.test/snap-1011': gz([row('2026-10-11', 'App Referrer', 1)]), // replaces the seeded day
     'https://files.test/snap-1012': gz([row('2026-10-12', 'App Referrer', 80), row('2026-10-12', 'App Store Search', 20)]),
     'https://files.test/ongoing-1013': gz([row('2026-10-13', 'Web Referrer', 30), row('2026-10-13', 'App Store Browse', 10)]),
   };
@@ -247,12 +247,15 @@ test('sync reads each new daily file once and never overwrites saved days', asyn
     if (!(url.pathname in api)) return new Response('{}', { status: 404 });
     return Response.json({ data: api[url.pathname], links: {} });
   };
-  const { channels } = harness({ seed: true, fetch });
+  const { channels, d1 } = harness({ seed: true, fetch });
   const first = await channels.syncAskMedChannels(new Date('2026-10-14T03:00:00Z'));
-  assert.deepEqual(first, { instances_read: 3, instances_pending: 1, saved_dates: ['2026-10-12', '2026-10-13'], missing_reports: [] });
+  assert.deepEqual(first, { instances_read: 3, instances_pending: 1, saved_dates: ['2026-10-11', '2026-10-12', '2026-10-13'], missing_reports: [] });
   const days = await channels.readAskMedChannelDays('2026-10-11');
+  // A seed rerun only fills missing days: Apple's row stays.
+  d1.sqlite.exec(fs.readFileSync(SEED, 'utf8'));
+  assert.deepEqual(await channels.readAskMedChannelDays('2026-10-11'), days);
   assert.deepEqual(days.map((d) => [d.date, d.app_referrer_usd, d.web_referrer_usd, d.app_store_search_usd, d.app_store_browse_usd]), [
-    ['2026-10-11', 2538, 0, 180, 147],
+    ['2026-10-11', 1, 0, 0, 0],
     ['2026-10-12', 80, 0, 20, 0],
     ['2026-10-13', 0, 30, 0, 10],
   ]);
