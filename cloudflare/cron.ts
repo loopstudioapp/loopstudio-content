@@ -3,10 +3,11 @@
 // `Authorization: Bearer $CRON_SECRET` header Vercel sends. The routes keep
 // validating CRON_SECRET themselves.
 export const CRON_JOBS: Record<string, string[]> = {
-  // 00:05 UTC: OpenRouter 30-day cost reconciliation
-  "5 0 * * *": ["/api/openrouter-costs?refresh=1"],
-  // 16:00 UTC: Ket Coffee (FABi) sales sync for today
-  "0 16 * * *": ["/api/fabi/sync"],
+  // 00:05 UTC: OpenRouter 30-day cost reconciliation; new AskMed App Store
+  // source files (Meta/organic revenue split), only days not saved yet
+  "5 0 * * *": ["/api/openrouter-costs?refresh=1", "/api/appstore/askmed-channels?refresh=1"],
+  // 16:00 UTC: Ket Coffee (FABi) sales sync for today; AskMed source files again
+  "0 16 * * *": ["/api/fabi/sync", "/api/appstore/askmed-channels?refresh=1"],
   // 18:00 UTC: prior Vietnam day revenue reconciliation, one per owner app
   "0 18 * * *": [
     "/api/revenuecat?type=today_stats&app=GrailScan&reconcile=1",

@@ -40,7 +40,7 @@ export type AppleProceeds = {
   error?: string;
 };
 
-function salesConfig() {
+export function salesConfig() {
   const keyId = process.env.ASC_SALES_KEY_ID;
   const issuerId = process.env.ASC_SALES_ISSUER_ID;
   const privateKey = process.env.ASC_SALES_PRIVATE_KEY?.replace(/\\n/g, "\n");
@@ -51,7 +51,7 @@ function salesConfig() {
   return { keyId, issuerId, privateKey, vendorNumber };
 }
 
-function salesToken(config: ReturnType<typeof salesConfig>): string {
+export function salesToken(config: ReturnType<typeof salesConfig>): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${encode({ alg: "ES256", kid: config.keyId, typ: "JWT" })}.${encode({

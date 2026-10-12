@@ -84,6 +84,18 @@ export const TABLES: Record<string, TableInfo> = {
       discount_amount: "int", invoice_count: "int", fetched_at: "ts",
     },
   },
+  askmed_channel_daily: {
+    pk: ["date"],
+    columns: {
+      date: "date", app_referrer_usd: "real", web_referrer_usd: "real", app_store_search_usd: "real",
+      app_store_browse_usd: "real", institutional_usd: "real", unavailable_usd: "real", other_usd: "real",
+      source: "text", updated_at: "ts",
+    },
+  },
+  askmed_channel_instances: {
+    pk: ["id"],
+    columns: { id: "text", request_kind: "text", processing_date: "date", dates: "json", fetched_at: "ts" },
+  },
 };
 
 // Minimal D1 surface (types from @cloudflare/workers-types are not installed).
