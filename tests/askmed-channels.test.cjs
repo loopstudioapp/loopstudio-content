@@ -209,7 +209,7 @@ test('seed loads the website data and is never applied over saved rows', async (
   assert.deepEqual(days, REAL);
 });
 
-test('sync reads each new daily file once; Apple's file replaces a saved (seed) day', async () => {
+test("sync reads each new daily file once; Apple's file replaces a saved (seed) day", async () => {
   const calls = [];
   const gz = (lines) => zlib.gzipSync([HEADER.join('\t'), ...lines].join('\n'));
   const files = {
