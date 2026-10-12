@@ -32,7 +32,8 @@ type DailyPoint = {
   apple_cost?: number;
 };
 type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; reconciliation_warning?: string | null };
+type AskMedChannels = Record<string, { meta: number; organic: number; meta_share: number; estimated: boolean }>;
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; askmed_channels?: AskMedChannels | null; reconciliation_warning?: string | null };
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
@@ -41,6 +42,12 @@ const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
 const APP_SEGMENTS = [
   { key: "GrailScan", label: "GrailScan", color: "#00b894" },
   { key: "AskMed", label: "AskMed", color: "#125cb5" },
+] as const;
+// Revenue chart: AskMed split by Apple's source of each sale (Meta ads vs organic).
+const REVENUE_SEGMENTS = [
+  APP_SEGMENTS[0],
+  { key: "AskMedMeta", label: "AskMed Meta Ads", color: "#125cb5" },
+  { key: "AskMedOrganic", label: "AskMed Organic", color: "#6ea8e8" },
 ] as const;
 
 /* ── Interactive Chart with Hover Tooltip ── */
@@ -261,10 +268,11 @@ const COST_SEGMENTS = [
   { key: "refunds", label: "Refunds", color: "#ef4444" },
 ] as const;
 
-function StackedBreakdownChart<K extends string>({ data, dates, segments, label, valueLabel = fmtCompactCur, tooltipValue = fmtApiCost }: {
+function StackedBreakdownChart<K extends string>({ data, dates, segments, label, valueLabel = fmtCompactCur, tooltipValue = fmtApiCost, notes }: {
   data: Record<K, number>[]; dates: string[];
   segments: readonly { key: K; label: string; color: string }[];
   label: string; valueLabel?: (value: number) => string; tooltipValue?: (value: number) => string;
+  notes?: (string | null)[];
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
@@ -372,6 +380,7 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
                 <span className="text-white font-medium">{tooltipValue(data[hover][segment.key])}</span>
               </div>
             ))}
+            {notes?.[hover] && <p className="text-[#737373] text-[10px] mt-1 whitespace-nowrap">{notes[hover]}</p>}
           </div>
         )}
       </div>
@@ -456,16 +465,36 @@ function fmtVnTime(iso: string): string {
 }
 
 /* ── Profit Grid (Total Profit, New Profit, Cost/New Sub, Total Adspend) ── */
-function AppChartLegend({ daily, metric }: { daily: DailyPoint[]; metric: "revenue" | "new_subs" }) {
+function AppChartLegend<K extends string>({ data, segments, format }: {
+  data: Record<K, number>[]; segments: readonly { key: K; label: string; color: string }[]; format: (value: number) => string;
+}) {
   return <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
-    {APP_SEGMENTS.map(segment => {
-      const total = daily.reduce((sum, day) => sum + (day.per_app?.[segment.key][metric] || 0), 0);
+    {segments.map(segment => {
+      const total = data.reduce((sum, day) => sum + (day[segment.key] || 0), 0);
       return <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
         <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
-        {segment.label} <span className="text-white font-medium">{metric === "revenue" ? fmtCur2(total) : fmtNum(total)}</span>
+        {segment.label} <span className="text-white font-medium">{format(total)}</span>
       </span>;
     })}
   </div>;
+}
+
+/** Revenue chart rows: AskMed split into Meta ads and organic when Apple source data exists. */
+function revenueChart(daily: DailyPoint[], channels: AskMedChannels | null | undefined) {
+  const appData = daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.revenue || 0, AskMed: d.per_app?.AskMed.revenue || 0 }));
+  if (!channels) return { split: false as const, data: appData, notes: undefined };
+  return {
+    split: true as const,
+    data: daily.map((d, i) => ({
+      GrailScan: appData[i].GrailScan,
+      AskMedMeta: channels[d.date]?.meta ?? 0,
+      AskMedOrganic: channels[d.date]?.organic ?? appData[i].AskMed,
+    })),
+    // Days without Apple source data yet use the trailing 7-day Meta share.
+    notes: daily.map((d, i) => channels[d.date]?.estimated && appData[i].AskMed
+      ? `AskMed split estimated (7-day Meta share ${Math.round(channels[d.date].meta_share * 100)}%)`
+      : null),
+  };
 }
 
 // Vietnam 2026 personal business tax: one flat rate on the whole profit,
@@ -478,7 +507,7 @@ function autoTaxRate(ytdVnd: number): number {
   if (ytdVnd <= 50_000_000_000) return 0.17;
   return 0.2;
 }
-function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; loading: boolean; appName?: string }) {
+function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; askmedChannels?: AskMedChannels | null; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("auto");
   // A manual rate is remembered on this device until Auto is picked again.
   useEffect(() => {
@@ -549,6 +578,8 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
   }));
   const usdToVnd = ads?.currency === "VND" ? ads.usd_rate : 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
+  const revenueSplit = revenueChart(daily || [], askmedChannels);
+  const newSubsData = (daily || []).map((d) => ({ GrailScan: d.per_app?.GrailScan.new_subs || 0, AskMed: d.per_app?.AskMed.new_subs || 0 }));
   const totalSubCost30 = (daily || []).reduce(
     (s, d) => s + (d.adspend_with_vat ?? ((d.cost_per_sub || 0) * (d.new_subs || 0))),
     0
@@ -646,15 +677,28 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
                 )}
               </div>
             </div>
-            <AppChartLegend daily={daily} metric="revenue" />
-            <StackedBreakdownChart
-              data={daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.revenue || 0, AskMed: d.per_app?.AskMed.revenue || 0 }))}
-              dates={daily.map((d) => d.date)}
-              segments={APP_SEGMENTS}
-              label="30-day revenue by app: GrailScan and AskMed"
-              valueLabel={fmtCompactCur}
-              tooltipValue={fmtCur2}
-            />
+            {revenueSplit.split ? <>
+              <AppChartLegend data={revenueSplit.data} segments={REVENUE_SEGMENTS} format={fmtCur2} />
+              <StackedBreakdownChart
+                data={revenueSplit.data}
+                dates={daily.map((d) => d.date)}
+                segments={REVENUE_SEGMENTS}
+                label="30-day revenue: GrailScan, AskMed Meta Ads and AskMed Organic"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+                notes={revenueSplit.notes}
+              />
+            </> : <>
+              <AppChartLegend data={revenueSplit.data} segments={APP_SEGMENTS} format={fmtCur2} />
+              <StackedBreakdownChart
+                data={revenueSplit.data}
+                dates={daily.map((d) => d.date)}
+                segments={APP_SEGMENTS}
+                label="30-day revenue by app: GrailScan and AskMed"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+              />
+            </>}
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
@@ -716,9 +760,9 @@ function ProfitGrid({ profit, ads, daily, proceeds, loading, appName = OWNER_APP
               <p className="text-[#d946ef] text-[10px] uppercase tracking-wider font-semibold">30-Day New Subs</p>
               <p className="text-white text-2xl font-bold">{fmtNum(totalNewSubs30)}</p>
             </div>
-            <AppChartLegend daily={daily} metric="new_subs" />
+            <AppChartLegend data={newSubsData} segments={APP_SEGMENTS} format={fmtNum} />
             <StackedBreakdownChart
-              data={daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.new_subs || 0, AskMed: d.per_app?.AskMed.new_subs || 0 }))}
+              data={newSubsData}
               dates={daily.map((d) => d.date)}
               segments={APP_SEGMENTS}
               label="30-day new subscriptions by app: GrailScan and AskMed"
@@ -1001,6 +1045,7 @@ export default function OwnerDashboard() {
           ads={todayStats?.ads}
           daily={todayStats?.daily}
           proceeds={todayStats?.apple_proceeds}
+          askmedChannels={todayStats?.askmed_channels}
           loading={todayStatsLoading && !todayStats}
         />
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
 import { getAppleProceeds } from "@/lib/appstore/proceeds";
+import { readAskMedChannelDays, splitAskMedRevenue } from "@/lib/appstore/channels";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
 import { db } from "@/lib/db";
 import {
@@ -1661,8 +1662,17 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
         const [grail, askmed] = sources.map(source => source.data);
         const proceeds = await proceedsPromise;
+        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date });
+        // AskMed Meta/organic split from saved Apple source data; a read
+        // failure only hides the split (chart shows AskMed as one segment).
+        const firstDay = combined.daily[0]?.date;
+        const channelDays = firstDay
+          ? await readAskMedChannelDays(new Date(Date.parse(`${firstDay}T00:00:00Z`) - 14 * 86400000).toISOString().slice(0, 10))
+            .catch(error => { console.error("AskMed channel days unavailable", error instanceof Error ? error.message : error); return []; })
+          : [];
         return NextResponse.json({
-          ...combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date }),
+          ...combined,
+          askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_app.AskMed.revenue })), channelDays),
           apple_proceeds: proceeds,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),

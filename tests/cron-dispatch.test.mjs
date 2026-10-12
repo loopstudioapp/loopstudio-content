@@ -42,6 +42,9 @@ test("no secret means no header, and failures are reported", async () => {
     assert.equal(req.headers.get("authorization"), null);
     return new Response('{"error":"Unauthorized"}', { status: 401 });
   }, undefined);
-  assert.deepEqual(results.map((r) => [r.path, r.status, r.ok]), [["/api/openrouter-costs?refresh=1", 401, false]]);
+  assert.deepEqual(results.map((r) => [r.path, r.status, r.ok]), [
+    ["/api/openrouter-costs?refresh=1", 401, false],
+    ["/api/appstore/askmed-channels?refresh=1", 401, false],
+  ]);
   await assert.rejects(runCronJobs("1 2 * * *", async () => new Response(""), "x"));
 });
