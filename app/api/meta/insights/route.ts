@@ -8,6 +8,7 @@ export const maxDuration = 120;
  *
  * GET /api/meta/insights?level=campaign|adset|ad&since=YYYY-MM-DD&until=YYYY-MM-DD
  *     [&breakdown=country|age|gender|publisher_platform|platform_position] [&daily=0] [&account=act_…]
+ *     [&campaign=<campaign id>]  (read only that campaign: GET /<campaign id>/insights)
  * Needs `Authorization: Bearer $META_INSIGHTS_READ_KEY` (its own key, separate from CRON_SECRET).
  *
  * Uses the existing server-side META_ACCESS_TOKEN (System User, ads_read). Only GET requests to the
@@ -43,6 +44,13 @@ export async function GET(request: NextRequest) {
   if (!LEVELS.has(level) || !DATE.test(since) || !DATE.test(until) || since > until) {
     return NextResponse.json({ error: "Bad level/since/until" }, { status: 400 });
   }
+  const campaign = p.get("campaign");
+  if (campaign && !/^\d{6,25}$/.test(campaign)) {
+    return NextResponse.json({ error: "Bad campaign" }, { status: 400 });
+  }
+  if (campaign && level === "account") {
+    return NextResponse.json({ error: "Use level=campaign|adset|ad with campaign" }, { status: 400 });
+  }
   if (breakdown && !BREAKDOWNS.has(breakdown)) {
     return NextResponse.json({ error: "Bad breakdown" }, { status: 400 });
   }
@@ -59,7 +67,8 @@ export async function GET(request: NextRequest) {
 
   const rows: unknown[] = [];
   let pages = 0;
-  let url: string | null = `${GRAPH}/${account}/insights?${params}`;
+  const node = campaign || account;
+  let url: string | null = `${GRAPH}/${node}/insights?${params}`;
   for (; url && pages < 60; pages++) {
     const res: Response = await fetch(url, { method: "GET" });
     const body = (await res.json().catch(() => ({}))) as { data?: unknown[]; paging?: { next?: string }; error?: { message?: string } };
@@ -70,7 +79,7 @@ export async function GET(request: NextRequest) {
     rows.push(...(body.data || []));
     const next: string | undefined = body.paging?.next;
     // Follow Meta's own "next" link only if it is still a GET on graph.facebook.com .../insights (any API version).
-    url = next && /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/act_\d+\/insights\?/.test(next) ? next : null;
+    url = next && /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/(act_)?\d+\/insights\?/.test(next) ? next : null;
   }
-  return NextResponse.json({ ok: true, account, level, since, until, breakdown: breakdown || null, pages, truncated: Boolean(url), rows });
+  return NextResponse.json({ ok: true, account, campaign: campaign || null, level, since, until, breakdown: breakdown || null, pages, truncated: Boolean(url), rows });
 }
