@@ -51,6 +51,7 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - It uses `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`, and optional `META_AD_ACCOUNT_CURRENCY` from server environment variables.
 - Current Graph API version in code is `v21.0`.
 - Spend uses the ad account's daily timezone, is converted to USD using `open.er-api.com`, and receives 10% Meta VAT in profit calculations.
+- Read-only insights for the AskMed Ads chat: `GET /api/meta/insights?level=&since=&until=[&breakdown=][&daily=0][&account=]` (`app/api/meta/insights/route.ts`), Bearer `META_INSIGHTS_READ_KEY` (Worker secret; copy only in the owner's Mac Keychain). GET-only on the Graph `/insights` edge; never add write calls (owner, 2026-10-14: "DO NOT write into meta").
 - A Meta outage preserves valid same-day cached spend when available and marks it stale; it must not silently replace known spend with zero.
 
 ### OpenRouter
