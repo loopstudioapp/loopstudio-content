@@ -17,7 +17,7 @@ export const maxDuration = 60;
 const GRAPH = "https://graph.facebook.com/v21.0";
 const BASE_FIELDS = [
   "id", "name", "status", "effective_status", "updated_time", "bid_strategy", "bid_amount",
-  "optimization_goal", "targeting",
+  "optimization_goal", "targeting", "learning_stage_info",
 ];
 const VALUE_FIELDS = ["value_rule_set_id", "value_rules_applied"];
 
