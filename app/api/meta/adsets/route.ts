@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
   const ruleSets: Record<string, unknown> = {};
   for (const id of ruleSetIds) {
     if (!/^\d{6,25}$/.test(id)) continue;
-    const rs = await graphGet(id, { fields: "name,rules" }, token);
+    const rs = await graphGet(id, { fields: "name,rules{name,adjust_sign,adjust_value,status,criterias}" }, token);
     ruleSets[id] = rs.ok ? rs.body : { error: rs.body?.error?.message || `Meta HTTP ${rs.status}` };
   }
 
