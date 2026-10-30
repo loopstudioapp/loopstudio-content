@@ -109,7 +109,7 @@ export const holdings: PortfolioHolding[] = [
     name: "Cash",
     detail: "Bank balance",
     category: "Other",
-    valueVnd: 2_000_000_000,
+    valueVnd: 1_000_000_000,
     currentMonthlyVnd: null,
     futureMonthlyVnd: null,
     status: "Idle",
