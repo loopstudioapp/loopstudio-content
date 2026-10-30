@@ -30,7 +30,7 @@ export type PortfolioPayload = {
 };
 
 export const USD_TO_VND = 26_275.7;
-export const PORTFOLIO_UPDATED_AT = "2026-10-06";
+export const PORTFOLIO_UPDATED_AT = "2026-10-30";
 
 export const holdings: PortfolioHolding[] = [
   {
@@ -46,7 +46,7 @@ export const holdings: PortfolioHolding[] = [
     name: "A La Carte Condotel",
     detail: "Da Nang condotel · rooms 507 & 710",
     category: "Real Estate",
-    valueVnd: 17_000_000_000,
+    valueVnd: 13_000_000_000,
     currentMonthlyVnd: 36_000_000,
     futureMonthlyVnd: null,
     status: "Income",
@@ -55,10 +55,10 @@ export const holdings: PortfolioHolding[] = [
     name: "Smart City S105",
     detail: "Podium retail unit",
     category: "Real Estate",
-    valueVnd: 5_600_000_000,
-    currentMonthlyVnd: 0,
+    valueVnd: 6_200_000_000,
+    currentMonthlyVnd: 18_000_000,
     futureMonthlyVnd: null,
-    status: "Idle",
+    status: "Income",
   },
   {
     name: "TPL",
@@ -92,9 +92,9 @@ export const holdings: PortfolioHolding[] = [
     detail: "Residential apartment",
     category: "Real Estate",
     valueVnd: 2_100_000_000,
-    currentMonthlyVnd: null,
+    currentMonthlyVnd: 7_000_000,
     futureMonthlyVnd: null,
-    status: "Idle",
+    status: "Income",
   },
   {
     name: "Ket Coffee Shop",
@@ -104,6 +104,15 @@ export const holdings: PortfolioHolding[] = [
     currentMonthlyVnd: null,
     futureMonthlyVnd: null,
     status: "Bad investment",
+  },
+  {
+    name: "Cash",
+    detail: "Bank balance",
+    category: "Other",
+    valueVnd: 2_000_000_000,
+    currentMonthlyVnd: null,
+    futureMonthlyVnd: null,
+    status: "Idle",
   },
   {
     name: "Watches",
@@ -127,9 +136,14 @@ export const holdings: PortfolioHolding[] = [
 
 export const debts: PortfolioDebt[] = [
   {
-    name: "Debt — real estate and bank",
-    detail: "Real estate loans and bank debt",
-    valueVnd: 9_000_000_000,
+    name: "Ocean Park",
+    detail: "Remaining payment to Ocean Park",
+    valueVnd: 4_000_000_000,
+  },
+  {
+    name: "BIDV",
+    detail: "Bank loan",
+    valueVnd: 1_700_000_000,
   },
 ];
 
