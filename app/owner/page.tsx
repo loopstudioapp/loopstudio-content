@@ -839,6 +839,8 @@ function AppStatGrid({ appName, accent, stats, loading }: { appName: string; acc
 /* ── Today Subscriptions table (new + renewals) ── */
 function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: boolean; todayVn: string }) {
   const planFor = (t: TodayTxn) => t.plan || "—";
+  const appFor = (t: TodayTxn) =>
+    t.app === "AskMed" ? `AskMed ${t.store === "play_store" ? "Android" : "iOS"}` : t.app || "—";
   const typeBadge: Record<TodayTxnType, { label: string; className: string }> = {
     NEW_SUB: { label: "New Sub", className: "bg-[#3b82f6]/20 text-[#3b82f6]" },
     RENEWAL: { label: "Renewal", className: "bg-[#22c55e]/20 text-[#22c55e]" },
@@ -878,7 +880,7 @@ function TodayTxnTable({ txns, loading, todayVn }: { txns: TodayTxn[]; loading: 
                   <td className="px-5 py-2.5 text-sm">
                     {countryFlag(t.country)} <span className="text-[#737373] text-xs ml-1">{countryName(t.country)}</span>
                   </td>
-                  <td className="px-5 py-2.5 text-xs text-[#a3a3a3]">{t.app || "—"}</td>
+                  <td className="px-5 py-2.5 text-xs text-[#a3a3a3]">{appFor(t)}</td>
                   <td className="px-5 py-2.5 text-sm text-white">{planFor(t)}</td>
                   <td className="px-5 py-2.5 text-xs text-[#737373]">{fmtVnTime(t.occurred_at)}</td>
                   <td className="px-5 py-2.5 text-sm text-right text-white font-medium">{fmtCur(t.revenue || 0)}</td>
