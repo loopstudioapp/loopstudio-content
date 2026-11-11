@@ -501,8 +501,9 @@ function buildDbTodayLedger({
         plan: planName(sub.productId),
         product_id: sub.productId,
         store: sub.store,
-        occurred_at: sub.purchasedAt,
-        expires_at: sub.expiresAt,
+        // Always "...SS.sssZ": the iOS app only parses times with fractions.
+        occurred_at: msToIso(sub.purchasedMs),
+        expires_at: msToIso(dateMs(sub.expiresAt)),
         revenue,
         type: "NEW_SUB",
       });
@@ -537,7 +538,7 @@ function buildDbTodayLedger({
         plan: planName(renewal.productId),
         product_id: renewal.productId,
         store: renewal.store,
-        occurred_at: renewal.occurredAt,
+        occurred_at: msToIso(renewal.occurredMs),
         expires_at: "",
         revenue: renewal.revenue,
         type: isNewSub ? "NEW_SUB" : "RENEWAL",
