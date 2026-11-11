@@ -47,7 +47,7 @@ function harness() {
       require(name) {
         if(name==='@/lib/db') return {db:supabase};
         if(name==='next/server') return {NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
-        if(name==='@/lib/meta/ads'||name==='@/lib/openrouter/costs'||name==='@/lib/openrouter/askmed') return {};
+        if(name==='@/lib/meta/ads'||name==='@/lib/openrouter/costs') return {};
         if(name.startsWith('@/')) return load(name.slice(2)+'.ts');
         if(name.startsWith('node:')) return require(name);
         throw Error(name);

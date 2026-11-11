@@ -752,7 +752,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
             </div>
             <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, RevenueCat, OpenRouter, AI Ads, and refunds" />
             <p className="text-[#525252] text-[10px] mt-2">
-              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter = GrailScan + AskMed keys on UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
+              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter = all keys on the account, UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">

@@ -7,14 +7,7 @@ export type AppBreakdown = Record<OwnerApp, { revenue: number; new_subs: number 
 export type KeptShares = { current: Record<OwnerApp, number>; by_date?: Record<OwnerApp, Record<string, number>> };
 
 /** Combine app ledgers, not their profits: the provider ledger is shared. */
-// askmedOpenRouter: AskMed's own OpenRouter key cost per UTC date (lib/openrouter/askmed.ts).
-// GrailScan's snapshot already carries its key's cost; the two keys are different, so both count.
-export function combineOwnerStats(
-  grail: TodayStatsResponse,
-  askmed: TodayStatsResponse,
-  kept?: KeptShares,
-  askmedOpenRouter: Record<string, number> = {}
-) {
+export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsResponse, kept?: KeptShares) {
   if (grail.today_vn !== askmed.today_vn || !grail.per_app.GrailScan || !askmed.per_app.AskMed) {
     throw new Error("Both app snapshots must cover the same reporting day");
   }
@@ -34,7 +27,6 @@ export function combineOwnerStats(
     return {
       ...g,
       apple_cost: appleCost,
-      openrouter_cost: (g.openrouter_cost || 0) + (askmedOpenRouter[g.date] || 0),
       revenue,
       purchase_revenue: (g.purchase_revenue ?? g.revenue) + (a.purchase_revenue ?? a.revenue),
       new_subs: newSubs,

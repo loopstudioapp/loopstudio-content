@@ -11,10 +11,10 @@ import {
 import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
 import {
   readOpenRouterDailyCosts,
+  reconcileOpenRouterDailyCosts,
   refreshOpenRouterCurrentCost,
   saveOpenRouterError,
 } from "@/lib/openrouter/costs";
-import { readAskMedOpenRouterDailyCosts } from "@/lib/openrouter/askmed";
 
 export const maxDuration = 300;
 
@@ -1247,10 +1247,12 @@ async function loadOpenRouterCostsByDate(
   refreshCurrent: boolean
 ): Promise<Record<string, number>> {
   const costsByDate = embeddedOpenRouterCosts(fallbackDaily);
+  let savedDates: Record<string, number> = {};
 
   try {
     const saved = await readOpenRouterDailyCosts("GrailScan", dates);
     Object.assign(costsByDate, saved.costsByDate);
+    savedDates = saved.costsByDate;
   } catch {
     // Preserve costs embedded in the last dashboard snapshot if the independent
     // cache is temporarily unavailable.
@@ -1258,7 +1260,13 @@ async function loadOpenRouterCostsByDate(
 
   if (refreshCurrent) {
     try {
-      const current = await refreshOpenRouterCurrentCost("GrailScan");
+      // Fill past UTC days the nightly job has not saved yet (e.g. right after
+      // a deploy); otherwise only today's usage is fetched.
+      const today = new Date().toISOString().slice(0, 10);
+      const missingPast = dates.some((date) => date < today && !(date in savedDates));
+      const current = missingPast
+        ? await reconcileOpenRouterDailyCosts(dates, "GrailScan")
+        : await refreshOpenRouterCurrentCost("GrailScan");
       Object.assign(costsByDate, current.costsByDate);
     } catch (error) {
       // A failed live query must not turn a previously reconciled day into zero.
@@ -1667,16 +1675,7 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
         const [grail, askmed] = sources.map(source => source.data);
         const proceeds = await proceedsPromise;
-        // AskMed's OpenRouter bill from its own saved key usage. A read failure
-        // leaves that cost out and says so, instead of failing the dashboard.
-        let openRouterWarning: string | null = null;
-        const askmedOpenRouter = await readAskMedOpenRouterDailyCosts(grail.daily.map((day: DailyPoint) => day.date))
-          .catch(error => {
-            console.error("AskMed OpenRouter cost unavailable", error instanceof Error ? error.message : error);
-            openRouterWarning = "AskMed OpenRouter cost unavailable";
-            return {} as Record<string, number>;
-          });
-        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date }, askmedOpenRouter);
+        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date });
         // AskMed Meta/organic split from saved Apple source data; a read
         // failure only hides the split (chart shows AskMed as one segment).
         const firstDay = combined.daily[0]?.date;
@@ -1688,7 +1687,6 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
           ...combined,
           askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_app.AskMed.revenue })), channelDays),
           apple_proceeds: proceeds,
-          openrouter_warning: openRouterWarning,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),
           updated_at: [grail.updated_at, askmed.updated_at].sort()[0],

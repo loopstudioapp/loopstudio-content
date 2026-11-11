@@ -15,13 +15,6 @@
       "database_name": "content-dashboard",
       "database_id": "8b8df6d2-b3b6-4551-a951-5a6b4453760a",
       "migrations_dir": "d1/migrations"
-    },
-    // AskMed's database, READ ONLY from here: its OpenRouter key usage
-    // (table openrouter_key_usage, saved every 10 min by askmed-api).
-    {
-      "binding": "ASKMED_DB",
-      "database_name": "askmed-qa",
-      "database_id": "bd35ba21-96d9-4902-83f6-bbdb7d9152a3"
     }
   ],
   // Calendar task images (moved from Supabase Storage on 2026-10-11).

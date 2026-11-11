@@ -61,8 +61,9 @@ function managementHeaders(): { Authorization: string } {
   return { Authorization: `Bearer ${managementKey}` };
 }
 
-async function fetchMatchingKeys(): Promise<OpenRouterKey[]> {
-  const keyName = process.env.OPENROUTER_GRAILSCAN_KEY_NAME || "Sports Card Scanner";
+// Every key on the OpenRouter account (AskMed, GrailScan, the old AskMed 1.0
+// key and any other app): the owner card shows the whole OpenRouter bill.
+async function fetchAllKeys(): Promise<OpenRouterKey[]> {
   const response = await fetch(OPENROUTER_KEYS_URL, {
     headers: managementHeaders(),
     cache: "no-store",
@@ -70,9 +71,14 @@ async function fetchMatchingKeys(): Promise<OpenRouterKey[]> {
   if (!response.ok) throw new Error(`OpenRouter key query failed: ${response.status}`);
 
   const json = (await response.json()) as { data?: OpenRouterKey[] };
-  const matchingKeys = (json.data || []).filter((key) => key.name === keyName && key.hash);
-  if (matchingKeys.length === 0) throw new Error(`OpenRouter key not found: ${keyName}`);
-  return matchingKeys;
+  return json.data || [];
+}
+
+function usageTodayAllKeys(keys: OpenRouterKey[]): number {
+  return keys.reduce((sum, key) => {
+    const cost = Number(key.usage_daily || 0);
+    return Number.isFinite(cost) ? sum + cost : sum;
+  }, 0);
 }
 
 async function writeOpenRouterDailyCosts(
@@ -125,11 +131,7 @@ export async function refreshOpenRouterCurrentCost(
   appName = "GrailScan"
 ): Promise<OpenRouterCostCache> {
   const currentUtcDate = new Date().toISOString().slice(0, 10);
-  const keys = await fetchMatchingKeys();
-  const currentCost = keys.reduce((sum, key) => {
-    const cost = Number(key.usage_daily || 0);
-    return Number.isFinite(cost) ? sum + cost : sum;
-  }, 0);
+  const currentCost = usageTodayAllKeys(await fetchAllKeys());
   const costsByDate = { [currentUtcDate]: currentCost };
   const updatedAt = await writeOpenRouterDailyCosts(appName, costsByDate);
   return { costsByDate, updatedAt };
@@ -139,23 +141,17 @@ export async function reconcileOpenRouterDailyCosts(
   dates: string[],
   appName = "GrailScan"
 ): Promise<OpenRouterCostCache> {
-  const keys = await fetchMatchingKeys();
+  const keys = await fetchAllKeys();
   const currentUtcDate = new Date().toISOString().slice(0, 10);
   const requestedDates = new Set(dates);
   const costsByDate = Object.fromEntries(dates.map((date) => [date, 0]));
 
-  const activityResponses = await Promise.all(
-    keys.map(async (key) => {
-      const url = new URL(OPENROUTER_ACTIVITY_URL);
-      url.searchParams.set("api_key_hash", key.hash!);
-      const response = await fetch(url, { headers: managementHeaders(), cache: "no-store" });
-      if (!response.ok) throw new Error(`OpenRouter activity query failed: ${response.status}`);
-      const json = (await response.json()) as { data?: OpenRouterActivity[] };
-      return json.data || [];
-    })
-  );
+  // Account-wide activity (no api_key_hash): every key, last 30 completed UTC days.
+  const response = await fetch(OPENROUTER_ACTIVITY_URL, { headers: managementHeaders(), cache: "no-store" });
+  if (!response.ok) throw new Error(`OpenRouter activity query failed: ${response.status}`);
+  const activity = ((await response.json()) as { data?: OpenRouterActivity[] }).data || [];
 
-  for (const point of activityResponses.flat()) {
+  for (const point of activity) {
     const date = point.date?.slice(0, 10);
     const cost = Number(point.usage || 0);
     if (date && date !== currentUtcDate && requestedDates.has(date) && Number.isFinite(cost)) {
@@ -163,12 +159,7 @@ export async function reconcileOpenRouterDailyCosts(
     }
   }
 
-  if (requestedDates.has(currentUtcDate)) {
-    costsByDate[currentUtcDate] = keys.reduce((sum, key) => {
-      const cost = Number(key.usage_daily || 0);
-      return Number.isFinite(cost) ? sum + cost : sum;
-    }, 0);
-  }
+  if (requestedDates.has(currentUtcDate)) costsByDate[currentUtcDate] = usageTodayAllKeys(keys);
 
   // Write only after every source request succeeds. A partial OpenRouter outage
   // therefore leaves the last complete reconciliation untouched.
