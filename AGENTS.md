@@ -62,6 +62,8 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - Normal dashboard refresh fetches only current OpenRouter key usage. It does not fetch activity history or touch the RevenueCat ledger.
 - Protected daily reconciliation runs at `00:05 UTC` (`07:05 Vietnam`) and updates only the 30 OpenRouter rows.
 - Failed OpenRouter requests preserve the last complete saved values.
+- AskMed's own OpenRouter key is a different key from GrailScan's, so it is added on top (2026-11-11): `lib/openrouter/askmed.ts` reads the snapshots askmed-api saves every 10 minutes in D1 `askmed-qa` (binding `ASKMED_DB`, table `openrouter_key_usage`, read only) and turns the all-time `usage` into a cost per UTC day. `combineOwnerStats` adds it to the owner card; a read failure leaves it out and sets `openrouter_warning`.
+- Why a GrailScan OpenRouter lookup failed is saved as `__openrouter_last_error__:GrailScan` and shown as `last_error` by `GET /api/openrouter-costs`.
 - The first production reconciliation on 2026-08-17 saved 30 nonzero days totaling about `$199.43`; this number naturally changes over time.
 
 ## Profit And Chart Rules

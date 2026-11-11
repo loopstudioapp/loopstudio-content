@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   readOpenRouterDailyCosts,
+  readOpenRouterError,
   reconcileOpenRouterDailyCosts,
+  saveOpenRouterError,
   utcDateWindow,
 } from "@/lib/openrouter/costs";
 
@@ -25,8 +27,10 @@ export async function GET(request: NextRequest) {
       ? await reconcileOpenRouterDailyCosts(dates, APP_NAME)
       : await readOpenRouterDailyCosts(APP_NAME, dates);
     const costsByDate = result.costsByDate;
+    const lastError = await readOpenRouterError(APP_NAME).catch(() => null);
 
     return NextResponse.json({
+      last_error: lastError,
       app: APP_NAME,
       costs_by_date: costsByDate,
       total: Object.values(costsByDate).reduce((sum, cost) => sum + cost, 0),
@@ -35,6 +39,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenRouter cost refresh failed";
+    if (forceRefresh) await saveOpenRouterError(APP_NAME, error);
     try {
       const saved = await readOpenRouterDailyCosts(APP_NAME, dates);
       if (Object.keys(saved.costsByDate).length > 0) {

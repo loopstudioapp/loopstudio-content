@@ -20,6 +20,37 @@ export type OpenRouterCostCache = {
   updatedAt: string | null;
 };
 
+const OPENROUTER_ERROR_PREFIX = "__openrouter_last_error__";
+
+export type OpenRouterError = { message: string; at: string };
+
+/** Saves why the last OpenRouter lookup failed (status/message only, never a key). Never throws. */
+export async function saveOpenRouterError(appName: string, error: unknown): Promise<void> {
+  const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+  try {
+    await db.from("pinterest_topics").upsert([{
+      id: `${OPENROUTER_ERROR_PREFIX}:${appName}`,
+      category: "system",
+      title_template: `OpenRouter last error ${appName}`,
+      description_template: message,
+      prompt_seed: new Date().toISOString(),
+      times_used: 0,
+    }], { onConflict: "id" });
+  } catch {
+    // Recording the error must never break the dashboard.
+  }
+}
+
+export async function readOpenRouterError(appName: string): Promise<OpenRouterError | null> {
+  const { data, error } = await db
+    .from("pinterest_topics")
+    .select("description_template, prompt_seed")
+    .eq("id", `${OPENROUTER_ERROR_PREFIX}:${appName}`)
+    .maybeSingle();
+  if (error || !data) return null;
+  return { message: data.description_template, at: data.prompt_seed };
+}
+
 function cacheId(appName: string, date: string): string {
   return `${OPENROUTER_CACHE_PREFIX}:${appName}:${date}`;
 }

@@ -46,7 +46,8 @@ function harness() {
         if (name === '@/lib/meta/ads') return {
           getTodayMetaSpend: async () => { metaCalls++; return { configured: true, spend_usd: 12, spend_native: 12, currency: 'USD', usd_rate: 1, date: '2026-09-20' }; },
         };
-        if (name === '@/lib/openrouter/costs') return { readOpenRouterDailyCosts: async () => ({}), refreshOpenRouterCurrentCost: async () => ({}) };
+        if (name === '@/lib/openrouter/costs') return { readOpenRouterDailyCosts: async () => ({}), refreshOpenRouterCurrentCost: async () => ({}), saveOpenRouterError: async () => {} };
+        if (name === '@/lib/openrouter/askmed') return { readAskMedOpenRouterDailyCosts: async () => ({ '2026-09-20': 1.25 }) };
         if (name.startsWith('@/')) return load(name.replace('@/', '') + '.ts');
         if (name.startsWith('node:')) return require(name);
         throw new Error('Unexpected import ' + name);
@@ -110,6 +111,9 @@ test('combined accounting sums app revenue/refunds, applies one shared cost ledg
   assert.equal(day.higgsfield_cost, 50 / 30);
   assert.equal(day.profit, 2670 * .85 - 11 - 4 - 50 / 30 - 26.7);
   assert.equal(result.profit.total_profit, day.profit);
+  const withAskMedKey = combineOwnerStats(grail, ask, undefined, { '2026-09-20': 1.5, '2026-09-19': 9 }).daily[0];
+  assert.equal(withAskMedKey.openrouter_cost, 5.5, "AskMed's own OpenRouter key is added to GrailScan's");
+  assert.equal(withAskMedKey.profit, day.profit - 1.5);
   assert.equal(result.profit.cost_per_new_sub, 11 / 5);
   assert.equal(day.per_app.GrailScan.revenue + day.per_app.AskMed.revenue, day.revenue);
   assert.equal(day.per_app.GrailScan.new_subs + day.per_app.AskMed.new_subs, day.new_subs);

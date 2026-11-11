@@ -12,7 +12,9 @@ import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta
 import {
   readOpenRouterDailyCosts,
   refreshOpenRouterCurrentCost,
+  saveOpenRouterError,
 } from "@/lib/openrouter/costs";
+import { readAskMedOpenRouterDailyCosts } from "@/lib/openrouter/askmed";
 
 export const maxDuration = 300;
 
@@ -1258,8 +1260,10 @@ async function loadOpenRouterCostsByDate(
     try {
       const current = await refreshOpenRouterCurrentCost("GrailScan");
       Object.assign(costsByDate, current.costsByDate);
-    } catch {
+    } catch (error) {
       // A failed live query must not turn a previously reconciled day into zero.
+      // Keep the reason so /api/openrouter-costs can show why it failed.
+      await saveOpenRouterError("GrailScan", error);
     }
   }
 
@@ -1663,7 +1667,16 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
         const [grail, askmed] = sources.map(source => source.data);
         const proceeds = await proceedsPromise;
-        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date });
+        // AskMed's OpenRouter bill from its own saved key usage. A read failure
+        // leaves that cost out and says so, instead of failing the dashboard.
+        let openRouterWarning: string | null = null;
+        const askmedOpenRouter = await readAskMedOpenRouterDailyCosts(grail.daily.map((day: DailyPoint) => day.date))
+          .catch(error => {
+            console.error("AskMed OpenRouter cost unavailable", error instanceof Error ? error.message : error);
+            openRouterWarning = "AskMed OpenRouter cost unavailable";
+            return {} as Record<string, number>;
+          });
+        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date }, askmedOpenRouter);
         // AskMed Meta/organic split from saved Apple source data; a read
         // failure only hides the split (chart shows AskMed as one segment).
         const firstDay = combined.daily[0]?.date;
@@ -1675,6 +1688,7 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
           ...combined,
           askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_app.AskMed.revenue })), channelDays),
           apple_proceeds: proceeds,
+          openrouter_warning: openRouterWarning,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),
           updated_at: [grail.updated_at, askmed.updated_at].sort()[0],
