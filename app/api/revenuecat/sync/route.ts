@@ -67,7 +67,7 @@ async function syncCustomers(
     });
     if (!customerRes.ok) throw new Error(`RevenueCat customer lookup failed (HTTP ${customerRes.status})`);
     const customer: { last_seen_country?: string } = await customerRes.json();
-    const subs = await fetchCustomerSubscriptions(apiKey, projectId, customerId);
+    const subs = await withStoreProductIds(apiKey, projectId, await fetchCustomerSubscriptions(apiKey, projectId, customerId));
     for (const sub of subs) {
       const record = subscriptionRecord(appName, customerId, customer.last_seen_country || "", sub);
       if (!record) continue;
@@ -82,6 +82,32 @@ async function syncCustomers(
   }
 
   return { appName, totalCustomers: customerIds.length, totalSubs, errors, databaseErrors: Array.from(databaseErrors) };
+}
+
+// RevenueCat v2 subscriptions name products by RevenueCat's own ID
+// ("prod3a73503cb0"). Store the store's ID instead ("askmed_pro_yearly:yearly",
+// "com.loopstudio.askmed.yearly.2"), the same one webhooks send, so the
+// dashboard can read the plan name from it.
+const storeProductIds = new Map<string, Promise<string>>();
+
+function storeProductId(apiKey: string, projectId: string, productId: string): Promise<string> {
+  if (!productId || !productId.startsWith("prod")) return Promise.resolve(productId);
+  const key = `${projectId}:${productId}`;
+  let pending = storeProductIds.get(key);
+  if (!pending) {
+    pending = fetch(`${RC_BASE}/projects/${projectId}/products/${encodeURIComponent(productId)}`, {
+      headers: rcHeaders(apiKey),
+    })
+      .then(async (res) => (res.ok ? ((await res.json()).store_identifier as string) || productId : productId))
+      .catch(() => productId);
+    storeProductIds.set(key, pending);
+  }
+  return pending;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function withStoreProductIds(apiKey: string, projectId: string, subs: any[]) {
+  return Promise.all(subs.map(async (sub) => ({ ...sub, product_id: await storeProductId(apiKey, projectId, sub.product_id || "") })));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,7 +165,7 @@ async function syncProject(
 
       const batchResults = await Promise.all(
         batch.map(async (c) => {
-          const subs = await fetchCustomerSubscriptions(apiKey, projectId, c.id);
+          const subs = await withStoreProductIds(apiKey, projectId, await fetchCustomerSubscriptions(apiKey, projectId, c.id));
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return subs.map((s: any) => ({ customerId: c.id, customerCountry: c.last_seen_country || "", ...s }));
         })
