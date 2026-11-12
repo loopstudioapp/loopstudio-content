@@ -122,7 +122,8 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
     const p = parts.get(d.date)!;
     const spend = inputs.metaSpendByDate?.[d.date];
     const spendTotal = (spend?.ios || 0) + (spend?.android || 0);
-    const androidShare = spendTotal > 0 ? (spend!.android || 0) / spendTotal : 0;
+    // A day without saved Play numbers shows all AskMed money as iOS, so its ad spend stays with it.
+    const androidShare = p.known && spendTotal > 0 ? (spend!.android || 0) / spendTotal : 0;
     p.android.meta = d.adspend_with_vat * androidShare;
     p.ios.meta = d.adspend_with_vat - p.android.meta;
     p.android.ai_ads = d.higgsfield_cost * androidShare;

@@ -126,6 +126,8 @@ test('owner split: GrailScan, AskMed iOS and AskMed Android add up to the day, M
   assert.equal(d2.per_platform.android_known, false, 'a day without saved Play numbers shows all AskMed as iOS');
   assert.equal(d2.per_platform.ios.revenue, 900);
   assert.equal(d2.per_platform.android.meta, 0);
+  const late = combineOwnerStats(grail, ask, kept, { metaSpendByDate: { '2026-11-12': { ios: 1, android: 1 } } });
+  assert.equal(late.daily[1].per_platform.android.meta, 0, 'Android ads on a day without Play numbers stay with iOS');
   // Google Play's real share (fee + taxes from its reports) replaces the 15% estimate per day.
   const real = combineOwnerStats(grail, ask, kept, { googleKept: { current: .8, by_date: { '2026-11-11': .78 } } });
   assert.ok(Math.abs(real.daily[0].per_platform.android.store_cut - (200 - 4) * .22) < 1e-9);
