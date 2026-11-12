@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
 import { ANDROID_SOURCES, type AndroidSource, type AppBreakdown, type PlatformDay } from "@/lib/revenuecat/owner";
+import type { GooglePlayProceeds as GoogleProceeds } from "@/lib/googleplay/proceeds";
 
 /* ── Types ── */
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
@@ -35,7 +36,7 @@ type DailyPoint = {
 };
 type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
 type AskMedChannels = Record<string, { meta: number; organic: number; meta_share: number; estimated: boolean }>;
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; askmed_channels?: AskMedChannels | null; android_sources_available?: boolean; reconciliation_warning?: string | null };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; google_proceeds?: GoogleProceeds; askmed_channels?: AskMedChannels | null; android_sources_available?: boolean; reconciliation_warning?: string | null };
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
@@ -660,7 +661,7 @@ function autoTaxRate(ytdVnd: number): number {
   if (ytdVnd <= 50_000_000_000) return 0.17;
   return 0.2;
 }
-function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, androidSourcesAvailable = true, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; askmedChannels?: AskMedChannels | null; androidSourcesAvailable?: boolean; loading: boolean; appName?: string }) {
+function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, askmedChannels, androidSourcesAvailable = true, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; googleProceeds?: GoogleProceeds; askmedChannels?: AskMedChannels | null; androidSourcesAvailable?: boolean; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("auto");
   // A manual rate is remembered on this device until Auto is picked again.
   useEffect(() => {
@@ -718,7 +719,11 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, androidSourc
     day.apple_cost ??
     (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) * (profit?.apple_commission_rate ?? 0.15);
   const appleCost30 = (daily || []).reduce((sum, day) => sum + appleCostFor(day), 0);
-  // Google's 15% on AskMed Android sales (since 2026-11-12; Apple's share no longer applies to them).
+  // Google's cut on AskMed Android sales (since 2026-11-12; Apple's share no longer applies to them):
+  // its real fee + the taxes it keeps, from Play's earnings / sales reports; 15% until those are connected.
+  const googleCutLabel = googleProceeds && googleProceeds.source !== "default"
+    ? `real fee + taxes from Google Play reports (${(100 - googleProceeds.kept_share * 100).toFixed(1)}% now)`
+    : "15% estimate until Google Play reports are connected";
   const googleCost30 = (daily || []).reduce((sum, day) => sum + (day.google_cost || 0), 0);
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
   const totalCost30 =
@@ -927,7 +932,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, androidSourc
                 tooltipValue={fmtCur2}
               />
               <p className="text-[#525252] text-[10px] mt-2">
-                Meta: ASKMED ANDROID campaigns = Android, all other campaigns = iOS · Android store cut = Google 15% · OpenRouter split by revenue · AI Ads split by Meta spend
+                Meta: ASKMED ANDROID campaigns = Android, all other campaigns = iOS · Android store cut = {googleCutLabel} · OpenRouter split by revenue · AI Ads split by Meta spend
                 {androidUnknownDays > 0 && ` · ${androidUnknownDays} ${androidUnknownDays === 1 ? "day has" : "days have"} no Android numbers yet, shown under iOS`}
               </p>
             </> : (
@@ -975,7 +980,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, androidSourc
             </div>
             <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, Google, RevenueCat, OpenRouter, AI Ads, and refunds" />
             <p className="text-[#525252] text-[10px] mt-2">
-              Shared costs counted once for both apps · Google = 15% of AskMed Android sales · Meta includes 10% VAT · OpenRouter = all keys on the account, UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
+              Shared costs counted once for both apps · Google = {googleCutLabel} on AskMed Android sales · Meta includes 10% VAT · OpenRouter = all keys on the account, UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -1309,6 +1314,7 @@ export default function OwnerDashboard() {
           ads={todayStats?.ads}
           daily={todayStats?.daily}
           proceeds={todayStats?.apple_proceeds}
+          googleProceeds={todayStats?.google_proceeds}
           askmedChannels={todayStats?.askmed_channels}
           androidSourcesAvailable={todayStats?.android_sources_available !== false}
           loading={todayStatsLoading && !todayStats}

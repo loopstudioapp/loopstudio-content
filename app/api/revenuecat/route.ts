@@ -4,6 +4,7 @@ import { getAppleProceeds } from "@/lib/appstore/proceeds";
 import { readAskMedChannelDays, splitAskMedRevenue } from "@/lib/appstore/channels";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
 import { loadFoundVia, loadMetaSpendByPlatform } from "@/lib/owner/platform-inputs";
+import { getGooglePlayProceeds } from "@/lib/googleplay/proceeds";
 import { db } from "@/lib/db";
 import {
   adjustmentKindFromLedgerId,
@@ -1712,6 +1713,8 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         // Apple's real proceeds share comes from its cached sales reports and
         // never fails the dashboard (last saved value, then 85%).
         const proceedsPromise = getAppleProceeds();
+        // Google Play's real share from its earnings / sales reports (last saved value, then 85%).
+        const playProceedsPromise = getGooglePlayProceeds();
         const sources = await Promise.all(OWNER_APPS.map(async app => {
           const url = new URL(request.url);
           url.searchParams.delete("scope");
@@ -1732,8 +1735,10 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
             .catch(error => { console.error("Meta platform spend unavailable", error instanceof Error ? error.message : error); return {}; }),
           loadFoundVia(androidUsers),
         ]);
+        const playProceeds = await playProceedsPromise;
         const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date },
-          { metaSpendByDate, foundViaByUser: foundViaByUser || {} });
+          { metaSpendByDate, foundViaByUser: foundViaByUser || {},
+            googleKept: { current: playProceeds.kept_share, by_date: playProceeds.kept_share_by_date } });
         // AskMed Meta/organic split from saved Apple source data; a read
         // failure only hides the split (chart shows AskMed as one segment).
         const firstDay = combined.daily[0]?.date;
@@ -1747,6 +1752,7 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
           askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_platform.ios.revenue })), channelDays),
           android_sources_available: foundViaByUser !== null,
           apple_proceeds: proceeds,
+          google_proceeds: playProceeds,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),
           updated_at: [grail.updated_at, askmed.updated_at].sort()[0],

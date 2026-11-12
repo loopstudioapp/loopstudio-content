@@ -38,6 +38,8 @@ export type PlatformInputs = {
   metaSpendByDate?: Record<string, { ios: number; android: number }>;
   /** "How did you find AskMed?" answer per RevenueCat app user id. */
   foundViaByUser?: Record<string, string>;
+  /** Google Play's real payout share (after its fee and the taxes it keeps); 85% when unknown. */
+  googleKept?: { current: number; by_date?: Record<string, number> };
 };
 const emptyPart = (): PlatformPart => ({
   revenue: 0, refunds: 0, store_cut: 0, meta: 0, revenuecat: 0, openrouter: 0, ai_ads: 0, profit: 0, new_subs: 0,
@@ -78,7 +80,8 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
     const net = (part: PlatformPart) => part.revenue - part.refunds;
     grailPart.store_cut = net(grailPart) * (1 - keptFor("GrailScan", g.date));
     iosPart.store_cut = net(iosPart) * (1 - keptFor("AskMed", g.date));
-    androidPart.store_cut = net(androidPart) * GOOGLE_PLAY_FEE;
+    const googleKept = inputs.googleKept?.by_date?.[g.date] ?? inputs.googleKept?.current ?? 1 - GOOGLE_PLAY_FEE;
+    androidPart.store_cut = net(androidPart) * (1 - googleKept);
     parts.set(g.date, { grailscan: grailPart, ios: iosPart, android: androidPart, known, userRevenue: known ? a.android!.by_user : {} });
     const appleCost = grailPart.store_cut + iosPart.store_cut;
     return {

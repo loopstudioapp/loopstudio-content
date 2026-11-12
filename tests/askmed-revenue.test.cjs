@@ -110,7 +110,7 @@ test('owner split: GrailScan, AskMed iOS and AskMed Android add up to the day, M
   assert.equal(p.android.new_subs, 1);
   assert.equal(p.ios.new_subs, 3);
   assert.equal(p.android.refunds, 4, 'Google Play refunds are spread over the 2 days');
-  assert.equal(p.android.store_cut, (200 - 4) * .15);
+  assert.ok(Math.abs(p.android.store_cut - (200 - 4) * .15) < 1e-9, 'Google 15% until Play reports are connected');
   assert.equal(p.ios.store_cut, (800 - 6) * .25);
   assert.equal(d1.google_cost, p.android.store_cut);
   assert.equal(p.android.meta, 110 * .25);
@@ -126,6 +126,10 @@ test('owner split: GrailScan, AskMed iOS and AskMed Android add up to the day, M
   assert.equal(d2.per_platform.android_known, false, 'a day without saved Play numbers shows all AskMed as iOS');
   assert.equal(d2.per_platform.ios.revenue, 900);
   assert.equal(d2.per_platform.android.meta, 0);
+  // Google Play's real share (fee + taxes from its reports) replaces the 15% estimate per day.
+  const real = combineOwnerStats(grail, ask, kept, { googleKept: { current: .8, by_date: { '2026-11-11': .78 } } });
+  assert.ok(Math.abs(real.daily[0].per_platform.android.store_cut - (200 - 4) * .22) < 1e-9);
+  assert.ok(Math.abs(real.daily[0].google_cost - (200 - 4) * .22) < 1e-9);
   assert.equal(androidSourceGroup('facebook'), 'meta');
   assert.equal(androidSourceGroup('tiktok'), 'organic');
   assert.equal(androidSourceGroup('website'), 'seo');
