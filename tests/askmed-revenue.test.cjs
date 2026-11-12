@@ -43,6 +43,7 @@ function harness() {
           NextResponse: { json: (body, options) => ({ body, status: options?.status || 200, json: async () => body }) },
         };
         if (name === '@/lib/db') return { db: supabase };
+        if (name === '@opennextjs/cloudflare') return { getCloudflareContext: () => ({ env: {} }) };
         if (name === '@/lib/meta/ads') return {
           getTodayMetaSpend: async () => { metaCalls++; return { configured: true, spend_usd: 12, spend_native: 12, currency: 'USD', usd_rate: 1, date: '2026-09-20' }; },
         };
@@ -82,6 +83,54 @@ test('owner route combines only the two app caches, refreshes shared providers o
   assert.equal((await missing.load('app/api/revenuecat/route.ts').GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&fast=1'))).status, 503);
   const fresh = harness().load('app/api/revenuecat/route.ts');
   assert.equal((await fresh.GET(request('https://test/api/revenuecat?type=today_stats&scope=owner&refresh=1'))).status, 401);
+});
+
+test('owner split: GrailScan, AskMed iOS and AskMed Android add up to the day, Meta by campaign, Android sources grouped', () => {
+  const { combineOwnerStats, androidSourceGroup } = harness().load('lib/revenuecat/owner.ts');
+  const day = (date, revenue, extra = {}) => ({ date, revenue, purchase_revenue: revenue, new_subs: 4,
+    refund_amount: 10, refund_reversed_amount: 0, refund_count: 0, refund_reversed_count: 0,
+    adspend_with_vat: 110, openrouter_cost: 6, higgsfield_cost: 3, profit: 0, ...extra });
+  const snap = (app, days) => ({ today_vn: '2026-11-12', per_app: { [app]: { today_revenue: 0, new_revenue: 0, new_subs: 0, mrr: 0 } },
+    transactions: [], ads: {}, profit: { apple_commission_rate: .15, adspend_with_vat: 110 }, daily: days });
+  const grail = snap('GrailScan', [day('2026-11-11', 100), day('2026-11-12', 100)]);
+  const ask = snap('AskMed', [
+    day('2026-11-11', 1000, { android: { revenue: 200, new_subs: 1, refund_source_amount: 8, refund_source_reversed_amount: 0, by_user: { a: 130, b: 50, c: 20 } } }),
+    day('2026-11-12', 900),
+  ]);
+  const kept = { current: { GrailScan: .7, AskMed: .75 } };
+  const result = combineOwnerStats(grail, ask, kept, {
+    metaSpendByDate: { '2026-11-11': { ios: 3, android: 1 }, '2026-11-12': { ios: 5, android: 0 } },
+    foundViaByUser: { a: 'instagram', b: 'lemon8' },
+  });
+  const [d1, d2] = result.daily;
+  const p = d1.per_platform;
+  assert.equal(p.android_known, true);
+  assert.equal(p.android.revenue, 200);
+  assert.equal(p.ios.revenue, 800);
+  assert.equal(p.android.new_subs, 1);
+  assert.equal(p.ios.new_subs, 3);
+  assert.equal(p.android.refunds, 4, 'Google Play refunds are spread over the 2 days');
+  assert.equal(p.android.store_cut, (200 - 4) * .15);
+  assert.equal(p.ios.store_cut, (800 - 6) * .25);
+  assert.equal(d1.google_cost, p.android.store_cut);
+  assert.equal(p.android.meta, 110 * .25);
+  assert.equal(p.ios.meta, 110 * .75);
+  assert.equal(p.grailscan.meta, 0);
+  assert.equal(p.android.ai_ads, 3 * .25);
+  assert.ok(Math.abs(p.grailscan.openrouter + p.ios.openrouter + p.android.openrouter - 6) < 1e-9);
+  assert.deepEqual({ ...p.android.sources }, { meta: 130, organic: 50, seo: 0, play_store: 0, friend: 0, other: 20 });
+  for (const d of [d1, d2]) {
+    const sum = d.per_platform.grailscan.profit + d.per_platform.ios.profit + d.per_platform.android.profit;
+    assert.ok(Math.abs(sum - d.profit) < 1e-9, 'the three parts add up to the day profit');
+  }
+  assert.equal(d2.per_platform.android_known, false, 'a day without saved Play numbers shows all AskMed as iOS');
+  assert.equal(d2.per_platform.ios.revenue, 900);
+  assert.equal(d2.per_platform.android.meta, 0);
+  assert.equal(androidSourceGroup('facebook'), 'meta');
+  assert.equal(androidSourceGroup('tiktok'), 'organic');
+  assert.equal(androidSourceGroup('website'), 'seo');
+  assert.equal(androidSourceGroup(undefined), 'other');
+  assert.equal(androidSourceGroup('app_store'), 'other');
 });
 
 test('combined accounting sums app revenue/refunds, applies one shared cost ledger and combined RevenueCat threshold', () => {

@@ -3,6 +3,7 @@ import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
 import { getAppleProceeds } from "@/lib/appstore/proceeds";
 import { readAskMedChannelDays, splitAskMedRevenue } from "@/lib/appstore/channels";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
+import { loadFoundVia, loadMetaSpendByPlatform } from "@/lib/owner/platform-inputs";
 import { db } from "@/lib/db";
 import {
   adjustmentKindFromLedgerId,
@@ -569,7 +570,22 @@ export type DailyPoint = {
   refund_reversed_count: number;
   refund_source_amount: number;
   refund_source_reversed_amount: number;
+  /** AskMed's Google Play part of this day (the rest of AskMed is the App Store). */
+  android?: AndroidDay;
 };
+
+/** One Vietnam day of Google Play money, with gross revenue per buyer for the found-via split. */
+export type AndroidDay = {
+  revenue: number;
+  new_subs: number;
+  refund_source_amount: number;
+  refund_source_reversed_amount: number;
+  by_user: Record<string, number>;
+};
+const emptyAndroidDay = (): AndroidDay => ({
+  revenue: 0, new_subs: 0, refund_source_amount: 0, refund_source_reversed_amount: 0, by_user: {},
+});
+const isPlayStore = (store: string | null | undefined) => (store || "").toLowerCase() === "play_store";
 
 type RcProject = (typeof RC_PROJECTS)[number];
 type RcList<T> = { items?: T[]; next_page?: string | null };
@@ -1005,9 +1021,20 @@ function buildDailyPointsFromLedger(
   const refundReversedAmountByDate: Record<string, number> = {};
   const refundReversedCountByDate: Record<string, number> = {};
   const countedNewSubs = new Set<string>();
+  const androidByDate: Record<string, AndroidDay> = {};
+  const androidFor = (date: string) => (androidByDate[date] ||= emptyAndroidDay());
 
   for (const event of ledger.events) {
     if (appName && event.app !== appName) continue;
+    if (event.app === "AskMed" && isPlayStore(event.store)) {
+      const android = androidFor(event.date);
+      if (event.adjustmentKind === "REFUND") android.refund_source_amount += Math.abs(event.gross);
+      else if (event.adjustmentKind === "REFUND_REVERSED") android.refund_source_reversed_amount += Math.abs(event.gross);
+      else {
+        android.revenue += event.gross;
+        android.by_user[event.userId] = (android.by_user[event.userId] || 0) + event.gross;
+      }
+    }
     if (event.adjustmentKind === "REFUND") {
       refundAmountByDate[event.date] = (refundAmountByDate[event.date] || 0) + Math.abs(event.gross);
       refundCountByDate[event.date] = (refundCountByDate[event.date] || 0) + 1;
@@ -1023,6 +1050,7 @@ function buildDailyPointsFromLedger(
       if (!countedNewSubs.has(countKey)) {
         newSubsByDate[event.date] = (newSubsByDate[event.date] || 0) + 1;
         countedNewSubs.add(countKey);
+        if (event.app === "AskMed" && isPlayStore(event.store)) androidFor(event.date).new_subs += 1;
       }
     }
   }
@@ -1055,6 +1083,7 @@ function buildDailyPointsFromLedger(
       refund_reversed_count: refundReversedCountByDate[date] || 0,
       refund_source_amount: refundAmountByDate[date] || 0,
       refund_source_reversed_amount: refundReversedAmountByDate[date] || 0,
+      ...(appName !== "GrailScan" ? { android: androidByDate[date] || emptyAndroidDay() } : {}),
     };
   });
 }
@@ -1481,8 +1510,26 @@ async function fetchFastTodayStatsFromDb(
       refund_source_amount: point?.refund_source_amount ?? point?.refund_amount ?? 0,
       refund_source_reversed_amount:
         point?.refund_source_reversed_amount ?? point?.refund_reversed_amount ?? 0,
+      ...(point?.android ? { android: point.android } : {}),
     };
   });
+  // Today's Google Play part, from the same rows as today's AskMed totals.
+  const todayAndroid = emptyAndroidDay();
+  if (appName === "AskMed") {
+    for (const txn of transactions) {
+      if (txn.app !== "AskMed" || !isPlayStore(txn.store)) continue;
+      todayAndroid.revenue += txn.revenue || 0;
+      todayAndroid.by_user[txn.id] = (todayAndroid.by_user[txn.id] || 0) + (txn.revenue || 0);
+      if (txn.type === "NEW_SUB") todayAndroid.new_subs += 1;
+    }
+    for (const row of renewalRows) {
+      if (!isPlayStore(row.store)) continue;
+      const revenue = money(row.revenue);
+      const kind = adjustmentKindFromLedgerId(row.id, revenue);
+      if (kind === "REFUND") todayAndroid.refund_source_amount += Math.abs(revenue);
+      else if (kind === "REFUND_REVERSED") todayAndroid.refund_source_reversed_amount += Math.abs(revenue);
+    }
+  }
   const totalRefundAmount =
     cachedDaily
       .filter((point) => point.date !== today)
@@ -1543,6 +1590,7 @@ async function fetchFastTodayStatsFromDb(
         point.date === today ? todayRefundReversedCount : point.refund_reversed_count,
       refund_source_amount: sourceRefundAmount,
       refund_source_reversed_amount: sourceRefundReversedAmount,
+      ...(appName === "AskMed" && point.date === today ? { android: todayAndroid } : {}),
     };
   });
 
@@ -1675,7 +1723,17 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
         if (failed) return NextResponse.json({ error: `${failed.app}: ${failed.data.error || "Revenue data unavailable"}` }, { status: failed.status });
         const [grail, askmed] = sources.map(source => source.data);
         const proceeds = await proceedsPromise;
-        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date });
+        // iOS / Android split inputs: Meta spend by campaign and Android buyers' "How did
+        // you find AskMed?" answers. A failure only hides that part of the split.
+        const ownerDates = (askmed.daily as DailyPoint[]).map(day => day.date);
+        const androidUsers = (askmed.daily as DailyPoint[]).flatMap(day => Object.keys(day.android?.by_user || {}));
+        const [metaSpendByDate, foundViaByUser] = await Promise.all([
+          loadMetaSpendByPlatform(ownerDates, searchParams.get("fast") === "1")
+            .catch(error => { console.error("Meta platform spend unavailable", error instanceof Error ? error.message : error); return {}; }),
+          loadFoundVia(androidUsers),
+        ]);
+        const combined = combineOwnerStats(grail, askmed, { current: proceeds.kept_share, by_date: proceeds.kept_share_by_date },
+          { metaSpendByDate, foundViaByUser: foundViaByUser || {} });
         // AskMed Meta/organic split from saved Apple source data; a read
         // failure only hides the split (chart shows AskMed as one segment).
         const firstDay = combined.daily[0]?.date;
@@ -1685,7 +1743,9 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
           : [];
         return NextResponse.json({
           ...combined,
-          askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_app.AskMed.revenue })), channelDays),
+          // Apple's source data covers the App Store only, so it splits iOS revenue only.
+          askmed_channels: splitAskMedRevenue(combined.daily.map(day => ({ date: day.date, revenue: day.per_platform.ios.revenue })), channelDays),
+          android_sources_available: foundViaByUser !== null,
           apple_proceeds: proceeds,
           cached: sources.every(source => source.data.cached),
           stale: sources.some(source => source.data.stale),
@@ -1728,8 +1788,9 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
           ]);
           const points = buildDailyPointsFromLedger(dates, ledger, {}, 0, 0, requestedApp);
           const corrected = points.map(({ date, revenue, new_subs, refund_source_amount, refund_count,
-            refund_source_reversed_amount, refund_reversed_count }) => ({ date, revenue, new_subs,
+            refund_source_reversed_amount, refund_reversed_count, android }) => ({ date, revenue, new_subs,
             refund_source_amount, refund_count, refund_source_reversed_amount, refund_reversed_count,
+            ...(requestedApp === "AskMed" && android ? { android } : {}),
             ...(Number.isFinite(closingSpend[date]) ? { adspend_with_vat: closingSpend[date] * (1 + META_VAT_RATE) } : {}),
           }));
           await finishReconciliation(requestedApp, run, corrected);

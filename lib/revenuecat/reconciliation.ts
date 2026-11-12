@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import type { TodayStatsResponse } from "@/app/api/revenuecat/route";
+import type { AndroidDay, TodayStatsResponse } from "@/app/api/revenuecat/route";
 
 export type ReconciledDay = {
   date: string;
@@ -12,6 +12,8 @@ export type ReconciledDay = {
   // Only the nightly GrailScan job closes the shared Meta cost for yesterday.
   // Omit on provider failures and on historical revenue-only repairs.
   adspend_with_vat?: number;
+  // AskMed only: the Google Play part of the day (owner page iOS/Android split).
+  android?: AndroidDay;
 };
 type Run = {
   status: "running" | "complete" | "failed";

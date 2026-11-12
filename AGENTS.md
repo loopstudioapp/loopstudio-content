@@ -76,6 +76,15 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - Net refunds are displayed as a cost and distributed evenly across the 30-day period. Revenue bars remain gross purchase revenue; profit subtracts the distributed refund cost.
 - Daily profit formula is revenue after distributed refunds, less Apple commission, Meta spend including VAT, RevenueCat cost, OpenRouter cost, and Higgsfield cost.
 - The headline Total Profit must equal the current day's fully costed profit chart point.
+
+## Platform Split (since 2026-11-12, owner request)
+
+- `combineOwnerStats` returns `per_platform` on every daily point: `grailscan`, `ios`, `android` (each revenue, refunds, store_cut, meta, revenuecat, openrouter, ai_ads, profit, new_subs) plus `android.sources` and `android_known`.
+- Android = AskMed RevenueCat rows with store `play_store`. The ledger builder and the fast path save them per day as `DailyPoint.android` (revenue, new_subs, refunds, revenue per app user id); reconciled-day overlays keep `android`. Days saved before this change have no `android` (`android_known=false`) and stay counted as iOS until the AskMed 30-day force repair runs once.
+- Google Play store cut is an estimated 15% (`GOOGLE_PLAY_FEE`, shown as `google_cost`); `apple_cost` is now GrailScan + AskMed iOS only.
+- Meta spend is split by campaign: names containing "android" = Android, every other campaign = iOS (old WEB campaigns count as iOS). `getMetaSpendByPlatformDay` is a read-only GET of campaign-level daily insights; `lib/owner/platform-inputs.ts` caches the result as `__meta_platform_spend__` in `pinterest_topics` for 30 minutes. Only the ratio is used; the total is still the VAT-included `adspend_with_vat`. AI Ads follows the same ratio; OpenRouter is split by each part's share of the day's gross revenue; RevenueCat is 1% of each part when the combined threshold applies.
+- Android revenue sources come from AskMed's onboarding answer `found_via` in D1 `askmed-qa` (second binding `ASKMED_DB`, READ-ONLY: SELECT only, never write). Groups: Meta Ads = facebook + instagram, Organic = tiktok + lemon8, SEO = google + website, Play Store, Friend, Other (other answers and no answer). Debug-build answers are excluded.
+- 30-Day Subs Cost shows AskMed iOS and Android separately (each its own Meta spend incl. VAT / its own new subs); GrailScan is not counted.
 - Independent provider reconciliation should overlay only that provider's cost delta. It must not refetch or mutate unrelated ledgers.
 
 ## Meta Attribution / Facebook Tracking Boundary

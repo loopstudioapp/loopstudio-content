@@ -46,6 +46,7 @@ function harness() {
       fetch: async (...args) => { fetchCalls++; return h.fetch(...args); },
       require(name) {
         if(name==='@/lib/db') return {db:supabase};
+        if(name==='@opennextjs/cloudflare') return {getCloudflareContext:()=>({env:{}})};
         if(name==='next/server') return {NextResponse:{json:(body,options)=>({body,status:options?.status||200})}};
         if(name==='@/lib/meta/ads'||name==='@/lib/openrouter/costs') return {};
         if(name.startsWith('@/')) return load(name.slice(2)+'.ts');
@@ -175,4 +176,28 @@ test('purchase identity deduplicates aliases, sandbox events stay out, and stric
   assert.equal(a.events[0].id,b.events[0].id);
   h.fetch=async()=>({ok:false,status:404,text:async()=>'',headers:new Headers()});
   await assert.rejects(testHelpers.fetchCustomerTransactionEvents(project,{userId:'a',country:'US'},at-1,at+1,true));
+});
+
+test('daily ledger keeps AskMed Google Play money per day and per buyer for the owner iOS/Android split',()=>{
+  const h=harness();
+  const {testHelpers}=h.load('app/api/revenuecat/route.ts','\nexports.testHelpers={buildDailyPointsFromLedger};');
+  const ev=(id,userId,store,gross,date,purchasedAt,adjustmentKind)=>({id,app:'AskMed',userId,country:'US',productId:'p',store,
+    purchasedAt,purchasedMs:Date.parse(purchasedAt),expiresAt:'',date,gross,adjustmentKind});
+  const ledger={events:[
+    ev('1','ios-user','app_store',129.99,'2026-11-11','2026-11-11T03:00:00Z'),
+    ev('2','play-a','play_store',129.99,'2026-11-11','2026-11-11T04:00:00Z'),
+    ev('3','play-b','play_store',24.99,'2026-11-12','2026-11-12T04:00:00Z'),
+    ev('4','play-old','play_store',24.99,'2026-11-12','2026-11-12T05:00:00Z'),
+    ev('r','play-a','play_store',-129.99,'2026-11-12','2026-11-12T06:00:00Z','REFUND'),
+  ],firstPaidAtByCustomer:new Map([['AskMed:ios-user','2026-11-11T03:00:00Z'],['AskMed:play-a','2026-11-11T04:00:00Z'],
+    ['AskMed:play-b','2026-11-12T04:00:00Z'],['AskMed:play-old','2026-10-12T04:00:00Z']])};
+  const keyOk=[...ledger.firstPaidAtByCustomer.keys()];
+  assert.ok(keyOk.length===4);
+  const [d1,d2]=testHelpers.buildDailyPointsFromLedger(['2026-11-11','2026-11-12'],ledger,{},0,0,'AskMed');
+  assert.equal(d1.revenue,259.98);
+  assert.equal(d1.android.revenue,129.99);
+  assert.equal(d2.android.revenue,49.98);
+  assert.deepEqual({...d2.android.by_user},{'play-b':24.99,'play-old':24.99});
+  assert.equal(d2.android.refund_source_amount,129.99);
+  assert.equal(d1.android.new_subs+d2.android.new_subs,d1.new_subs+d2.new_subs-1,'only the App Store buyer is not an Android new sub');
 });

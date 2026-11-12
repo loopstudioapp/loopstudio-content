@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
-import type { AppBreakdown } from "@/lib/revenuecat/owner";
+import { ANDROID_SOURCES, type AndroidSource, type AppBreakdown, type PlatformDay } from "@/lib/revenuecat/owner";
 
 /* ── Types ── */
 type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
@@ -30,10 +30,12 @@ type DailyPoint = {
   refund_reversed_amount?: number;
   refund_reversed_count?: number;
   apple_cost?: number;
+  google_cost?: number;
+  per_platform?: PlatformDay;
 };
 type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
 type AskMedChannels = Record<string, { meta: number; organic: number; meta_share: number; estimated: boolean }>;
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; askmed_channels?: AskMedChannels | null; reconciliation_warning?: string | null };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; askmed_channels?: AskMedChannels | null; android_sources_available?: boolean; reconciliation_warning?: string | null };
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
@@ -43,11 +45,38 @@ const APP_SEGMENTS = [
   { key: "GrailScan", label: "GrailScan", color: "#00b894" },
   { key: "AskMed", label: "AskMed", color: "#125cb5" },
 ] as const;
-// Revenue chart: AskMed split by Apple's source of each sale (Meta ads vs organic).
+// Revenue chart: AskMed iOS split by Apple's source of each sale (Meta ads vs organic),
+// AskMed Android as its own part (Loop 2026-11-12).
+const ANDROID_COLOR = "#9bc53d";
 const REVENUE_SEGMENTS = [
   APP_SEGMENTS[0],
-  { key: "AskMedMeta", label: "AskMed Meta Ads", color: "#125cb5" },
-  { key: "AskMedOrganic", label: "AskMed Organic", color: "#6ea8e8" },
+  { key: "AskMedMeta", label: "AskMed iOS Meta Ads", color: "#125cb5" },
+  { key: "AskMedOrganic", label: "AskMed iOS Organic", color: "#6ea8e8" },
+  { key: "AskMedAndroid", label: "AskMed Android", color: ANDROID_COLOR },
+] as const;
+const REVENUE_SEGMENTS_NO_SPLIT = [
+  APP_SEGMENTS[0],
+  { key: "AskMedIos", label: "AskMed iOS", color: "#125cb5" },
+  { key: "AskMedAndroid", label: "AskMed Android", color: ANDROID_COLOR },
+] as const;
+// Profit per day in three parts.
+const PLATFORM_SEGMENTS = [
+  { key: "grailscan", label: "GrailScan", color: "#00b894" },
+  { key: "ios", label: "AskMed iOS", color: "#125cb5" },
+  { key: "android", label: "AskMed Android", color: ANDROID_COLOR },
+] as const;
+// Android revenue by "How did you find AskMed?" (grouped as Loop asked, 2026-11-12).
+const ANDROID_SOURCE_SEGMENTS: readonly { key: AndroidSource; label: string; color: string }[] = [
+  { key: "meta", label: "Meta Ads", color: "#1877f2" },
+  { key: "organic", label: "Organic", color: "#25c4d6" },
+  { key: "seo", label: "SEO", color: "#34a853" },
+  { key: "play_store", label: "Play Store", color: "#0f766e" },
+  { key: "friend", label: "Friend", color: "#fb923c" },
+  { key: "other", label: "Other", color: "#6b7280" },
+];
+const SUBS_COST_SEGMENTS = [
+  { key: "ios", label: "AskMed iOS", color: "#125cb5" },
+  { key: "android", label: "AskMed Android", color: ANDROID_COLOR },
 ] as const;
 
 /* ── Interactive Chart with Hover Tooltip ── */
@@ -253,6 +282,7 @@ function DailyBarChart({
 type DailyCostBreakdown = {
   meta: number;
   apple: number;
+  google: number;
   revenueCat: number;
   openRouter: number;
   higgsfield: number;
@@ -262,6 +292,7 @@ type DailyCostBreakdown = {
 const COST_SEGMENTS = [
   { key: "meta", label: "Meta", color: "#0082fb" },
   { key: "apple", label: "Apple", color: "#f5f5f7" },
+  { key: "google", label: "Google", color: "#34a853" },
   { key: "revenueCat", label: "RevenueCat", color: "#f2545b" },
   { key: "openRouter", label: "OpenRouter", color: "#c8ff00" },
   { key: "higgsfield", label: "AI Ads", color: "#8b5cf6" },
@@ -283,13 +314,22 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
   const plotW = w - pad.left - pad.right;
   const plotH = h - pad.top - pad.bottom;
   const totals = data.map((day) => segments.reduce((sum, segment) => sum + day[segment.key], 0));
-  const rawMax = Math.max(...totals, 1);
-  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
-  const chartMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
+  // Positive parts stack up from $0 and negative parts (losses) stack down from it.
+  const ups = data.map((day) => segments.reduce((sum, segment) => sum + Math.max(0, day[segment.key]), 0));
+  const downs = data.map((day) => segments.reduce((sum, segment) => sum + Math.min(0, day[segment.key]), 0));
+  const niceCeil = (value: number) => {
+    const safeValue = Math.max(value, 1);
+    const magnitude = 10 ** Math.floor(Math.log10(safeValue));
+    return (Math.ceil((safeValue / magnitude) * 2) / 2) * magnitude;
+  };
+  const chartMax = niceCeil(Math.max(...ups, 1));
+  const rawMin = Math.min(...downs, 0);
+  const chartMin = rawMin < 0 ? -niceCeil(-rawMin) : 0;
+  const chartRange = chartMax - chartMin || 1;
   const slot = plotW / data.length;
   const barW = Math.max(8, Math.min(22, slot * 0.62));
-  const yOf = (value: number) => pad.top + ((chartMax - value) / chartMax) * plotH;
-  const gridValues = [chartMax, chartMax / 2, 0];
+  const yOf = (value: number) => pad.top + ((chartMax - value) / chartRange) * plotH;
+  const gridValues = chartMin < 0 ? [chartMax, 0, chartMin] : [chartMax, chartMax / 2, 0];
 
   return (
     <div className="relative overflow-x-auto pb-1 [direction:rtl] sm:[direction:ltr]">
@@ -317,9 +357,10 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
         >
           {gridValues.map((value) => {
             const y = yOf(value);
+            const isZeroLine = value === 0 && chartMin < 0;
             return (
               <g key={value}>
-                <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke="#2f2f2f" strokeWidth="1" />
+                <line x1={pad.left} y1={y} x2={w - pad.right} y2={y} stroke={isZeroLine ? "#737373" : "#2f2f2f"} strokeWidth="1" strokeDasharray={isZeroLine ? "4,3" : undefined} />
                 <text x={pad.left - 5} y={y + 3} textAnchor="end" fill="#666" fontSize="8">{valueLabel(value)}</text>
               </g>
             );
@@ -327,17 +368,21 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
           {data.map((day, i) => {
             const x = pad.left + i * slot + slot / 2;
             const active = hover === i;
-            let cumulative = 0;
+            let up = 0;
+            let down = 0;
             return (
               <g key={`${dates[i]}-${i}`} onPointerDown={() => setHover(i)}>
                 <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="transparent" />
                 {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="#f59e0b" opacity="0.08" />}
                 {segments.map((segment) => {
                   const value = day[segment.key];
-                  const bottom = yOf(cumulative);
-                  cumulative += value;
-                  const top = yOf(cumulative);
-                  return value > 0 ? (
+                  if (!value) return null;
+                  const from = value > 0 ? up : down;
+                  if (value > 0) up += value; else down += value;
+                  const to = value > 0 ? up : down;
+                  const top = Math.min(yOf(from), yOf(to));
+                  const bottom = Math.max(yOf(from), yOf(to));
+                  return value !== 0 ? (
                     <rect
                       key={segment.key}
                       x={x - barW / 2}
@@ -349,7 +394,7 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
                     />
                   ) : null;
                 })}
-                <text x={x} y={Math.max(10, yOf(totals[i]) - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
+                <text x={x} y={Math.max(10, yOf(ups[i]) - 5)} textAnchor="middle" fill={active ? "#fff" : "#d4d4d4"} fontSize="9" fontWeight="600">
                   {valueLabel(totals[i])}
                 </text>
                 <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">
@@ -381,6 +426,104 @@ function StackedBreakdownChart<K extends string>({ data, dates, segments, label,
               </div>
             ))}
             {notes?.[hover] && <p className="text-[#737373] text-[10px] mt-1 whitespace-nowrap">{notes[hover]}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Side-by-side daily bars (one per series); a missing value draws no bar ── */
+function GroupedBarChart<K extends string>({ data, dates, segments, label, valueLabel, tooltipValue }: {
+  data: Record<K, number | null>[]; dates: string[];
+  segments: readonly { key: K; label: string; color: string }[];
+  label: string; valueLabel: (value: number) => string; tooltipValue: (value: number) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (data.length === 0) return <div className="h-40 flex items-center justify-center text-[#525252] text-xs">No data</div>;
+  const w = 960;
+  const h = 150;
+  const pad = { top: 18, right: 8, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const values = data.flatMap((day) => segments.map((segment) => day[segment.key] ?? 0));
+  const rawMax = Math.max(...values, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
+  const chartMax = (Math.ceil((rawMax / magnitude) * 2) / 2) * magnitude;
+  const slot = plotW / data.length;
+  const barW = Math.max(4, Math.min(10, (slot * 0.8) / segments.length));
+  const yOf = (value: number) => pad.top + ((chartMax - value) / chartMax) * plotH;
+  return (
+    <div className="relative overflow-x-auto pb-1 [direction:rtl] sm:[direction:ltr]">
+      <div dir="ltr" className="relative min-w-[960px]">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          className="block w-full cursor-crosshair"
+          role="img"
+          aria-label={label}
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setHover(null);
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setHover(index => Math.max(0, Math.min(data.length - 1, (index ?? data.length - 1) + (event.key === "ArrowLeft" ? -1 : 1))));
+            }
+          }}
+          onPointerLeave={(event) => { if (event.pointerType === "mouse") setHover(null); }}
+          onPointerMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * w;
+            setHover(Math.max(0, Math.min(data.length - 1, Math.floor((x - pad.left) / slot))));
+          }}
+        >
+          {[chartMax, chartMax / 2, 0].map((value) => (
+            <g key={value}>
+              <line x1={pad.left} y1={yOf(value)} x2={w - pad.right} y2={yOf(value)} stroke="#2f2f2f" strokeWidth="1" />
+              <text x={pad.left - 5} y={yOf(value) + 3} textAnchor="end" fill="#666" fontSize="8">{valueLabel(value)}</text>
+            </g>
+          ))}
+          {data.map((day, i) => {
+            const x = pad.left + i * slot + slot / 2;
+            const active = hover === i;
+            return (
+              <g key={`${dates[i]}-${i}`} onPointerDown={() => setHover(i)}>
+                <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="transparent" />
+                {active && <rect x={pad.left + i * slot} y={pad.top} width={slot} height={plotH} fill="#f59e0b" opacity="0.08" />}
+                {segments.map((segment, k) => {
+                  const value = day[segment.key];
+                  if (value == null) return null;
+                  const left = x - (segments.length * barW) / 2 + k * barW;
+                  return (
+                    <rect key={segment.key} x={left + 0.5} y={yOf(value)} width={barW - 1}
+                      height={Math.max(1.5, yOf(0) - yOf(value))} rx="1.5" fill={segment.color} opacity={active ? 1 : 0.86} />
+                  );
+                })}
+                <text x={x} y={h - 7} textAnchor="middle" fill={active ? "#d4d4d4" : "#666"} fontSize="8">{dates[i]?.slice(5)}</text>
+              </g>
+            );
+          })}
+        </svg>
+        {hover !== null && (
+          <div
+            className="absolute top-0 pointer-events-none bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 shadow-xl z-10 min-w-36"
+            style={{
+              left: `${((pad.left + hover * slot + slot / 2) / w) * 100}%`,
+              transform: hover < 2 ? "translateX(0)" : hover > data.length - 3 ? "translateX(-100%)" : "translateX(-50%)",
+            }}
+          >
+            <p className="text-[#a3a3a3] text-[10px] whitespace-nowrap mb-1.5">{dates[hover]}</p>
+            {segments.map((segment) => {
+              const value = data[hover][segment.key];
+              return (
+                <div key={segment.key} className="flex items-center justify-between gap-5 text-[10px] leading-5">
+                  <span className="flex items-center gap-1.5 text-[#a3a3a3] whitespace-nowrap">
+                    <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
+                    {segment.label}
+                  </span>
+                  <span className="text-white font-medium">{value == null ? "—" : tooltipValue(value)}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -479,20 +622,30 @@ function AppChartLegend<K extends string>({ data, segments, format }: {
   </div>;
 }
 
-/** Revenue chart rows: AskMed split into Meta ads and organic when Apple source data exists. */
+/** Revenue chart rows: AskMed iOS split into Meta ads and organic when Apple source data exists; Android on its own. */
 function revenueChart(daily: DailyPoint[], channels: AskMedChannels | null | undefined) {
-  const appData = daily.map((d) => ({ GrailScan: d.per_app?.GrailScan.revenue || 0, AskMed: d.per_app?.AskMed.revenue || 0 }));
-  if (!channels) return { split: false as const, data: appData, notes: undefined };
+  const parts = daily.map((d) => {
+    const android = d.per_platform?.android.revenue ?? 0;
+    return { GrailScan: d.per_app?.GrailScan.revenue || 0, ios: (d.per_app?.AskMed.revenue || 0) - android, android };
+  });
+  if (!channels) {
+    return {
+      split: false as const,
+      data: parts.map((p) => ({ GrailScan: p.GrailScan, AskMedIos: p.ios, AskMedAndroid: p.android })),
+      notes: undefined,
+    };
+  }
   return {
     split: true as const,
     data: daily.map((d, i) => ({
-      GrailScan: appData[i].GrailScan,
+      GrailScan: parts[i].GrailScan,
       AskMedMeta: channels[d.date]?.meta ?? 0,
-      AskMedOrganic: channels[d.date]?.organic ?? appData[i].AskMed,
+      AskMedOrganic: channels[d.date]?.organic ?? parts[i].ios,
+      AskMedAndroid: parts[i].android,
     })),
     // Days without Apple source data yet use the trailing 7-day Meta share.
-    notes: daily.map((d, i) => channels[d.date]?.estimated && appData[i].AskMed
-      ? `AskMed split estimated (7-day Meta share ${Math.round(channels[d.date].meta_share * 100)}%)`
+    notes: daily.map((d, i) => channels[d.date]?.estimated && parts[i].ios
+      ? `iOS split estimated (7-day Meta share ${Math.round(channels[d.date].meta_share * 100)}%)`
       : null),
   };
 }
@@ -507,7 +660,7 @@ function autoTaxRate(ytdVnd: number): number {
   if (ytdVnd <= 50_000_000_000) return 0.17;
   return 0.2;
 }
-function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; askmedChannels?: AskMedChannels | null; loading: boolean; appName?: string }) {
+function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, androidSourcesAvailable = true, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; askmedChannels?: AskMedChannels | null; androidSourcesAvailable?: boolean; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("auto");
   // A manual rate is remembered on this device until Auto is picked again.
   useEffect(() => {
@@ -565,12 +718,15 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
     day.apple_cost ??
     (day.revenue - (day.refund_amount || 0) + (day.refund_reversed_amount || 0)) * (profit?.apple_commission_rate ?? 0.15);
   const appleCost30 = (daily || []).reduce((sum, day) => sum + appleCostFor(day), 0);
+  // Google's 15% on AskMed Android sales (since 2026-11-12; Apple's share no longer applies to them).
+  const googleCost30 = (daily || []).reduce((sum, day) => sum + (day.google_cost || 0), 0);
   const metaCost30 = (daily || []).reduce((sum, day) => sum + (day.adspend_with_vat || 0), 0);
   const totalCost30 =
-    metaCost30 + appleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
+    metaCost30 + appleCost30 + googleCost30 + revenueCatCost30 + openRouterCost30 + higgsfieldCost30 + netRefundAmount30;
   const dailyCosts: DailyCostBreakdown[] = (daily || []).map((day) => ({
     meta: day.adspend_with_vat || 0,
     apple: appleCostFor(day),
+    google: day.google_cost || 0,
     revenueCat: day.revenuecat_cost || 0,
     openRouter: day.openrouter_cost || 0,
     higgsfield: day.higgsfield_cost || 0,
@@ -585,6 +741,30 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
     0
   );
   const costPerSub30 = totalNewSubs30 > 0 ? totalSubCost30 / totalNewSubs30 : 0;
+  // GrailScan / AskMed iOS / AskMed Android (Loop 2026-11-12).
+  const hasPlatforms = Boolean(daily?.length) && (daily || []).every((d) => d.per_platform);
+  const platformProfit = (daily || []).map((d) => ({
+    grailscan: (d.per_platform?.grailscan.profit || 0) * taxFactor30,
+    ios: (d.per_platform?.ios.profit || 0) * taxFactor30,
+    android: (d.per_platform?.android.profit || 0) * taxFactor30,
+  }));
+  const androidUnknownDays = (daily || []).filter((d) => d.per_platform && !d.per_platform.android_known).length;
+  const androidSources = (daily || []).map((d) =>
+    Object.fromEntries(ANDROID_SOURCES.map((key) => [key, d.per_platform?.android.sources[key] || 0])) as Record<AndroidSource, number>);
+  const androidRevenue30 = (daily || []).reduce((s, d) => s + (d.per_platform?.android.revenue || 0), 0);
+  const costPerSub = (meta: number, subs: number) => (meta > 0 && subs > 0 ? meta / subs : null);
+  const subsCostData = (daily || []).map((d) => ({
+    ios: costPerSub(d.per_platform?.ios.meta || 0, d.per_platform?.ios.new_subs || 0),
+    android: costPerSub(d.per_platform?.android.meta || 0, d.per_platform?.android.new_subs || 0),
+  }));
+  const iosMeta30 = (daily || []).reduce((s, d) => s + (d.per_platform?.ios.meta || 0), 0);
+  const iosSubs30 = (daily || []).reduce((s, d) => s + (d.per_platform?.ios.new_subs || 0), 0);
+  // Android: only days with Android ad spend, so organic buyers from before the ads don't lower it.
+  const androidAdDays = (daily || []).filter((d) => (d.per_platform?.android.meta || 0) > 0);
+  const androidMeta30 = androidAdDays.reduce((s, d) => s + (d.per_platform?.android.meta || 0), 0);
+  const androidSubs30 = androidAdDays.reduce((s, d) => s + (d.per_platform?.android.new_subs || 0), 0);
+  const iosCostPerSub30 = iosSubs30 > 0 ? iosMeta30 / iosSubs30 : 0;
+  const androidCostPerSub30 = androidSubs30 > 0 ? androidMeta30 / androidSubs30 : 0;
   const metaUnavailable = Boolean(ads?.error && !ads?.stale);
   // Subtitle for adspend showing native VND (incl VAT) + rate
   const nativeWithVat = ads?.configured ? ads.spend_native * (1 + (profit?.meta_vat_rate ?? META_VAT_RATE)) : 0;
@@ -683,23 +863,49 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
                 data={revenueSplit.data}
                 dates={daily.map((d) => d.date)}
                 segments={REVENUE_SEGMENTS}
-                label="30-day revenue: GrailScan, AskMed Meta Ads and AskMed Organic"
+                label="30-day revenue: GrailScan, AskMed iOS Meta Ads, AskMed iOS Organic and AskMed Android"
                 valueLabel={fmtCompactCur}
                 tooltipValue={fmtCur2}
                 notes={revenueSplit.notes}
               />
             </> : <>
-              <AppChartLegend data={revenueSplit.data} segments={APP_SEGMENTS} format={fmtCur2} />
+              <AppChartLegend data={revenueSplit.data} segments={REVENUE_SEGMENTS_NO_SPLIT} format={fmtCur2} />
               <StackedBreakdownChart
                 data={revenueSplit.data}
                 dates={daily.map((d) => d.date)}
-                segments={APP_SEGMENTS}
-                label="30-day revenue by app: GrailScan and AskMed"
+                segments={REVENUE_SEGMENTS_NO_SPLIT}
+                label="30-day revenue: GrailScan, AskMed iOS and AskMed Android"
                 valueLabel={fmtCompactCur}
                 tooltipValue={fmtCur2}
               />
             </>}
           </div>
+          {hasPlatforms && (
+            <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[#9bc53d] text-[10px] uppercase tracking-wider font-semibold">30-Day AskMed Android Revenue</p>
+                <div className="text-right">
+                  <p className="text-white text-2xl font-bold">{fmtCur2(androidRevenue30)}</p>
+                  {usdToVnd > 0 && (
+                    <p className="text-[#737373] text-[11px] mt-0.5">≈ {fmtVndFull(Math.round(androidRevenue30 * usdToVnd))}</p>
+                  )}
+                </div>
+              </div>
+              <AppChartLegend data={androidSources} segments={ANDROID_SOURCE_SEGMENTS} format={fmtCur2} />
+              <StackedBreakdownChart
+                data={androidSources}
+                dates={daily.map((d) => d.date)}
+                segments={ANDROID_SOURCE_SEGMENTS}
+                label="30-day AskMed Android revenue by how the buyer found AskMed"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+              />
+              <p className="text-[#525252] text-[10px] mt-2">
+                From &quot;How did you find AskMed?&quot; · Meta Ads = Facebook + Instagram · Organic = TikTok + Lemon8 · SEO = Google + Website · No answer = Other (buyers before Android 1.7.1 never saw the question) · Renewals count under the buyer&apos;s answer
+                {!androidSourcesAvailable && " · Answers unavailable right now, so all shows as Other"}
+              </p>
+            </div>
+          )}
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#10b981] text-[10px] uppercase tracking-wider font-semibold">30-Day Profit</p>
@@ -710,15 +916,31 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
                 )}
               </div>
             </div>
-            <DailyBarChart
-              data={taxedProfit}
-              dates={daily.map((d) => d.date)}
-              color="#10b981"
-              negativeColor="#ef4444"
-              label="Profit"
-              valueLabel={fmtCompactCur}
-              tooltipValue={fmtCur2}
-            />
+            {hasPlatforms ? <>
+              <AppChartLegend data={platformProfit} segments={PLATFORM_SEGMENTS} format={fmtCur2} />
+              <StackedBreakdownChart
+                data={platformProfit}
+                dates={daily.map((d) => d.date)}
+                segments={PLATFORM_SEGMENTS}
+                label="30-day profit: GrailScan, AskMed iOS and AskMed Android"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+              />
+              <p className="text-[#525252] text-[10px] mt-2">
+                Meta: ASKMED ANDROID campaigns = Android, all other campaigns = iOS · Android store cut = Google 15% · OpenRouter split by revenue · AI Ads split by Meta spend
+                {androidUnknownDays > 0 && ` · ${androidUnknownDays} ${androidUnknownDays === 1 ? "day has" : "days have"} no Android numbers yet, shown under iOS`}
+              </p>
+            </> : (
+              <DailyBarChart
+                data={taxedProfit}
+                dates={daily.map((d) => d.date)}
+                color="#10b981"
+                negativeColor="#ef4444"
+                label="Profit"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+              />
+            )}
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-start justify-between gap-4 mb-3">
@@ -729,6 +951,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
                     const values = {
                       meta: metaCost30,
                       apple: appleCost30,
+                      google: googleCost30,
                       revenueCat: revenueCatCost30,
                       openRouter: openRouterCost30,
                       higgsfield: higgsfieldCost30,
@@ -750,9 +973,9 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
                 )}
               </div>
             </div>
-            <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, RevenueCat, OpenRouter, AI Ads, and refunds" />
+            <StackedBreakdownChart data={dailyCosts} dates={daily.map((d) => d.date)} segments={COST_SEGMENTS} label="Shared costs by day: Meta, Apple, Google, RevenueCat, OpenRouter, AI Ads, and refunds" />
             <p className="text-[#525252] text-[10px] mt-2">
-              Shared costs counted once for both apps · Meta includes 10% VAT · OpenRouter = all keys on the account, UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
+              Shared costs counted once for both apps · Google = 15% of AskMed Android sales · Meta includes 10% VAT · OpenRouter = all keys on the account, UTC days · AI Ads $50/month prorated daily · Revenue is gross; refunds are deducted in profit
             </p>
           </div>
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
@@ -770,6 +993,44 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
               tooltipValue={(value) => `${value.toFixed(0)} new ${value === 1 ? "sub" : "subs"}`}
             />
           </div>
+          {hasPlatforms ? (
+          <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Subs Cost</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                  {SUBS_COST_SEGMENTS.map((segment) => (
+                    <span key={segment.key} className="flex items-center gap-1.5 text-[10px] text-[#a3a3a3]">
+                      <span className="w-2 h-2" style={{ backgroundColor: segment.color }} />
+                      {segment.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-6 text-right">
+                <div>
+                  <p className="text-[#6ea8e8] text-2xl font-bold">{iosCostPerSub30 > 0 ? fmtCur2(iosCostPerSub30) : "—"}</p>
+                  <p className="text-[#737373] text-[11px] mt-0.5">AskMed iOS</p>
+                </div>
+                <div>
+                  <p className="text-[#9bc53d] text-2xl font-bold">{androidCostPerSub30 > 0 ? fmtCur2(androidCostPerSub30) : "—"}</p>
+                  <p className="text-[#737373] text-[11px] mt-0.5">AskMed Android{androidAdDays.length > 0 && androidAdDays.length < (daily?.length || 0) ? ` · ${androidAdDays.length} ad ${androidAdDays.length === 1 ? "day" : "days"}` : ""}</p>
+                </div>
+              </div>
+            </div>
+            <GroupedBarChart
+              data={subsCostData}
+              dates={daily.map((d) => d.date)}
+              segments={SUBS_COST_SEGMENTS}
+              label="Cost per new subscription by day: AskMed iOS and AskMed Android"
+              valueLabel={(value) => `$${value.toFixed(0)}`}
+              tooltipValue={(value) => fmtCur2(value)}
+            />
+            <p className="text-[#525252] text-[10px] mt-2">
+              Each = its own Meta spend incl. 10% VAT ÷ its own new subs · GrailScan not counted · No bar = no ad spend or no new subs that day
+            </p>
+          </div>
+          ) : (
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-[#f59e0b] text-[10px] uppercase tracking-wider font-semibold">30-Day Subs Cost</p>
@@ -784,6 +1045,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, askmedChannels, loading, app
               tooltipValue={(value) => fmtCur2(value)}
             />
           </div>
+          )}
         </div>
       )}
     </div>
@@ -1048,6 +1310,7 @@ export default function OwnerDashboard() {
           daily={todayStats?.daily}
           proceeds={todayStats?.apple_proceeds}
           askmedChannels={todayStats?.askmed_channels}
+          androidSourcesAvailable={todayStats?.android_sources_available !== false}
           loading={todayStatsLoading && !todayStats}
         />
 

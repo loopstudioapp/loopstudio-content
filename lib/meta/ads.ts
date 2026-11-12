@@ -186,3 +186,55 @@ export async function getTodayMetaSpend(): Promise<MetaSpend> {
     return { ...empty, configured: true, error: e instanceof Error ? e.message : "meta fetch failed" };
   }
 }
+
+/** Owner page platform split: a campaign whose name contains "ANDROID" is Android, every other one is iOS. */
+export type PlatformSpend = { ios: number; android: number };
+export const isAndroidCampaign = (name: string) => /android/i.test(name);
+
+/**
+ * Daily Meta spend per platform in the ad account's currency (read-only GET on
+ * /insights at campaign level). Only the ratio is used: the page keeps its
+ * existing account total per day and splits it with these numbers.
+ * Returns null when Meta can't be read, so callers keep their saved values.
+ */
+export async function getMetaSpendByPlatformDay(
+  startIso: string,
+  endIso: string
+): Promise<Record<string, PlatformSpend> | null> {
+  const token = process.env.META_ACCESS_TOKEN;
+  const rawAccount = process.env.META_AD_ACCOUNT_ID;
+  if (!token || !rawAccount) return null;
+  const accountId = normalizeAccountId(rawAccount);
+  const params = new URLSearchParams({
+    level: "campaign",
+    fields: "campaign_name,spend",
+    time_increment: "1",
+    time_range: JSON.stringify({ since: startIso, until: endIso }),
+    limit: "500",
+    access_token: token,
+  });
+  const out: Record<string, PlatformSpend> = {};
+  let url: string | null = `${GRAPH_BASE}/${accountId}/insights?${params}`;
+  try {
+    for (let page = 0; url && page < 20; page++) {
+      const res: Response = await fetch(url, { method: "GET" });
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        data?: { date_start?: string; campaign_name?: string; spend?: string }[];
+        paging?: { next?: string };
+      };
+      for (const row of json.data || []) {
+        if (!row.date_start) continue;
+        const day = (out[row.date_start] ||= { ios: 0, android: 0 });
+        const spend = row.spend ? parseFloat(row.spend) || 0 : 0;
+        if (isAndroidCampaign(row.campaign_name || "")) day.android += spend;
+        else day.ios += spend;
+      }
+      const next = json.paging?.next;
+      url = next && /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/act_\d+\/insights\?/.test(next) ? next : null;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}

@@ -33,6 +33,7 @@ function harness(env = {}) {
       fetch: async () => { throw new Error('no network in tests'); },
       require(name) {
         if (name === '@/lib/db') return { db: supabase };
+        if (name === '@opennextjs/cloudflare') return { getCloudflareContext: () => ({ env: {} }) };
         if (name.startsWith('@/')) return load(name.slice(2) + '.ts');
         if (name.startsWith('node:')) return require(name);
         throw new Error('Unexpected import ' + name);
