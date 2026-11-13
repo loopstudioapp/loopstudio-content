@@ -204,7 +204,9 @@ export function parseEarnings(rows: Record<string, string>[], packageName: strin
 export function parseSales(rows: Record<string, string>[], packageName: string, rates: Record<string, number>): DayTotals {
   const days: DayTotals = {};
   for (const row of rows) {
-    if (row["Product ID"] && row["Product ID"] !== packageName) continue;
+    // The real report names this column "Package ID" (older docs: "Product ID").
+    const pkg = row["Package ID"] || row["Product ID"];
+    if (pkg && pkg !== packageName) continue;
     if ((row["Financial Status"] || "").toLowerCase() !== "charged") continue;
     const date = reportDate(row["Order Charged Date"]);
     const paid = amount(row["Charged Amount"]);
