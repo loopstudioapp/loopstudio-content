@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { combineOwnerStats, OWNER_APPS } from "@/lib/revenuecat/owner";
-import { getAppleProceeds } from "@/lib/appstore/proceeds";
+import { combineOwnerStats, GOOGLE_PLAY_FEE, OWNER_APPS, type OwnerApp } from "@/lib/revenuecat/owner";
+import { appleKeptSharesByDate, getAppleProceeds, type AppleProceeds } from "@/lib/appstore/proceeds";
+import { buildHistoryDays, datesBetween, HISTORY_START, saveHistoryDays } from "@/lib/owner/history";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { readAskMedChannelDays, splitAskMedRevenue } from "@/lib/appstore/channels";
 import { beginReconciliation, finishReconciliation, previousVnDates, withReconciliation } from "@/lib/revenuecat/reconciliation";
-import { loadFoundVia, loadMetaSpendByPlatform } from "@/lib/owner/platform-inputs";
-import { getGooglePlayProceeds } from "@/lib/googleplay/proceeds";
+import { loadAskMedOpenRouterByDate, loadFoundVia, loadMetaSpendByPlatform } from "@/lib/owner/platform-inputs";
+import { getGooglePlayProceeds, type GooglePlayProceeds } from "@/lib/googleplay/proceeds";
 import { db } from "@/lib/db";
 import {
   adjustmentKindFromLedgerId,
   type RevenueAdjustmentKind,
 } from "@/lib/revenuecat/adjustments";
-import { getTodayMetaSpend, getMetaSpendByDay, type MetaSpend } from "@/lib/meta/ads";
+import { getTodayMetaSpend, getMetaSpendByDay, getMetaSpendByPlatformDay, getMetaSpendUsdByDayStrict, type MetaSpend } from "@/lib/meta/ads";
 import {
   readOpenRouterDailyCosts,
   reconcileOpenRouterDailyCosts,
@@ -1671,6 +1673,139 @@ async function fetchTodayStats(
   return { today_vn: today, per_app: perApp, transactions: txns, ads, profit: profitWithRefund, daily };
 }
 
+type OwnerCombined = ReturnType<typeof combineOwnerStats>;
+
+async function saveLiveOwnerHistory({ combined, grail, askmed, proceeds, playProceeds, metaSpendByDate, degraded }: {
+  combined: OwnerCombined; grail: TodayStatsResponse; askmed: TodayStatsResponse; proceeds: AppleProceeds;
+  playProceeds: GooglePlayProceeds; metaSpendByDate: Record<string, { ios: number; android: number }>; degraded: boolean;
+}): Promise<void> {
+  if (degraded) return;
+  try {
+    const tracked = combined.daily.reduce((sum, day) => sum + day.revenue - day.refund_amount + day.refund_reversed_amount, 0);
+    const rcRate = tracked > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
+    const appleRate = grail.profit.apple_commission_rate;
+    await saveHistoryDays(buildHistoryDays({
+      dates: combined.daily.map(day => day.date),
+      today: combined.today_vn,
+      grail: Object.fromEntries(grail.daily.map(day => [day.date, day])),
+      askmed: Object.fromEntries(askmed.daily.map(day => [day.date, day])),
+      metaWithVat: Object.fromEntries(combined.daily.map(day => [day.date, day.adspend_with_vat])),
+      metaSplit: metaSpendByDate,
+      openrouter: Object.fromEntries(combined.daily.map(day => [day.date, day.openrouter_cost])),
+      aiAds: Object.fromEntries(combined.daily.map(day => [day.date, day.higgsfield_cost])),
+      appleKept: (app, date) => proceeds.kept_share_by_date?.[app]?.[date] ?? proceeds.kept_share?.[app] ?? 1 - appleRate,
+      googleKept: date => playProceeds.kept_share_by_date?.[date] ?? playProceeds.kept_share ?? 1 - GOOGLE_PLAY_FEE,
+      revenuecatRate: () => rcRate,
+      source: "live",
+    }));
+  } catch (error) {
+    console.error("Owner history save failed", error instanceof Error ? error.message : error);
+  }
+}
+
+// Backfill of the permanent owner history for days before the page's first save, one calendar
+// month per call (each call reads every known subscriber's RevenueCat events once per app).
+// The cron repeats it until every month is done; afterwards each call only reads its status.
+const BACKFILL_STATE_ID = "__owner_history_backfill__";
+type BackfillState = {
+  start: string; end: string; done: string[];
+  running_since?: string | null; last_error?: string | null; finished_at?: string | null;
+  months?: Record<string, { written: number; kept_live: number; at: string }>;
+};
+
+async function writeBackfillState(state: BackfillState) {
+  const stamp = new Date().toISOString();
+  const { error } = await db.from("pinterest_topics").upsert({
+    id: BACKFILL_STATE_ID, category: "system", title_template: "Owner history backfill",
+    description_template: JSON.stringify(state), prompt_seed: stamp, times_used: 0,
+  }, { onConflict: "id" });
+  if (error) throw new Error("Cannot save owner history backfill status");
+}
+
+function backfillMonths(state: BackfillState): string[] {
+  const months: string[] = [];
+  for (let month = state.start.slice(0, 7); month <= state.end.slice(0, 7);) {
+    months.push(month);
+    const [year, m] = month.split("-").map(Number);
+    month = m === 12 ? `${year + 1}-01` : `${year}-${String(m + 1).padStart(2, "0")}`;
+  }
+  return months;
+}
+
+async function runOwnerHistoryBackfill(restart: boolean) {
+  const { data } = await db.from("pinterest_topics").select("description_template").eq("id", BACKFILL_STATE_ID).maybeSingle();
+  let state: BackfillState | null = data?.description_template && !restart ? JSON.parse(data.description_template) : null;
+  // The page itself saves its 30 days (today and the 29 before); the backfill ends the day before.
+  if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], months: {} };
+  const remaining = backfillMonths(state).filter(month => !state!.done.includes(month));
+  if (!remaining.length) return { ok: true, done: true, more: false, start: state.start, end: state.end, finished_at: state.finished_at };
+  if (state.running_since && Date.now() - Date.parse(state.running_since) < 15 * 60000) {
+    return { ok: true, busy: true, more: false, running_since: state.running_since };
+  }
+  const month = remaining[0];
+  await writeBackfillState({ ...state, running_since: new Date().toISOString() });
+  try {
+    const first = month === state.start.slice(0, 7) ? state.start : `${month}-01`;
+    const monthEnd = addVnDays(month.slice(5) === "12" ? `${Number(month.slice(0, 4)) + 1}-01-01` : `${month.slice(0, 5)}${String(Number(month.slice(5)) + 1).padStart(2, "0")}-01`, -1);
+    const last = monthEnd < state.end ? monthEnd : state.end;
+    const dates = datesBetween(first, last);
+    // RevenueCat's 1% applies when the 30 days up to a day made more than its free $2,500.
+    const trailingStart = addVnDays(first, -29);
+    const allDates = datesBetween(trailingStart, last);
+    const points = {} as Record<OwnerApp, Record<string, DailyPoint>>;
+    for (const app of OWNER_APPS) {
+      transactionLedgerCache = null;
+      const ledger = await fetchTransactionLedger(trailingStart, addVnDays(last, 1), app, false);
+      points[app] = Object.fromEntries(buildDailyPointsFromLedger(allDates, ledger, {}, 0, 0, app).map(point => [point.date, point]));
+    }
+    transactionLedgerCache = null;
+    const netOf = (date: string) => OWNER_APPS.reduce((sum, app) => {
+      const point = points[app][date];
+      return sum + (point ? point.revenue - point.refund_source_amount + point.refund_source_reversed_amount : 0);
+    }, 0);
+    const rcRate = (date: string) =>
+      datesBetween(addVnDays(date, -29), date).reduce((sum, day) => sum + netOf(day), 0) > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
+    const [metaUsd, metaSplit, appleKept, playProceeds, grailOpenRouter, askmedOpenRouter] = await Promise.all([
+      getMetaSpendUsdByDayStrict(first, last),
+      getMetaSpendByPlatformDay(first, last),
+      appleKeptSharesByDate(dates),
+      getGooglePlayProceeds(),
+      readOpenRouterDailyCosts("GrailScan", dates),
+      loadAskMedOpenRouterByDate(dates),
+    ]);
+    if (!metaUsd || !metaSplit) throw new Error("Meta spend unavailable");
+    if (!askmedOpenRouter) throw new Error("AskMed OpenRouter history unavailable");
+    const days = buildHistoryDays({
+      dates,
+      grail: points.GrailScan,
+      askmed: points.AskMed,
+      metaWithVat: Object.fromEntries(dates.map(date => [date, (metaUsd[date] || 0) * (1 + META_VAT_RATE)])),
+      metaSplit,
+      // OpenRouter keeps only 30 days of daily activity: older days use the GrailScan key's saved
+      // daily costs plus the AskMed server key's own records, so they are marked estimated.
+      openrouter: Object.fromEntries(dates.map(date => [date, (grailOpenRouter.costsByDate[date] || 0) + (askmedOpenRouter[date]?.cost || 0)])),
+      aiAds: Object.fromEntries(dates.map(date => [date, HIGGSFIELD_DAILY_COST])),
+      appleKept: (app, date) => appleKept[app]?.[date] ?? 0.85,
+      googleKept: date => playProceeds.kept_share_by_date?.[date] ?? playProceeds.kept_share ?? 1 - GOOGLE_PLAY_FEE,
+      revenuecatRate: rcRate,
+      source: "backfill",
+      estimated: Object.fromEntries(dates.map(date => [date, ["openrouter"]])),
+    });
+    const saved = await saveHistoryDays(days);
+    const at = new Date().toISOString();
+    const done = [...state.done, month];
+    const more = backfillMonths(state).some(m => !done.includes(m));
+    await writeBackfillState({ ...state, done, running_since: null, last_error: null,
+      months: { ...(state.months || {}), [month]: { ...saved, at } }, finished_at: more ? null : at });
+    return { ok: true, month, from: first, to: last, ...saved, more };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Owner history backfill failed", month, message);
+    await writeBackfillState({ ...state, running_since: null, last_error: `${month}: ${message}` });
+    return { ok: false, month, error: message, more: false };
+  }
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const response = await handleGet(request);
   response.headers?.set("Cache-Control", "no-store");
@@ -1701,6 +1836,14 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
       }
       const data = await fetchSubscribers(filter);
       return NextResponse.json(data);
+    }
+
+    if (type === "owner_history_backfill") {
+      if (!process.env.CRON_SECRET || request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+        return NextResponse.json({ error: "Unauthorized owner history backfill" }, { status: 401 });
+      }
+      const result = await runOwnerHistoryBackfill(searchParams.get("restart") === "1");
+      return NextResponse.json(result, { status: result.ok ? 200 : 502 });
     }
 
     if (type === "today_stats") {
@@ -1741,6 +1884,19 @@ async function handleGet(request: NextRequest): Promise<NextResponse> {
             googleKept: { current: playProceeds.kept_share, by_date: playProceeds.kept_share_by_date } });
         // AskMed Meta/organic split from saved Apple source data; a read
         // failure only hides the split (chart shows AskMed as one segment).
+        // Keep every day the page shows forever (Loop 2026-11-13): a day leaves this 30-day
+        // window, but its saved row stays. Skipped while any input is a fallback, so a
+        // degraded refresh never replaces good saved numbers.
+        const historySave = saveLiveOwnerHistory({
+          combined, grail, askmed, proceeds, playProceeds, metaSpendByDate,
+          degraded: sources.some(source => source.data.stale) || proceeds.source === "default"
+            || !Object.keys(metaSpendByDate).length,
+        });
+        try {
+          getCloudflareContext().ctx.waitUntil(historySave);
+        } catch {
+          await historySave;
+        }
         const firstDay = combined.daily[0]?.date;
         const channelDays = firstDay
           ? await readAskMedChannelDays(new Date(Date.parse(`${firstDay}T00:00:00Z`) - 14 * 86400000).toISOString().slice(0, 10))

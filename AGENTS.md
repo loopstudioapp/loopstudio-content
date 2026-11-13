@@ -87,6 +87,14 @@ Read this before changing `/owner`, GrailScan analytics, Meta integrations, or b
 - 30-Day Subs Cost shows AskMed iOS and Android separately (each its own Meta spend incl. VAT / its own new subs); GrailScan is not counted.
 - Independent provider reconciliation should overlay only that provider's cost delta. It must not refetch or mutate unrelated ledgers.
 
+## Permanent Owner History (since 2026-11-13, owner request: "keep profit and all data forever not 30 days")
+
+- Every owner-page refresh saves each of its 30 days (today marked `partial`) as `__owner_day__:YYYY-MM-DD` in `pinterest_topics` (`lib/owner/history.ts`). Rows are never deleted; a day keeps the last values it had before leaving the 30-day window. Only changed rows are rewritten. A refresh with stale app data, default Apple proceeds or no Meta platform split saves nothing.
+- Each row: `grailscan`, `ios`, `android` and `total`, each with revenue (gross), refunds (that day's real refunds net of reversals, not the page's 30-day average), store_cut, meta (incl. VAT), revenuecat, openrouter, ai_ads, profit (before personal tax), new_subs; plus `source` (`live` | `backfill`) and `estimated` fields.
+- Hourly cron `15 * * * *` calls the owner endpoint with `fast=1` (so days are saved even when nobody opens the page) and `type=owner_history_backfill`.
+- Backfill (`GET /api/revenuecat?type=owner_history_backfill`, CRON_SECRET; `restart=1` starts over): one calendar month per call from 2026-01-01 to the day before the page's first window, state in `__owner_history_backfill__`. Revenue/refunds/new subs from the RevenueCat ledger of known production subscribers, Apple kept share from the cached daily sales reports (`appleKeptSharesByDate`), Meta from a strict read-only insights GET (fails instead of saving zero), Google share from the Play summary, OpenRouter = saved GrailScan key rows + AskMed server key (askmed-qa `openrouter_key_usage`, else per-request costs; marked `estimated` because OpenRouter keeps only 30 days of account activity), AI Ads $50/30 a day, RevenueCat 1% when the trailing 30 days made over $2,500. A backfilled day never replaces a `live` one. The cron repeats the call (up to 12 per run) while it returns `more: true`.
+- Read: `GET /api/owner/history?from=&to=[&days=1]` (default: Jan 1 → today, Vietnam dates). Read-only sums of saved rows per part, missing/partial/estimated dates, Auto Vietnam tax (owner page brackets on Apple YTD proceeds) and VND at the proceeds summary rate.
+
 ## Meta Attribution / Facebook Tracking Boundary
 
 The current system has Meta spend reporting only. Server-side attribution and Meta Conversions API are new work and should be implemented separately.

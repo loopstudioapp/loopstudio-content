@@ -238,3 +238,49 @@ export async function getMetaSpendByPlatformDay(
     return null;
   }
 }
+
+/**
+ * Daily Meta spend in USD (no VAT) for any date range, read-only GET with paging, for the owner
+ * history backfill. Unlike getMetaSpendByDay it returns null when Meta can't be read, so a missing
+ * day never gets saved as zero spend. Days with no rows had no spend.
+ */
+export async function getMetaSpendUsdByDayStrict(
+  startIso: string,
+  endIso: string
+): Promise<Record<string, number> | null> {
+  const token = process.env.META_ACCESS_TOKEN;
+  const rawAccount = process.env.META_AD_ACCOUNT_ID;
+  if (!token || !rawAccount) return null;
+  const accountId = normalizeAccountId(rawAccount);
+  try {
+    const acctRes = await fetch(`${GRAPH_BASE}/${accountId}?fields=currency&access_token=${encodeURIComponent(token)}`);
+    if (!acctRes.ok) return null;
+    const currency: string = (await acctRes.json())?.currency || "USD";
+    let rate = 1;
+    if (currency !== "USD") {
+      const fx = await fetch("https://open.er-api.com/v6/latest/USD", { cache: "no-store" });
+      if (!fx.ok) return null;
+      rate = Number((await fx.json())?.rates?.[currency]);
+      if (!(rate > 0)) return null;
+    }
+    const params = new URLSearchParams({
+      fields: "spend", time_increment: "1", limit: "100",
+      time_range: JSON.stringify({ since: startIso, until: endIso }), access_token: token,
+    });
+    const out: Record<string, number> = {};
+    let url: string | null = `${GRAPH_BASE}/${accountId}/insights?${params}`;
+    for (let page = 0; url && page < 20; page++) {
+      const res: Response = await fetch(url, { method: "GET" });
+      if (!res.ok) return null;
+      const json = (await res.json()) as { data?: { date_start?: string; spend?: string }[]; paging?: { next?: string } };
+      for (const row of json.data || []) {
+        if (row.date_start) out[row.date_start] = (out[row.date_start] || 0) + (row.spend ? parseFloat(row.spend) || 0 : 0) / rate;
+      }
+      const next = json.paging?.next;
+      url = next && /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/act_\d+\/insights\?/.test(next) ? next : null;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
