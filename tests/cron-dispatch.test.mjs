@@ -48,3 +48,31 @@ test("no secret means no header, and failures are reported", async () => {
   ]);
   await assert.rejects(runCronJobs("1 2 * * *", async () => new Response(""), "x"));
 });
+
+test("hourly job saves the owner numbers and repeats the history backfill while months remain", async () => {
+  let backfillCalls = 0;
+  const results = await runCronJobs("15 * * * *", async (req) => {
+    if (req.url.includes("owner_history_backfill")) {
+      backfillCalls += 1;
+      return new Response(JSON.stringify({ ok: true, more: backfillCalls < 3 }), { status: 200 });
+    }
+    return new Response("{}", { status: 200 });
+  }, "s3cret");
+  assert.equal(backfillCalls, 3);
+  assert.ok(results.every((r) => r.ok));
+  assert.deepEqual(results.map((r) => r.path), [
+    "/api/revenuecat?type=today_stats&scope=owner&fast=1",
+    "/api/revenuecat?type=owner_history_backfill",
+  ]);
+});
+
+test("a failed backfill month stops the repeat and is reported", async () => {
+  let calls = 0;
+  const results = await runCronJobs("15 * * * *", async (req) => {
+    if (!req.url.includes("owner_history_backfill")) return new Response("{}", { status: 200 });
+    calls += 1;
+    return new Response('{"ok":false,"more":false}', { status: 502 });
+  }, "s3cret");
+  assert.equal(calls, 1);
+  assert.equal(results[1].ok, false);
+});

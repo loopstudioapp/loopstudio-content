@@ -346,3 +346,39 @@ export async function getAppleProceeds(): Promise<AppleProceeds> {
 }
 
 export const testHelpers = { computeAppleProceeds };
+
+/**
+ * Apple's kept share per app for any Vietnam days (owner history backfill): the same trailing
+ * 14 report days as the page, from the permanently cached daily sales reports (fetched once).
+ * Throws when App Store reports can't be read, so a backfill never saves a guessed share.
+ */
+export async function appleKeptSharesByDate(vnDates: string[], now = new Date()): Promise<Record<keyof typeof OWNER_APP_SKUS, Record<string, number>>> {
+  const byDate = Object.fromEntries(Object.keys(OWNER_APP_SKUS).map(app => [app, {} as Record<string, number>])) as Record<keyof typeof OWNER_APP_SKUS, Record<string, number>>;
+  if (!vnDates.length) return byDate;
+  const config = salesConfig();
+  const today = pacificToday(now);
+  const settledBefore = addDays(today, -SETTLED_DAILY_AGE_DAYS);
+  const newest = addDays(today, -1);
+  const last = vnDates[vnDates.length - 1] < newest ? vnDates[vnDates.length - 1] : newest;
+  const days = daysBetween(addDays(vnDates[0], -(KEPT_WINDOW_DAYS - 1)), last);
+  const reports = await loadReports(config, days.map(date => ({ frequency: "DAILY", date, settled: date <= settledBefore })));
+  if (days.some(date => reports.get(reportId("DAILY", date))?.status === "pending")) {
+    throw new Error("App Store sales reports not published yet for these days");
+  }
+  const rates = await usdRates();
+  const dayTotals = new Map<string, UsdTotals>();
+  for (const date of days) {
+    const result = reports.get(reportId("DAILY", date));
+    const totals: UsdTotals = {};
+    if (result?.status === "ok") addTotals(totals, result.report, rates);
+    dayTotals.set(date, totals);
+  }
+  for (const date of vnDates) {
+    const end = date < last ? date : last;
+    const totals: UsdTotals = {};
+    for (const day of daysBetween(addDays(end, -(KEPT_WINDOW_DAYS - 1)), end)) addTotals(totals, dayTotals.get(day) || {});
+    const shares = keptShareForApps(sharesBySku(totals));
+    for (const app of Object.keys(byDate) as (keyof typeof OWNER_APP_SKUS)[]) byDate[app][date] = shares[app];
+  }
+  return byDate;
+}

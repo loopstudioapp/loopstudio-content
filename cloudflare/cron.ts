@@ -2,6 +2,10 @@
 // route Vercel Cron called (vercel.json), as a GET with the same
 // `Authorization: Bearer $CRON_SECRET` header Vercel sends. The routes keep
 // validating CRON_SECRET themselves.
+export const OWNER_HISTORY_BACKFILL_PATH = "/api/revenuecat?type=owner_history_backfill";
+// One backfill call per month; within one cron run, call again while it says more months remain.
+const BACKFILL_MAX_CALLS = 12;
+
 export const CRON_JOBS: Record<string, string[]> = {
   // 00:05 UTC: OpenRouter 30-day cost reconciliation; new AskMed App Store
   // source files (Meta/organic revenue split), only days not saved yet
@@ -12,6 +16,13 @@ export const CRON_JOBS: Record<string, string[]> = {
   "0 18 * * *": [
     "/api/revenuecat?type=today_stats&app=GrailScan&reconcile=1",
     "/api/revenuecat?type=today_stats&app=AskMed&reconcile=1",
+  ],
+  // Hourly at :15: the owner page's numbers, so every day is saved to the permanent owner
+  // history even when nobody opens the page; then the history backfill (repeated below while
+  // months remain; only a status read once it is done).
+  "15 * * * *": [
+    "/api/revenuecat?type=today_stats&scope=owner&fast=1",
+    OWNER_HISTORY_BACKFILL_PATH,
   ],
 };
 
@@ -37,9 +48,17 @@ export async function runCronJobs(
   return Promise.all(
     paths.map(async (path) => {
       try {
-        const response = await send(new Request(`${CRON_ORIGIN}${path}`, { method: "GET", headers }));
-        const body = (await response.text()).slice(0, 500);
-        return { path, status: response.status, ok: response.ok, body };
+        let response: Response;
+        let body = "";
+        for (let call = 0; ; call++) {
+          response = await send(new Request(`${CRON_ORIGIN}${path}`, { method: "GET", headers }));
+          body = await response.text();
+          if (path !== OWNER_HISTORY_BACKFILL_PATH || !response.ok || call + 1 >= BACKFILL_MAX_CALLS) break;
+          let more = false;
+          try { more = JSON.parse(body)?.more === true; } catch { more = false; }
+          if (!more) break;
+        }
+        return { path, status: response.status, ok: response.ok, body: body.slice(0, 500) };
       } catch (error) {
         return { path, status: 0, ok: false, body: error instanceof Error ? error.message : String(error) };
       }

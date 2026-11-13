@@ -78,3 +78,52 @@ export async function loadFoundVia(userIds: string[]): Promise<Record<string, st
     return null;
   }
 }
+
+function askMedDb(): AskMedDb | undefined {
+  try {
+    return (getCloudflareContext().env as unknown as { ASKMED_DB?: AskMedDb }).ASKMED_DB;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * AskMed server key's OpenRouter cost per UTC day, read-only from askmed-qa, for days older than
+ * OpenRouter's own 30-day activity history (owner history backfill). Uses the key's all-time usage
+ * snapshots (openrouter_key_usage, every 10 minutes) where a day and the next both have one;
+ * otherwise the sum of the per-request costs AskMed saved (qa, Max reports, exam batches).
+ * Returns null when the database can't be read.
+ */
+export async function loadAskMedOpenRouterByDate(dates: string[]): Promise<Record<string, { cost: number; exact: boolean }> | null> {
+  const database = askMedDb();
+  if (!database || !dates.length) return database ? {} : null;
+  const from = dates[0];
+  const next = new Date(Date.parse(`${dates[dates.length - 1]}T00:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10);
+  try {
+    const firsts = await database.prepare(`SELECT k.taken_at, k.usage FROM openrouter_key_usage k
+        JOIN (SELECT MIN(taken_at) AS t FROM openrouter_key_usage WHERE taken_at >= ? AND taken_at < ?
+              GROUP BY substr(taken_at, 1, 10)) f ON k.taken_at = f.t`)
+      .bind(from, next).all<{ taken_at: string; usage: number }>()
+      .then(result => result.results || [])
+      .catch(() => [] as { taken_at: string; usage: number }[]);
+    const usageAtStart = new Map(firsts.map(row => [row.taken_at.slice(0, 10), Number(row.usage)]));
+    const sums = new Map<string, number>();
+    for (const table of ["qa", "max_research", "max_exam_batches"]) {
+      const { results } = await database.prepare(`SELECT substr(created_at, 1, 10) AS day, SUM(cost_usd) AS cost
+          FROM ${table} WHERE created_at >= ? AND created_at < ? GROUP BY day`)
+        .bind(from, next).all<{ day: string; cost: number | null }>();
+      for (const row of results || []) sums.set(row.day, (sums.get(row.day) || 0) + (Number(row.cost) || 0));
+    }
+    const out: Record<string, { cost: number; exact: boolean }> = {};
+    for (const date of dates) {
+      const start = usageAtStart.get(date);
+      const end = usageAtStart.get(new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10));
+      const diff = start != null && end != null ? end - start : NaN;
+      out[date] = Number.isFinite(diff) && diff >= 0 ? { cost: diff, exact: true } : { cost: sums.get(date) || 0, exact: false };
+    }
+    return out;
+  } catch (error) {
+    console.error("AskMed OpenRouter history unavailable", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
