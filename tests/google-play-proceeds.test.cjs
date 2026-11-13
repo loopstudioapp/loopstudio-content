@@ -98,6 +98,10 @@ test('sales report: real taxes, Google fee 15% of the rest, only charged orders'
   assert.ok(Math.abs(days['2026-11-05'].paid - 48) < 1e-9); // 24 EUR at 0.5 EUR/USD
   assert.ok(Math.abs(days['2026-11-05'].kept - 20 * 0.85 / 0.5) < 1e-9);
   assert.ok(Math.abs(days['2026-11-06'].kept / days['2026-11-06'].paid - 0.85) < 1e-9);
+  // The live report's column is "Package ID": another app's orders are left out.
+  const live = parseSales(parseCsv(['Order Number,Order Charged Date,Financial Status,Package ID,Currency of Sale,Taxes Collected,Charged Amount',
+    'GPA.1,2026-11-11,Charged,com.loopstudio.askmed,USD,0,10', 'GPA.2,2026-11-11,Charged,com.other.app,USD,0,99'].join('\n')), 'com.loopstudio.askmed', RATES);
+  assert.equal(live['2026-11-11'].paid, 10);
 });
 
 test('end to end: signs in with the service account, earnings month wins over sales, trailing share per day', async () => {
