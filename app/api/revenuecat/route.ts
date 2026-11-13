@@ -1703,14 +1703,23 @@ async function saveLiveOwnerHistory({ combined, grail, askmed, proceeds, playPro
   }
 }
 
-// Backfill of the permanent owner history for days before the page's first save, one calendar
-// month per call (each call reads every known subscriber's RevenueCat events once per app).
-// The cron repeats it until every month is done; afterwards each call only reads its status.
+// Backfill of the permanent owner history for days before the page's first save. Steps, one per
+// call: (1) GrailScan and (2) AskMed RevenueCat ledgers for the whole range (each reads every known
+// subscriber's events once, like one nightly reconcile) saved as per-month points; then (3) one
+// calendar month per call adds Meta, Apple/Google shares and OpenRouter and saves the days.
+// The cron repeats it until done; afterwards each call only reads its status. Each step records
+// its stage first, so a run that dies without answering is reported on the next call.
 const BACKFILL_STATE_ID = "__owner_history_backfill__";
+const BACKFILL_POINTS_PREFIX = "__owner_backfill_points__";
+const BACKFILL_LOCK_MS = 10 * 60000;
 type BackfillState = {
   start: string; end: string; done: string[];
-  running_since?: string | null; last_error?: string | null; finished_at?: string | null;
+  ledgers?: Partial<Record<OwnerApp, string>>;
+  running_since?: string | null; stage?: string | null; last_error?: string | null; finished_at?: string | null;
   months?: Record<string, { written: number; kept_live: number; at: string }>;
+};
+type BackfillPoint = Pick<DailyPoint, "date" | "revenue" | "new_subs" | "refund_source_amount" | "refund_source_reversed_amount"> & {
+  android?: Omit<AndroidDay, "by_user">;
 };
 
 async function writeBackfillState(state: BackfillState) {
@@ -1722,87 +1731,140 @@ async function writeBackfillState(state: BackfillState) {
   if (error) throw new Error("Cannot save owner history backfill status");
 }
 
+function nextMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  return m === 12 ? `${year + 1}-01` : `${year}-${String(m + 1).padStart(2, "0")}`;
+}
+
 function backfillMonths(state: BackfillState): string[] {
   const months: string[] = [];
-  for (let month = state.start.slice(0, 7); month <= state.end.slice(0, 7);) {
-    months.push(month);
-    const [year, m] = month.split("-").map(Number);
-    month = m === 12 ? `${year + 1}-01` : `${year}-${String(m + 1).padStart(2, "0")}`;
-  }
+  for (let month = state.start.slice(0, 7); month <= state.end.slice(0, 7); month = nextMonth(month)) months.push(month);
   return months;
+}
+
+async function saveBackfillLedger(app: OwnerApp, state: BackfillState) {
+  // 29 extra days before the start: RevenueCat's 1% depends on the 30 days up to each day.
+  const fetchStart = addVnDays(state.start, -29);
+  transactionLedgerCache = null;
+  const ledger = await fetchTransactionLedger(fetchStart, addVnDays(state.end, 1), app, false);
+  transactionLedgerCache = null;
+  const points = buildDailyPointsFromLedger(datesBetween(fetchStart, state.end), ledger, {}, 0, 0, app);
+  const byMonth = new Map<string, BackfillPoint[]>();
+  for (const point of points) {
+    const compact: BackfillPoint = {
+      date: point.date, revenue: point.revenue, new_subs: point.new_subs,
+      refund_source_amount: point.refund_source_amount, refund_source_reversed_amount: point.refund_source_reversed_amount,
+      ...(point.android ? { android: { revenue: point.android.revenue, new_subs: point.android.new_subs,
+        refund_source_amount: point.android.refund_source_amount, refund_source_reversed_amount: point.android.refund_source_reversed_amount } } : {}),
+    };
+    const month = point.date.slice(0, 7);
+    byMonth.set(month, [...(byMonth.get(month) || []), compact]);
+  }
+  const stamp = new Date().toISOString();
+  const rows = Array.from(byMonth, ([month, monthPoints]) => ({
+    id: `${BACKFILL_POINTS_PREFIX}:${app}:${month}`, category: "system", title_template: "Owner history backfill points",
+    description_template: JSON.stringify(monthPoints), prompt_seed: stamp, times_used: 0,
+  }));
+  const { error } = await db.from("pinterest_topics").upsert(rows, { onConflict: "id" });
+  if (error) throw new Error(`Cannot save ${app} backfill points`);
+  return { app, days: points.length, revenue: Math.round(points.reduce((sum, p) => sum + p.revenue, 0) * 100) / 100 };
+}
+
+async function readBackfillPoints(app: OwnerApp, months: string[]): Promise<Record<string, DailyPoint>> {
+  const { data, error } = await db.from("pinterest_topics").select("id,description_template")
+    .in("id", months.map(month => `${BACKFILL_POINTS_PREFIX}:${app}:${month}`));
+  if (error) throw new Error(`Cannot read ${app} backfill points`);
+  const out: Record<string, DailyPoint> = {};
+  for (const row of data || []) {
+    for (const point of JSON.parse(row.description_template) as BackfillPoint[]) {
+      out[point.date] = { ...point, android: point.android ? { ...point.android, by_user: {} } : undefined } as DailyPoint;
+    }
+  }
+  return out;
+}
+
+async function assembleBackfillMonth(month: string, state: BackfillState) {
+  const first = month === state.start.slice(0, 7) ? state.start : `${month}-01`;
+  const monthLast = addVnDays(`${nextMonth(month)}-01`, -1);
+  const last = monthLast < state.end ? monthLast : state.end;
+  const dates = datesBetween(first, last);
+  const previous = addVnDays(`${month}-01`, -1).slice(0, 7);
+  const points = {} as Record<OwnerApp, Record<string, DailyPoint>>;
+  for (const app of OWNER_APPS) points[app] = await readBackfillPoints(app, [previous, month]);
+  const netOf = (date: string) => OWNER_APPS.reduce((sum, app) => {
+    const point = points[app][date];
+    return sum + (point ? point.revenue - point.refund_source_amount + point.refund_source_reversed_amount : 0);
+  }, 0);
+  const rcRate = (date: string) =>
+    datesBetween(addVnDays(date, -29), date).reduce((sum, day) => sum + netOf(day), 0) > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
+  const [metaUsd, metaSplit, appleKept, playProceeds, grailOpenRouter, askmedOpenRouter] = await Promise.all([
+    getMetaSpendUsdByDayStrict(first, last),
+    getMetaSpendByPlatformDay(first, last),
+    appleKeptSharesByDate(dates),
+    getGooglePlayProceeds(),
+    readOpenRouterDailyCosts("GrailScan", dates),
+    loadAskMedOpenRouterByDate(dates),
+  ]);
+  if (!metaUsd || !metaSplit) throw new Error("Meta spend unavailable");
+  if (!askmedOpenRouter) throw new Error("AskMed OpenRouter history unavailable");
+  const days = buildHistoryDays({
+    dates,
+    grail: points.GrailScan,
+    askmed: points.AskMed,
+    metaWithVat: Object.fromEntries(dates.map(date => [date, (metaUsd[date] || 0) * (1 + META_VAT_RATE)])),
+    metaSplit,
+    // OpenRouter keeps only 30 days of daily activity: older days use the GrailScan key's saved
+    // daily costs plus the AskMed server key's own records, so they are marked estimated.
+    openrouter: Object.fromEntries(dates.map(date => [date, (grailOpenRouter.costsByDate[date] || 0) + (askmedOpenRouter[date]?.cost || 0)])),
+    aiAds: Object.fromEntries(dates.map(date => [date, HIGGSFIELD_DAILY_COST])),
+    appleKept: (app, date) => appleKept[app]?.[date] ?? 0.85,
+    googleKept: date => playProceeds.kept_share_by_date?.[date] ?? playProceeds.kept_share ?? 1 - GOOGLE_PLAY_FEE,
+    revenuecatRate: rcRate,
+    source: "backfill",
+    estimated: Object.fromEntries(dates.map(date => [date, ["openrouter"]])),
+  });
+  return { from: first, to: last, ...await saveHistoryDays(days) };
 }
 
 async function runOwnerHistoryBackfill(restart: boolean) {
   const { data } = await db.from("pinterest_topics").select("description_template").eq("id", BACKFILL_STATE_ID).maybeSingle();
   let state: BackfillState | null = data?.description_template && !restart ? JSON.parse(data.description_template) : null;
   // The page itself saves its 30 days (today and the 29 before); the backfill ends the day before.
-  if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], months: {} };
-  const remaining = backfillMonths(state).filter(month => !state!.done.includes(month));
-  if (!remaining.length) return { ok: true, done: true, more: false, start: state.start, end: state.end, finished_at: state.finished_at };
-  if (state.running_since && Date.now() - Date.parse(state.running_since) < 15 * 60000) {
-    return { ok: true, busy: true, more: false, running_since: state.running_since };
-  }
-  const month = remaining[0];
-  await writeBackfillState({ ...state, running_since: new Date().toISOString() });
-  try {
-    const first = month === state.start.slice(0, 7) ? state.start : `${month}-01`;
-    const monthEnd = addVnDays(month.slice(5) === "12" ? `${Number(month.slice(0, 4)) + 1}-01-01` : `${month.slice(0, 5)}${String(Number(month.slice(5)) + 1).padStart(2, "0")}-01`, -1);
-    const last = monthEnd < state.end ? monthEnd : state.end;
-    const dates = datesBetween(first, last);
-    // RevenueCat's 1% applies when the 30 days up to a day made more than its free $2,500.
-    const trailingStart = addVnDays(first, -29);
-    const allDates = datesBetween(trailingStart, last);
-    const points = {} as Record<OwnerApp, Record<string, DailyPoint>>;
-    for (const app of OWNER_APPS) {
-      transactionLedgerCache = null;
-      const ledger = await fetchTransactionLedger(trailingStart, addVnDays(last, 1), app, false);
-      points[app] = Object.fromEntries(buildDailyPointsFromLedger(allDates, ledger, {}, 0, 0, app).map(point => [point.date, point]));
+  if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], ledgers: {}, months: {} };
+  state.ledgers ||= {};
+  if (state.running_since) {
+    if (Date.now() - Date.parse(state.running_since) < BACKFILL_LOCK_MS) {
+      return { ok: true, busy: true, more: false, stage: state.stage, running_since: state.running_since };
     }
-    transactionLedgerCache = null;
-    const netOf = (date: string) => OWNER_APPS.reduce((sum, app) => {
-      const point = points[app][date];
-      return sum + (point ? point.revenue - point.refund_source_amount + point.refund_source_reversed_amount : 0);
-    }, 0);
-    const rcRate = (date: string) =>
-      datesBetween(addVnDays(date, -29), date).reduce((sum, day) => sum + netOf(day), 0) > REVENUECAT_FREE_MTR ? REVENUECAT_COST_RATE : 0;
-    const [metaUsd, metaSplit, appleKept, playProceeds, grailOpenRouter, askmedOpenRouter] = await Promise.all([
-      getMetaSpendUsdByDayStrict(first, last),
-      getMetaSpendByPlatformDay(first, last),
-      appleKeptSharesByDate(dates),
-      getGooglePlayProceeds(),
-      readOpenRouterDailyCosts("GrailScan", dates),
-      loadAskMedOpenRouterByDate(dates),
-    ]);
-    if (!metaUsd || !metaSplit) throw new Error("Meta spend unavailable");
-    if (!askmedOpenRouter) throw new Error("AskMed OpenRouter history unavailable");
-    const days = buildHistoryDays({
-      dates,
-      grail: points.GrailScan,
-      askmed: points.AskMed,
-      metaWithVat: Object.fromEntries(dates.map(date => [date, (metaUsd[date] || 0) * (1 + META_VAT_RATE)])),
-      metaSplit,
-      // OpenRouter keeps only 30 days of daily activity: older days use the GrailScan key's saved
-      // daily costs plus the AskMed server key's own records, so they are marked estimated.
-      openrouter: Object.fromEntries(dates.map(date => [date, (grailOpenRouter.costsByDate[date] || 0) + (askmedOpenRouter[date]?.cost || 0)])),
-      aiAds: Object.fromEntries(dates.map(date => [date, HIGGSFIELD_DAILY_COST])),
-      appleKept: (app, date) => appleKept[app]?.[date] ?? 0.85,
-      googleKept: date => playProceeds.kept_share_by_date?.[date] ?? playProceeds.kept_share ?? 1 - GOOGLE_PLAY_FEE,
-      revenuecatRate: rcRate,
-      source: "backfill",
-      estimated: Object.fromEntries(dates.map(date => [date, ["openrouter"]])),
-    });
-    const saved = await saveHistoryDays(days);
+    // The previous call died without answering (limit or disconnect): keep its stage as the error.
+    state.last_error = `${state.stage || "unknown step"}: stopped without finishing (started ${state.running_since})`;
+    state.running_since = null;
+  }
+  const app = OWNER_APPS.find(name => !state!.ledgers![name]);
+  const month = app ? null : backfillMonths(state).find(m => !state!.done.includes(m));
+  if (!app && !month) return { ok: true, done: true, more: false, start: state.start, end: state.end, finished_at: state.finished_at };
+  const stage = app ? `RevenueCat ${app} ${state.start}..${state.end}` : `month ${month}`;
+  await writeBackfillState({ ...state, running_since: new Date().toISOString(), stage });
+  try {
     const at = new Date().toISOString();
-    const done = [...state.done, month];
-    const more = backfillMonths(state).some(m => !done.includes(m));
-    await writeBackfillState({ ...state, done, running_since: null, last_error: null,
-      months: { ...(state.months || {}), [month]: { ...saved, at } }, finished_at: more ? null : at });
-    return { ok: true, month, from: first, to: last, ...saved, more };
+    let result: Record<string, unknown>;
+    if (app) {
+      result = await saveBackfillLedger(app, state);
+      state.ledgers[app] = at;
+    } else {
+      const saved = await assembleBackfillMonth(month!, state);
+      result = { month, ...saved };
+      state.done = [...state.done, month!];
+      state.months = { ...(state.months || {}), [month!]: { written: saved.written, kept_live: saved.kept_live, at } };
+    }
+    const more = backfillMonths(state).some(m => !state!.done.includes(m));
+    await writeBackfillState({ ...state, running_since: null, stage: null, last_error: null, finished_at: more ? null : at });
+    return { ok: true, stage, ...result, more };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("Owner history backfill failed", month, message);
-    await writeBackfillState({ ...state, running_since: null, last_error: `${month}: ${message}` });
-    return { ok: false, month, error: message, more: false };
+    console.error("Owner history backfill failed", stage, message);
+    await writeBackfillState({ ...state, running_since: null, stage: null, last_error: `${stage}: ${message}` });
+    return { ok: false, stage, error: message, more: false };
   }
 }
 

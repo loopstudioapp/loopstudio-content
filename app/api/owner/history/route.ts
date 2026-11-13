@@ -63,7 +63,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
       backfill: state ? {
         done: Boolean(state.finished_at), start: state.start, end: state.end,
-        months_done: state.done, last_error: state.last_error || null, finished_at: state.finished_at || null,
+        ledgers: state.ledgers || {}, months_done: state.done, running_step: state.running_since ? state.stage : null,
+        last_error: state.last_error || null, finished_at: state.finished_at || null,
       } : null,
       ...(searchParams.get("days") === "1" ? { days: days.filter(day => day.date >= from && day.date <= to) } : {}),
     }, { headers: { "Cache-Control": "no-store" } });

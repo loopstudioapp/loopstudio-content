@@ -3,8 +3,10 @@
 // `Authorization: Bearer $CRON_SECRET` header Vercel sends. The routes keep
 // validating CRON_SECRET themselves.
 export const OWNER_HISTORY_BACKFILL_PATH = "/api/revenuecat?type=owner_history_backfill";
-// One backfill call per month; within one cron run, call again while it says more months remain.
-const BACKFILL_MAX_CALLS = 12;
+// One backfill step per call; within one cron run, call again while it says more remain, but start
+// no new step after 9 minutes (a scheduled run may last 15).
+const BACKFILL_MAX_CALLS = 14;
+const BACKFILL_MAX_MS = 9 * 60000;
 
 export const CRON_JOBS: Record<string, string[]> = {
   // 00:05 UTC: OpenRouter 30-day cost reconciliation; new AskMed App Store
@@ -50,10 +52,12 @@ export async function runCronJobs(
       try {
         let response: Response;
         let body = "";
+        const started = Date.now();
         for (let call = 0; ; call++) {
           response = await send(new Request(`${CRON_ORIGIN}${path}`, { method: "GET", headers }));
           body = await response.text();
-          if (path !== OWNER_HISTORY_BACKFILL_PATH || !response.ok || call + 1 >= BACKFILL_MAX_CALLS) break;
+          if (path !== OWNER_HISTORY_BACKFILL_PATH || !response.ok || call + 1 >= BACKFILL_MAX_CALLS
+            || Date.now() - started > BACKFILL_MAX_MS) break;
           let more = false;
           try { more = JSON.parse(body)?.more === true; } catch { more = false; }
           if (!more) break;
