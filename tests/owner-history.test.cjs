@@ -115,6 +115,18 @@ test('saved days stay forever: backfill never replaces the page\'s own day, the 
   assert.deepEqual([...summary.partial_dates], ['2026-11-12']);
 });
 
+test('Meta by campaign name: GRAIL to GrailScan, other apps kept out of every part', () => {
+  const { buildHistoryDays, summarizeHistory } = load(fakeDb());
+  const [day] = buildHistoryDays(input({ metaSplit: { '2026-11-11': { ios: 5, android: 1, grailscan: 3, other: 1 } } }));
+  assert.equal(day.grailscan.meta, 198);
+  assert.equal(day.android.meta, 66);
+  assert.equal(day.ios.meta, 330);
+  assert.equal(day.other_apps_meta, 66);
+  assert.equal(day.total.meta, 594);
+  assert.equal(day.android.ai_ads, Math.round(1 / 6 * 1e4) / 1e4);
+  assert.equal(summarizeHistory([day], '2026-11-11', '2026-11-11').other_apps_meta, 66);
+});
+
 test('auto tax brackets match the owner page', () => {
   const { autoTaxRate } = load(fakeDb());
   assert.equal(autoTaxRate(500_000_000), 0);

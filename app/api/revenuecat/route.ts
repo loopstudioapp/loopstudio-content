@@ -12,7 +12,7 @@ import {
   adjustmentKindFromLedgerId,
   type RevenueAdjustmentKind,
 } from "@/lib/revenuecat/adjustments";
-import { getTodayMetaSpend, getMetaSpendByDay, getMetaSpendByPlatformDay, getMetaSpendUsdByDayStrict, type MetaSpend } from "@/lib/meta/ads";
+import { getTodayMetaSpend, getMetaSpendByDay, getMetaSpendByPlatformDay, getMetaSpendUsdByDayStrict, type MetaSpend, type PlatformSpend } from "@/lib/meta/ads";
 import {
   readOpenRouterDailyCosts,
   reconcileOpenRouterDailyCosts,
@@ -1677,7 +1677,7 @@ type OwnerCombined = ReturnType<typeof combineOwnerStats>;
 
 async function saveLiveOwnerHistory({ combined, grail, askmed, proceeds, playProceeds, metaSpendByDate, degraded }: {
   combined: OwnerCombined; grail: TodayStatsResponse; askmed: TodayStatsResponse; proceeds: AppleProceeds;
-  playProceeds: GooglePlayProceeds; metaSpendByDate: Record<string, { ios: number; android: number }>; degraded: boolean;
+  playProceeds: GooglePlayProceeds; metaSpendByDate: Record<string, PlatformSpend>; degraded: boolean;
 }): Promise<void> {
   if (degraded) return;
   try {
@@ -1712,7 +1712,7 @@ async function saveLiveOwnerHistory({ combined, grail, askmed, proceeds, playPro
 const BACKFILL_STATE_ID = "__owner_history_backfill__";
 const BACKFILL_POINTS_PREFIX = "__owner_backfill_points__";
 const BACKFILL_LOCK_MS = 10 * 60000;
-const BACKFILL_RULES = 2;
+const BACKFILL_RULES = 3;
 type BackfillState = {
   start: string; end: string; done: string[]; rules?: number;
   ledgers?: Partial<Record<OwnerApp, string>>;
@@ -1849,7 +1849,8 @@ async function runOwnerHistoryBackfill(restart: boolean) {
   // The page itself saves its 30 days (today and the 29 before); the backfill ends the day before.
   if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], ledgers: {}, months: {}, rules: BACKFILL_RULES };
   state.ledgers ||= {};
-  // Months saved under an older rule set are rebuilt (2: AI Ads only from the first revenue day).
+  // Months saved under an older rule set are rebuilt (2: AI Ads only from the first revenue day;
+  // 3: Meta split by campaign name, GRAIL to GrailScan, other apps kept out).
   if ((state.rules || 1) < BACKFILL_RULES) state = { ...state, ledgers: state.ledgers || {}, rules: BACKFILL_RULES, done: [], months: {}, finished_at: null };
   if (state.running_since) {
     if (Date.now() - Date.parse(state.running_since) < BACKFILL_LOCK_MS) {

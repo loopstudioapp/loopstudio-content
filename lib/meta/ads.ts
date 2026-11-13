@@ -187,9 +187,19 @@ export async function getTodayMetaSpend(): Promise<MetaSpend> {
   }
 }
 
-/** Owner page platform split: a campaign whose name contains "ANDROID" is Android, every other one is iOS. */
-export type PlatformSpend = { ios: number; android: number };
+/**
+ * Owner split by campaign name: an ASKMED campaign with "ANDROID" in its name is AskMed Android,
+ * other ASKMED campaigns are AskMed iOS, GRAIL campaigns are GrailScan, every other campaign
+ * (Roomy, Qaria, SwipeAway, ...) is another app. The owner page itself uses only the iOS /
+ * Android ratio; owner history uses all four.
+ */
+export type PlatformSpend = { ios: number; android: number; grailscan?: number; other?: number };
 export const isAndroidCampaign = (name: string) => /android/i.test(name);
+export function ownerCampaignPart(name: string): keyof PlatformSpend {
+  if (/askmed/i.test(name)) return isAndroidCampaign(name) ? "android" : "ios";
+  if (/grail/i.test(name)) return "grailscan";
+  return "other";
+}
 
 /**
  * Daily Meta spend per platform in the ad account's currency (read-only GET on
@@ -225,10 +235,10 @@ export async function getMetaSpendByPlatformDay(
       };
       for (const row of json.data || []) {
         if (!row.date_start) continue;
-        const day = (out[row.date_start] ||= { ios: 0, android: 0 });
+        const day = (out[row.date_start] ||= { ios: 0, android: 0, grailscan: 0, other: 0 });
         const spend = row.spend ? parseFloat(row.spend) || 0 : 0;
-        if (isAndroidCampaign(row.campaign_name || "")) day.android += spend;
-        else day.ios += spend;
+        const part = ownerCampaignPart(row.campaign_name || "");
+        day[part] = (day[part] || 0) + spend;
       }
       const next = json.paging?.next;
       url = next && /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/act_\d+\/insights\?/.test(next) ? next : null;

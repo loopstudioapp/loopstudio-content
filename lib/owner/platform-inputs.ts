@@ -9,7 +9,7 @@ const SPEND_MAX_AGE_MS = 30 * 60 * 1000;
 type SpendCache = { days: Record<string, PlatformSpend>; updated_at: string };
 
 /**
- * Meta spend per Vietnam day split by campaign (ASKMED ANDROID → Android, others → iOS).
+ * Meta spend per Vietnam day split by campaign (see ownerCampaignPart).
  * Read-only Graph GET, saved for 30 minutes; a Meta failure keeps the last saved split.
  */
 export async function loadMetaSpendByPlatform(dates: string[], forceFresh = false): Promise<Record<string, PlatformSpend>> {
@@ -27,7 +27,7 @@ export async function loadMetaSpendByPlatform(dates: string[], forceFresh = fals
   if (!fetched) return saved?.days || {};
   // Days Meta returns no rows for had no spend.
   const days: Record<string, PlatformSpend> = {};
-  for (const date of dates) days[date] = fetched[date] || { ios: 0, android: 0 };
+  for (const date of dates) days[date] = fetched[date] || { ios: 0, android: 0, grailscan: 0, other: 0 };
   const value: SpendCache = { days, updated_at: new Date().toISOString() };
   await db.from("pinterest_topics").upsert({
     id: SPEND_CACHE_ID, category: "system", title_template: "Meta spend by platform",

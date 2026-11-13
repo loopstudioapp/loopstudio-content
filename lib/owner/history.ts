@@ -29,6 +29,8 @@ export type HistoryDay = Record<HistoryPartName | "total", HistoryPart> & {
   partial: boolean;
   /** Fields that are not the exact bill for this day (e.g. OpenRouter before its daily records). */
   estimated?: string[];
+  /** Meta spend incl. VAT on other apps' campaigns (Roomy, Qaria, SwipeAway, ...): in no part, not in profit. */
+  other_apps_meta?: number;
   saved_at: string;
 };
 
@@ -39,8 +41,8 @@ export type HistoryInput = {
   askmed: Record<string, DailyPoint | undefined>;
   /** Whole ad account spend in USD including Meta's 10% VAT. */
   metaWithVat: Record<string, number>;
-  /** Spend per platform in any currency (only the ratio is used). */
-  metaSplit: Record<string, { ios: number; android: number } | undefined>;
+  /** Spend per part by campaign name, in any currency (only the ratios are used). */
+  metaSplit: Record<string, { ios: number; android: number; grailscan?: number; other?: number } | undefined>;
   openrouter: Record<string, number>;
   aiAds: Record<string, number>;
   appleKept: (app: OwnerApp, date: string) => number;
@@ -82,14 +84,20 @@ export function buildHistoryDays(input: HistoryInput): HistoryDay[] {
     grailscan.store_cut = net(grailscan) * (1 - input.appleKept("GrailScan", date));
     ios.store_cut = net(ios) * (1 - input.appleKept("AskMed", date));
     android.store_cut = net(android) * (1 - input.googleKept(date));
-    // Meta: ASKMED ANDROID campaigns are Android, every other campaign is iOS; GrailScan has
-    // no spend in this ad account. A day without Play numbers keeps all spend with iOS.
+    // Meta, by campaign name: ASKMED ANDROID is Android, other ASKMED is iOS, GRAIL is GrailScan,
+    // anything else is another app (kept out of every part). A day without Play numbers keeps
+    // Android spend with iOS; a day without a split keeps all spend with iOS.
     const meta = input.metaWithVat[date] || 0;
     const split = input.metaSplit[date];
-    const splitTotal = (split?.ios || 0) + (split?.android || 0);
-    const androidShare = known && splitTotal > 0 ? (split!.android || 0) / splitTotal : 0;
-    android.meta = meta * androidShare;
-    ios.meta = meta - android.meta;
+    const splitTotal = (split?.ios || 0) + (split?.android || 0) + (split?.grailscan || 0) + (split?.other || 0);
+    const share = (value?: number) => (splitTotal > 0 ? (value || 0) / splitTotal : 0);
+    const otherAppsMeta = meta * share(split?.other);
+    grailscan.meta = meta * share(split?.grailscan);
+    android.meta = known ? meta * share(split?.android) : 0;
+    ios.meta = meta - otherAppsMeta - grailscan.meta - android.meta;
+    // AI Ads are AskMed's: split between iOS and Android like AskMed's own Meta spend.
+    const askmedSpend = (split?.ios || 0) + (split?.android || 0);
+    const androidShare = known && askmedSpend > 0 ? (split!.android || 0) / askmedSpend : 0;
     const aiAds = input.aiAds[date] || 0;
     android.ai_ads = aiAds * androidShare;
     ios.ai_ads = aiAds - android.ai_ads;
@@ -113,6 +121,7 @@ export function buildHistoryDays(input: HistoryInput): HistoryDay[] {
       source: input.source,
       partial: date === input.today,
       ...(estimated?.length ? { estimated } : {}),
+      ...(otherAppsMeta ? { other_apps_meta: round(otherAppsMeta) } : {}),
       saved_at: savedAt,
     };
   });
@@ -120,6 +129,7 @@ export function buildHistoryDays(input: HistoryInput): HistoryDay[] {
 
 const sameNumbers = (a: HistoryDay, b: HistoryDay) =>
   a.partial === b.partial && a.source === b.source && JSON.stringify(a.estimated || []) === JSON.stringify(b.estimated || [])
+  && (a.other_apps_meta || 0) === (b.other_apps_meta || 0)
   && [...HISTORY_PARTS, "total" as const].every(name => FIELDS.every(field => a[name][field] === b[name][field]));
 
 /**
@@ -192,15 +202,19 @@ export type HistorySummary = {
   partial_dates: string[];
   estimated: Record<string, string[]>;
   totals: Record<HistoryPartName | "total", HistoryPart>;
+  /** Meta incl. VAT on other apps' campaigns in the range: not in any part or in profit. */
+  other_apps_meta: number;
 };
 
 export function summarizeHistory(days: HistoryDay[], from: string, to: string): HistorySummary {
   const totals = Object.fromEntries([...HISTORY_PARTS, "total"].map(name => [name, emptyPart()])) as HistorySummary["totals"];
   const saved = new Set<string>();
   const estimated: Record<string, string[]> = {};
+  let otherAppsMeta = 0;
   for (const day of days) {
     if (day.date < from || day.date > to) continue;
     saved.add(day.date);
+    otherAppsMeta += day.other_apps_meta || 0;
     for (const name of [...HISTORY_PARTS, "total" as const]) for (const field of FIELDS) totals[name][field] += day[name][field] || 0;
     for (const field of day.estimated || []) (estimated[field] ||= []).push(day.date);
   }
@@ -214,5 +228,6 @@ export function summarizeHistory(days: HistoryDay[], from: string, to: string): 
     partial_dates: days.filter(day => day.partial && saved.has(day.date)).map(day => day.date),
     estimated,
     totals,
+    other_apps_meta: Math.round(otherAppsMeta * 100) / 100,
   };
 }
