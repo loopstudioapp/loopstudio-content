@@ -1712,8 +1712,9 @@ async function saveLiveOwnerHistory({ combined, grail, askmed, proceeds, playPro
 const BACKFILL_STATE_ID = "__owner_history_backfill__";
 const BACKFILL_POINTS_PREFIX = "__owner_backfill_points__";
 const BACKFILL_LOCK_MS = 10 * 60000;
+const BACKFILL_RULES = 2;
 type BackfillState = {
-  start: string; end: string; done: string[];
+  start: string; end: string; done: string[]; rules?: number;
   ledgers?: Partial<Record<OwnerApp, string>>;
   running_since?: string | null; stage?: string | null; last_error?: string | null; finished_at?: string | null;
   months?: Record<string, { written: number; kept_live: number; at: string }>;
@@ -1783,6 +1784,19 @@ async function readBackfillPoints(app: OwnerApp, months: string[]): Promise<Reco
   return out;
 }
 
+/** First Vietnam day in the backfill range on which GrailScan or AskMed had revenue, if any. */
+async function firstBackfillRevenueDate(state: BackfillState): Promise<string | null> {
+  const months = backfillMonths(state);
+  let first: string | null = null;
+  for (const app of OWNER_APPS) {
+    const points = await readBackfillPoints(app, months);
+    for (const point of Object.values(points)) {
+      if (point.date >= state.start && point.revenue > 0 && (!first || point.date < first)) first = point.date;
+    }
+  }
+  return first;
+}
+
 async function assembleBackfillMonth(month: string, state: BackfillState) {
   const first = month === state.start.slice(0, 7) ? state.start : `${month}-01`;
   const monthLast = addVnDays(`${nextMonth(month)}-01`, -1);
@@ -1791,6 +1805,9 @@ async function assembleBackfillMonth(month: string, state: BackfillState) {
   const previous = addVnDays(`${month}-01`, -1).slice(0, 7);
   const points = {} as Record<OwnerApp, Record<string, DailyPoint>>;
   for (const app of OWNER_APPS) points[app] = await readBackfillPoints(app, [previous, month]);
+  // AI Ads count only from the first day the apps had revenue (Loop 2026-11-13: "ai ads only count
+  // from the date we start having revenue"). The page's 30-day window always has revenue.
+  const firstRevenue = await firstBackfillRevenueDate(state);
   const netOf = (date: string) => OWNER_APPS.reduce((sum, app) => {
     const point = points[app][date];
     return sum + (point ? point.revenue - point.refund_source_amount + point.refund_source_reversed_amount : 0);
@@ -1816,7 +1833,7 @@ async function assembleBackfillMonth(month: string, state: BackfillState) {
     // OpenRouter keeps only 30 days of daily activity: older days use the GrailScan key's saved
     // daily costs plus the AskMed server key's own records, so they are marked estimated.
     openrouter: Object.fromEntries(dates.map(date => [date, (grailOpenRouter.costsByDate[date] || 0) + (askmedOpenRouter[date]?.cost || 0)])),
-    aiAds: Object.fromEntries(dates.map(date => [date, HIGGSFIELD_DAILY_COST])),
+    aiAds: Object.fromEntries(dates.map(date => [date, firstRevenue && date >= firstRevenue ? HIGGSFIELD_DAILY_COST : 0])),
     appleKept: (app, date) => appleKept[app]?.[date] ?? 0.85,
     googleKept: date => playProceeds.kept_share_by_date?.[date] ?? playProceeds.kept_share ?? 1 - GOOGLE_PLAY_FEE,
     revenuecatRate: rcRate,
@@ -1830,8 +1847,10 @@ async function runOwnerHistoryBackfill(restart: boolean) {
   const { data } = await db.from("pinterest_topics").select("description_template").eq("id", BACKFILL_STATE_ID).maybeSingle();
   let state: BackfillState | null = data?.description_template && !restart ? JSON.parse(data.description_template) : null;
   // The page itself saves its 30 days (today and the 29 before); the backfill ends the day before.
-  if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], ledgers: {}, months: {} };
+  if (!state) state = { start: HISTORY_START, end: addVnDays(vnDateIso(), -30), done: [], ledgers: {}, months: {}, rules: BACKFILL_RULES };
   state.ledgers ||= {};
+  // Months saved under an older rule set are rebuilt (2: AI Ads only from the first revenue day).
+  if ((state.rules || 1) < BACKFILL_RULES) state = { ...state, ledgers: state.ledgers || {}, rules: BACKFILL_RULES, done: [], months: {}, finished_at: null };
   if (state.running_since) {
     if (Date.now() - Date.parse(state.running_since) < BACKFILL_LOCK_MS) {
       return { ok: true, busy: true, more: false, stage: state.stage, running_since: state.running_since };
@@ -1850,7 +1869,7 @@ async function runOwnerHistoryBackfill(restart: boolean) {
     let result: Record<string, unknown>;
     if (app) {
       result = await saveBackfillLedger(app, state);
-      state.ledgers[app] = at;
+      state.ledgers = { ...state.ledgers, [app]: at };
     } else {
       const saved = await assembleBackfillMonth(month!, state);
       result = { month, ...saved };
