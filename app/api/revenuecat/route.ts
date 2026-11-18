@@ -33,19 +33,14 @@ const REVENUECAT_FREE_MTR = 2_500;
 const HIGGSFIELD_MONTHLY_COST = 50;
 const HIGGSFIELD_DAILY_COST = HIGGSFIELD_MONTHLY_COST / 30;
 
-// Multiple RevenueCat projects. SwipeAway intentionally omitted —
-// it's hidden from the owner dashboard. Webhook still receives it but
+// Multiple RevenueCat projects. SwipeAway and Roomy AI (both sold, Nov 2026)
+// are intentionally omitted from the owner dashboard. Webhook still receives it but
 // it won't appear here.
 const RC_PROJECTS = [
   {
     name: "AskMed",
     apiKey: process.env.REVENUECAT_ASKMED_API_KEY || "",
     projectId: process.env.REVENUECAT_ASKMED_PROJECT_ID || "",
-  },
-  {
-    name: "Roomy AI",
-    apiKey: process.env.REVENUECAT_API_KEY || "",
-    projectId: process.env.REVENUECAT_PROJECT_ID || "",
   },
   {
     name: "GrailScan",
@@ -56,7 +51,7 @@ const RC_PROJECTS = [
 
 // Apps available to the owner stats API. The dashboard can request one app
 // without changing the existing unfiltered endpoint behavior.
-const VISIBLE_APPS = new Set(["Roomy AI", "GrailScan", "AskMed"]);
+const VISIBLE_APPS = new Set(["GrailScan", "AskMed"]);
 
 // The existing Meta account belongs to GrailScan, not newly connected apps.
 function askMedAds(): MetaSpend {
