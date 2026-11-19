@@ -1277,7 +1277,8 @@ export default function OwnerDashboard() {
           loading={todayStatsLoading && !todayStats}
         />
 
-        {APP_SEGMENTS.map(app => <div key={app.key} className="mt-8">
+        {/* GrailScan's today cards + Today Subscriptions hidden (Loop 2026-11-19); it stays in the charts. */}
+        {APP_SEGMENTS.filter(app => app.key !== "GrailScan").map(app => <div key={app.key} className="mt-8">
           <AppStatGrid
             appName={app.label}
             accent={app.color}
