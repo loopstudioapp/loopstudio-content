@@ -57,9 +57,10 @@ const PLATFORM_SEGMENTS = [
   { key: "android", label: "AskMed Android", color: ANDROID_COLOR },
 ] as const;
 // Android revenue by "How did you find AskMed?" (grouped as Loop asked, 2026-11-12).
+// The Android and iOS source cards always match except Play Store / App Store (Loop 2026-11-19).
 const ANDROID_SOURCE_SEGMENTS: readonly { key: AndroidSource; label: string; color: string }[] = [
   { key: "meta", label: "Meta Ads", color: "#1877f2" },
-  { key: "organic", label: "Organic", color: "#25c4d6" },
+  { key: "organic", label: "TikTok", color: "#25c4d6" },
   { key: "seo", label: "SEO", color: "#34a853" },
   { key: "play_store", label: "Play Store", color: "#0f766e" },
   { key: "friend", label: "Friend", color: "#fb923c" },
@@ -873,7 +874,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, androidSourc
               />
             </div>
           )}
-          {hasPlatforms && (
+          {hasPlatforms && androidSourcesAvailable && (
             <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-[#9bc53d] text-[10px] uppercase tracking-wider font-semibold">30-Day AskMed Android Revenue</p>
@@ -893,10 +894,6 @@ function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, androidSourc
                 valueLabel={fmtCompactCur}
                 tooltipValue={fmtCur2}
               />
-              <p className="text-[#525252] text-[10px] mt-2">
-                From &quot;How did you find AskMed?&quot; · Meta Ads = Facebook + Instagram · Organic = TikTok + Lemon8 · SEO = Google + Website · No answer = Other (buyers before Android 1.7.1 never saw the question) · Renewals count under the buyer&apos;s answer
-                {!androidSourcesAvailable && " · Answers unavailable right now, so all shows as Other"}
-              </p>
             </div>
           )}
           <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
