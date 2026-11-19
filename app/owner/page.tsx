@@ -4,12 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink, MessageCircle, Share2, ThumbsUp } from "lucide-react";
-import { ANDROID_SOURCES, type AndroidSource, type AppBreakdown, type PlatformDay } from "@/lib/revenuecat/owner";
+import { ANDROID_SOURCES, IOS_FOUND_VIA_SINCE, IOS_SOURCES, type AndroidSource, type AppBreakdown, type IosSource, type PlatformDay } from "@/lib/revenuecat/owner";
 import type { GooglePlayProceeds as GoogleProceeds } from "@/lib/googleplay/proceeds";
 
 /* ── Types ── */
-type FabiDay = { date: string; revenue_net: number; revenue_gross: number; discount_amount: number; invoice_count: number };
-type FabiData = { today: FabiDay | null; daily: FabiDay[] };
 type TodayPerApp = { today_revenue: number; new_revenue: number; new_subs: number; mrr: number };
 type TodayTxnType = "NEW_SUB" | "RENEWAL" | "REFUND" | "REFUND_REVERSED";
 type TodayTxn = { id: string; country: string; app: string; plan: string; product_id: string; store: string; occurred_at: string; expires_at: string; revenue: number; type: TodayTxnType };
@@ -35,8 +33,7 @@ type DailyPoint = {
   per_platform?: PlatformDay;
 };
 type AppleProceeds = { kept_share: Record<string, number>; ytd_year: number; ytd_through: string | null; ytd_proceeds_vnd: number; source: "apple" | "saved" | "default" };
-type AskMedChannels = Record<string, { meta: number; organic: number; meta_share: number; estimated: boolean }>;
-type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; google_proceeds?: GoogleProceeds; askmed_channels?: AskMedChannels | null; android_sources_available?: boolean; reconciliation_warning?: string | null };
+type TodayStats = { today_vn: string; per_app: Record<string, TodayPerApp>; transactions: TodayTxn[]; ads?: MetaSpend; profit?: ProfitSummary; daily?: DailyPoint[]; apple_proceeds?: AppleProceeds; google_proceeds?: GoogleProceeds; android_sources_available?: boolean; ios_sources_available?: boolean; reconciliation_warning?: string | null };
 const META_VAT_RATE = 0.10;
 const OWNER_APP = "GrailScan + AskMed";
 const TODAY_STATS_URL = "/api/revenuecat?type=today_stats&scope=owner";
@@ -46,16 +43,9 @@ const APP_SEGMENTS = [
   { key: "GrailScan", label: "GrailScan", color: "#00b894" },
   { key: "AskMed", label: "AskMed", color: "#125cb5" },
 ] as const;
-// Revenue chart: AskMed iOS split by Apple's source of each sale (Meta ads vs organic),
-// AskMed Android as its own part (Loop 2026-11-12).
+// Revenue chart: GrailScan, AskMed iOS and AskMed Android only (Loop 2026-11-19).
 const ANDROID_COLOR = "#9bc53d";
 const REVENUE_SEGMENTS = [
-  APP_SEGMENTS[0],
-  { key: "AskMedMeta", label: "AskMed iOS Meta Ads", color: "#125cb5" },
-  { key: "AskMedOrganic", label: "AskMed iOS Organic", color: "#6ea8e8" },
-  { key: "AskMedAndroid", label: "AskMed Android", color: ANDROID_COLOR },
-] as const;
-const REVENUE_SEGMENTS_NO_SPLIT = [
   APP_SEGMENTS[0],
   { key: "AskMedIos", label: "AskMed iOS", color: "#125cb5" },
   { key: "AskMedAndroid", label: "AskMed Android", color: ANDROID_COLOR },
@@ -72,6 +62,15 @@ const ANDROID_SOURCE_SEGMENTS: readonly { key: AndroidSource; label: string; col
   { key: "organic", label: "Organic", color: "#25c4d6" },
   { key: "seo", label: "SEO", color: "#34a853" },
   { key: "play_store", label: "Play Store", color: "#0f766e" },
+  { key: "friend", label: "Friend", color: "#fb923c" },
+  { key: "other", label: "Other", color: "#6b7280" },
+];
+// iOS revenue by the same answer, buyers on iOS 1.7+ only (Loop 2026-11-19).
+const IOS_SOURCE_SEGMENTS: readonly { key: IosSource; label: string; color: string }[] = [
+  { key: "meta", label: "Meta Ads", color: "#1877f2" },
+  { key: "organic", label: "Organic", color: "#25c4d6" },
+  { key: "seo", label: "SEO", color: "#34a853" },
+  { key: "app_store", label: "App Store", color: "#0f766e" },
   { key: "friend", label: "Friend", color: "#fb923c" },
   { key: "other", label: "Other", color: "#6b7280" },
 ];
@@ -564,11 +563,6 @@ function fmtSignedCur(n: number): string {
   const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (n < 0 ? "-$" : "+$") + abs;
 }
-function fmtVnd(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M₫";
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K₫";
-  return n.toLocaleString("en-US") + "₫";
-}
 function fmtVndFull(n: number): string {
   return n.toLocaleString("en-US") + "₫";
 }
@@ -623,32 +617,12 @@ function AppChartLegend<K extends string>({ data, segments, format }: {
   </div>;
 }
 
-/** Revenue chart rows: AskMed iOS split into Meta ads and organic when Apple source data exists; Android on its own. */
-function revenueChart(daily: DailyPoint[], channels: AskMedChannels | null | undefined) {
-  const parts = daily.map((d) => {
+/** Revenue chart rows: GrailScan, AskMed iOS and AskMed Android. */
+function revenueChart(daily: DailyPoint[]) {
+  return daily.map((d) => {
     const android = d.per_platform?.android.revenue ?? 0;
-    return { GrailScan: d.per_app?.GrailScan.revenue || 0, ios: (d.per_app?.AskMed.revenue || 0) - android, android };
+    return { GrailScan: d.per_app?.GrailScan.revenue || 0, AskMedIos: (d.per_app?.AskMed.revenue || 0) - android, AskMedAndroid: android };
   });
-  if (!channels) {
-    return {
-      split: false as const,
-      data: parts.map((p) => ({ GrailScan: p.GrailScan, AskMedIos: p.ios, AskMedAndroid: p.android })),
-      notes: undefined,
-    };
-  }
-  return {
-    split: true as const,
-    data: daily.map((d, i) => ({
-      GrailScan: parts[i].GrailScan,
-      AskMedMeta: channels[d.date]?.meta ?? 0,
-      AskMedOrganic: channels[d.date]?.organic ?? parts[i].ios,
-      AskMedAndroid: parts[i].android,
-    })),
-    // Days without Apple source data yet use the trailing 7-day Meta share.
-    notes: daily.map((d, i) => channels[d.date]?.estimated && parts[i].ios
-      ? `iOS split estimated (7-day Meta share ${Math.round(channels[d.date].meta_share * 100)}%)`
-      : null),
-  };
 }
 
 // Vietnam 2026 personal business tax: one flat rate on the whole profit,
@@ -661,7 +635,7 @@ function autoTaxRate(ytdVnd: number): number {
   if (ytdVnd <= 50_000_000_000) return 0.17;
   return 0.2;
 }
-function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, askmedChannels, androidSourcesAvailable = true, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; googleProceeds?: GoogleProceeds; askmedChannels?: AskMedChannels | null; androidSourcesAvailable?: boolean; loading: boolean; appName?: string }) {
+function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, androidSourcesAvailable = true, iosSourcesAvailable = true, loading, appName = OWNER_APP }: { profit: ProfitSummary | undefined; ads: MetaSpend | undefined; daily: DailyPoint[] | undefined; proceeds: AppleProceeds | undefined; googleProceeds?: GoogleProceeds; androidSourcesAvailable?: boolean; iosSourcesAvailable?: boolean; loading: boolean; appName?: string }) {
   const [taxMode, setTaxMode] = useState<TaxMode>("auto");
   // A manual rate is remembered on this device until Auto is picked again.
   useEffect(() => {
@@ -739,7 +713,7 @@ function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, askmedChanne
   }));
   const usdToVnd = ads?.currency === "VND" ? ads.usd_rate : 0;
   const totalNewSubs30 = (daily || []).reduce((s, d) => s + (d.new_subs || 0), 0);
-  const revenueSplit = revenueChart(daily || [], askmedChannels);
+  const revenueData = revenueChart(daily || []);
   const newSubsData = (daily || []).map((d) => ({ GrailScan: d.per_app?.GrailScan.new_subs || 0, AskMed: d.per_app?.AskMed.new_subs || 0 }));
   const totalSubCost30 = (daily || []).reduce(
     (s, d) => s + (d.adspend_with_vat ?? ((d.cost_per_sub || 0) * (d.new_subs || 0))),
@@ -757,6 +731,11 @@ function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, askmedChanne
   const androidSources = (daily || []).map((d) =>
     Object.fromEntries(ANDROID_SOURCES.map((key) => [key, d.per_platform?.android.sources[key] || 0])) as Record<AndroidSource, number>);
   const androidRevenue30 = (daily || []).reduce((s, d) => s + (d.per_platform?.android.revenue || 0), 0);
+  // iOS from the 1.7 release day on, buyers on 1.7+ only (earlier versions never asked).
+  const iosDays = (daily || []).filter((d) => d.date >= IOS_FOUND_VIA_SINCE && d.per_platform?.ios.sources);
+  const iosSources = iosDays.map((d) =>
+    Object.fromEntries(IOS_SOURCES.map((key) => [key, d.per_platform?.ios.sources?.[key] || 0])) as Record<IosSource, number>);
+  const iosRevenue30 = iosSources.reduce((s, d) => s + IOS_SOURCES.reduce((sum, key) => sum + d[key], 0), 0);
   const costPerSub = (meta: number, subs: number) => (meta > 0 && subs > 0 ? meta / subs : null);
   const subsCostData = (daily || []).map((d) => ({
     ios: costPerSub(d.per_platform?.ios.meta || 0, d.per_platform?.ios.new_subs || 0),
@@ -862,29 +841,38 @@ function ProfitGrid({ profit, ads, daily, proceeds, googleProceeds, askmedChanne
                 )}
               </div>
             </div>
-            {revenueSplit.split ? <>
-              <AppChartLegend data={revenueSplit.data} segments={REVENUE_SEGMENTS} format={fmtCur2} />
-              <StackedBreakdownChart
-                data={revenueSplit.data}
-                dates={daily.map((d) => d.date)}
-                segments={REVENUE_SEGMENTS}
-                label="30-day revenue: GrailScan, AskMed iOS Meta Ads, AskMed iOS Organic and AskMed Android"
-                valueLabel={fmtCompactCur}
-                tooltipValue={fmtCur2}
-                notes={revenueSplit.notes}
-              />
-            </> : <>
-              <AppChartLegend data={revenueSplit.data} segments={REVENUE_SEGMENTS_NO_SPLIT} format={fmtCur2} />
-              <StackedBreakdownChart
-                data={revenueSplit.data}
-                dates={daily.map((d) => d.date)}
-                segments={REVENUE_SEGMENTS_NO_SPLIT}
-                label="30-day revenue: GrailScan, AskMed iOS and AskMed Android"
-                valueLabel={fmtCompactCur}
-                tooltipValue={fmtCur2}
-              />
-            </>}
+            <AppChartLegend data={revenueData} segments={REVENUE_SEGMENTS} format={fmtCur2} />
+            <StackedBreakdownChart
+              data={revenueData}
+              dates={daily.map((d) => d.date)}
+              segments={REVENUE_SEGMENTS}
+              label="30-day revenue: GrailScan, AskMed iOS and AskMed Android"
+              valueLabel={fmtCompactCur}
+              tooltipValue={fmtCur2}
+            />
           </div>
+          {iosSourcesAvailable && iosDays.length > 0 && (
+            <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[#125cb5] text-[10px] uppercase tracking-wider font-semibold">30-Day AskMed iOS Revenue</p>
+                <div className="text-right">
+                  <p className="text-white text-2xl font-bold">{fmtCur2(iosRevenue30)}</p>
+                  {usdToVnd > 0 && (
+                    <p className="text-[#737373] text-[11px] mt-0.5">≈ {fmtVndFull(Math.round(iosRevenue30 * usdToVnd))}</p>
+                  )}
+                </div>
+              </div>
+              <AppChartLegend data={iosSources} segments={IOS_SOURCE_SEGMENTS} format={fmtCur2} />
+              <StackedBreakdownChart
+                data={iosSources}
+                dates={iosDays.map((d) => d.date)}
+                segments={IOS_SOURCE_SEGMENTS}
+                label="30-day AskMed iOS revenue by how the buyer found AskMed"
+                valueLabel={fmtCompactCur}
+                tooltipValue={fmtCur2}
+              />
+            </div>
+          )}
           {hasPlatforms && (
             <div className="sm:col-span-2 bg-[#141414] border border-[#262626] rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
@@ -1178,19 +1166,7 @@ export default function OwnerDashboard() {
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
   const [todayStatsLoading, setTodayStatsLoading] = useState(true);
   const [todayStatsError, setTodayStatsError] = useState<string | null>(null);
-  const [fabi, setFabi] = useState<FabiData | null>(null);
-  const [fabiLoading, setFabiLoading] = useState(false);
-  const [fabiError, setFabiError] = useState<string | null>(null);
-
-  // Ket Coffee stays independent from the app metrics.
-  useEffect(() => {
-    fetch("/api/fabi/sync?cached=1")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.ok) setFabi({ today: data.today || null, daily: data.daily || [] });
-      })
-      .catch(() => {});
-  }, []);
+  // Ket Coffee section hidden (Loop 2026-11-19); its sync (/api/fabi/sync, daily cron) still runs.
 
   // Load both app snapshots through the combined cached/fast endpoint.
   useEffect(() => {
@@ -1238,21 +1214,6 @@ export default function OwnerDashboard() {
   const loadRevenueCat = useCallback(async () => {
     setTodayStatsLoading(true);
     setTodayStatsError(null);
-    setFabiLoading(true);
-    setFabiError(null);
-
-    const fabiPromise = (async () => {
-      try {
-        const response = await fetch("/api/fabi/sync");
-        const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data.error || "Coffee shop sync failed");
-        setFabi({ today: data.today || null, daily: data.daily || [] });
-      } catch (error) {
-        setFabiError(error instanceof Error ? error.message : "Coffee shop sync failed");
-      } finally {
-        setFabiLoading(false);
-      }
-    })();
 
     try {
       const fast = await fetch(`${TODAY_STATS_URL}&fast=1`);
@@ -1264,7 +1225,6 @@ export default function OwnerDashboard() {
     } finally {
       setTodayStatsLoading(false);
     }
-    await fabiPromise;
   }, []);
 
   // (SubTable removed — replaced by TodayTxnTable which handles new + renewal types)
@@ -1315,8 +1275,8 @@ export default function OwnerDashboard() {
           daily={todayStats?.daily}
           proceeds={todayStats?.apple_proceeds}
           googleProceeds={todayStats?.google_proceeds}
-          askmedChannels={todayStats?.askmed_channels}
           androidSourcesAvailable={todayStats?.android_sources_available !== false}
+          iosSourcesAvailable={todayStats?.ios_sources_available !== false}
           loading={todayStatsLoading && !todayStats}
         />
 
@@ -1334,47 +1294,6 @@ export default function OwnerDashboard() {
           />
         </div>)}
         </>}
-      </section>
-
-      <section className="mb-10">
-        <div className="flex items-center gap-2 mb-5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#d97706]" />
-          <h2 className="text-sm font-semibold text-[#737373] uppercase tracking-wider">Ket Coffee</h2>
-          {fabiLoading && <span className="text-[10px] text-[#525252]">syncing…</span>}
-        </div>
-
-        {fabiError && (
-          <div className="bg-[#141414] border border-[#ef4444]/20 rounded-xl p-5 text-[#ef4444] text-sm mb-4">{fabiError}</div>
-        )}
-
-        {!fabi && !fabiLoading && !fabiError && (
-          <div className="bg-[#141414] border border-[#262626] rounded-xl p-8 text-center text-[#525252] text-sm">
-            Click &quot;Refresh&quot; above to load coffee shop data
-          </div>
-        )}
-
-        {fabi && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold mb-1">Today Revenue</p>
-              <p className="text-white text-3xl font-bold">{fmtVndFull(fabi.today?.revenue_net || 0)}</p>
-              <p className="text-[#525252] text-[10px] mt-1">{fabi.today?.invoice_count || 0} invoices</p>
-            </div>
-            <div className="bg-[#141414] border border-[#262626] rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-[#d97706] text-[10px] uppercase tracking-wider font-semibold">30-Day Revenue</p>
-                <p className="text-white text-2xl font-bold">{fmtVnd(fabi.daily.reduce((sum, day) => sum + (day.revenue_net || 0), 0))}</p>
-              </div>
-              <Chart
-                data={fabi.daily.map((day) => day.revenue_net)}
-                dates={fabi.daily.map((day) => day.date)}
-                color="#d97706"
-                label="Coffee Revenue"
-                h={72}
-              />
-            </div>
-          </div>
-        )}
       </section>
 
     </div>

@@ -21,6 +21,21 @@ export function androidSourceGroup(answer: string | null | undefined): AndroidSo
     default: return "other"; // "other", no answer, or bought before the question existed
   }
 }
+/** AskMed iOS revenue by the same answer, only from buyers on iOS 1.7+ (Loop 2026-11-19). */
+export const IOS_SOURCES = ["meta", "organic", "seo", "app_store", "friend", "other"] as const;
+export type IosSource = (typeof IOS_SOURCES)[number];
+export function iosSourceGroup(answer: string | null | undefined): IosSource {
+  switch (answer) {
+    case "facebook": case "instagram": return "meta";
+    case "tiktok": case "lemon8": return "organic";
+    case "google": case "website": return "seo";
+    case "app_store": return "app_store";
+    case "friend": return "friend";
+    default: return "other"; // "other" or no answer
+  }
+}
+/** iOS 1.7 went on sale 2026-11-18; earlier iOS versions never asked "How did you find AskMed?". */
+export const IOS_FOUND_VIA_SINCE = "2026-11-18";
 /** One part of a day's profit. revenue is gross; refunds are the evenly spread 30-day net refunds. */
 export type PlatformPart = {
   revenue: number; refunds: number; store_cut: number; meta: number; revenuecat: number;
@@ -28,7 +43,7 @@ export type PlatformPart = {
 };
 export type PlatformDay = {
   grailscan: PlatformPart;
-  ios: PlatformPart;
+  ios: PlatformPart & { sources?: Record<IosSource, number> };
   android: PlatformPart & { sources: Record<AndroidSource, number> };
   /** false when this day has no saved Google Play numbers yet (all AskMed money shows as iOS). */
   android_known: boolean;
@@ -38,6 +53,8 @@ export type PlatformInputs = {
   metaSpendByDate?: Record<string, { ios: number; android: number }>;
   /** "How did you find AskMed?" answer per RevenueCat app user id. */
   foundViaByUser?: Record<string, string>;
+  /** iOS buyers who bought on iOS 1.7+ (null when AskMed's database can't be read), with their answer if any. */
+  iosFoundVia?: { eligible: Set<string>; answers: Record<string, string> } | null;
   /** Google Play's real payout share (after its fee and the taxes it keeps); 85% when unknown. */
   googleKept?: { current: number; by_date?: Record<string, number> };
 };
@@ -61,7 +78,7 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
   // Google Play refunds are spread evenly over the 30 days, like each app's own refunds.
   const androidRefundNet = askmed.daily.reduce((sum, day) =>
     sum + (day.android?.refund_source_amount || 0) - (day.android?.refund_source_reversed_amount || 0), 0) / (askmed.daily.length || 1);
-  const parts = new Map<string, { grailscan: PlatformPart; ios: PlatformPart; android: PlatformPart; known: boolean; userRevenue: Record<string, number> }>();
+  const parts = new Map<string, { grailscan: PlatformPart; ios: PlatformPart; android: PlatformPart; known: boolean; userRevenue: Record<string, number>; iosUserRevenue: Record<string, number> }>();
   const daily = grail.daily.map((g): DailyPoint & { per_app: AppBreakdown; apple_cost: number; google_cost: number } => {
     const a = askDays.get(g.date)!;
     const revenue = g.revenue + a.revenue;
@@ -82,7 +99,7 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
     iosPart.store_cut = net(iosPart) * (1 - keptFor("AskMed", g.date));
     const googleKept = inputs.googleKept?.by_date?.[g.date] ?? inputs.googleKept?.current ?? 1 - GOOGLE_PLAY_FEE;
     androidPart.store_cut = net(androidPart) * (1 - googleKept);
-    parts.set(g.date, { grailscan: grailPart, ios: iosPart, android: androidPart, known, userRevenue: known ? a.android!.by_user : {} });
+    parts.set(g.date, { grailscan: grailPart, ios: iosPart, android: androidPart, known, userRevenue: known ? a.android!.by_user : {}, iosUserRevenue: a.ios_by_user || {} });
     const appleCost = grailPart.store_cut + iosPart.store_cut;
     return {
       ...g,
@@ -141,7 +158,18 @@ export function combineOwnerStats(grail: TodayStatsResponse, askmed: TodayStatsR
     for (const [userId, amount] of Object.entries(p.userRevenue)) {
       sources[androidSourceGroup(inputs.foundViaByUser?.[userId])] += amount;
     }
-    perPlatform[d.date] = { grailscan: p.grailscan, ios: p.ios, android: { ...p.android, sources }, android_known: p.known };
+    const iosFoundVia = inputs.iosFoundVia;
+    let iosSources: Record<IosSource, number> | undefined;
+    if (iosFoundVia && d.date >= IOS_FOUND_VIA_SINCE) {
+      iosSources = Object.fromEntries(IOS_SOURCES.map(source => [source, 0])) as Record<IosSource, number>;
+      for (const [userId, amount] of Object.entries(p.iosUserRevenue)) {
+        if (iosFoundVia.eligible.has(userId)) iosSources[iosSourceGroup(iosFoundVia.answers[userId])] += amount;
+      }
+    }
+    perPlatform[d.date] = {
+      grailscan: p.grailscan, ios: iosSources ? { ...p.ios, sources: iosSources } : p.ios,
+      android: { ...p.android, sources }, android_known: p.known,
+    };
   }
   // Blended 30-day share Apple keeps, for labels and older clients.
   const net30 = daily.reduce((sum, d) => sum + afterRefunds(d), 0);
