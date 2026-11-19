@@ -68,7 +68,7 @@ const ANDROID_SOURCE_SEGMENTS: readonly { key: AndroidSource; label: string; col
 // iOS revenue by the same answer, buyers on iOS 1.7+ only (Loop 2026-11-19).
 const IOS_SOURCE_SEGMENTS: readonly { key: IosSource; label: string; color: string }[] = [
   { key: "meta", label: "Meta Ads", color: "#1877f2" },
-  { key: "organic", label: "Organic", color: "#25c4d6" },
+  { key: "organic", label: "TikTok", color: "#25c4d6" },
   { key: "seo", label: "SEO", color: "#34a853" },
   { key: "app_store", label: "App Store", color: "#0f766e" },
   { key: "friend", label: "Friend", color: "#fb923c" },
