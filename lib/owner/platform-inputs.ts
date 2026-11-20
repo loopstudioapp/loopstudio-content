@@ -79,6 +79,58 @@ export async function loadFoundVia(userIds: string[]): Promise<Record<string, st
   }
 }
 
+/** "1.7" / "1.7.2" → comparable number (1.7 → 1007). */
+function versionNumber(version: string | null | undefined): number {
+  const [major, minor] = (version || "").split(".").map(part => parseInt(part, 10));
+  return Number.isFinite(major) ? major * 1000 + (Number.isFinite(minor) ? minor : 0) : 0;
+}
+const IOS_FOUND_VIA_VERSION = versionNumber("1.7");
+
+/**
+ * iOS buyers whose revenue counts on the iOS sources card (Loop 2026-11-19: iOS 1.7 onwards only,
+ * earlier versions never asked "How did you find AskMed?"): anyone with an answer, plus anyone whose
+ * first onboarding step reached us from iOS 1.7+ (bought without being asked, e.g. a restore = Other).
+ * Read-only from askmed-qa; debug builds are left out. Returns null when the database can't be read.
+ */
+export async function loadIosFoundVia(userIds: string[]): Promise<{ eligible: Set<string>; answers: Record<string, string> } | null> {
+  const ids = Array.from(new Set(userIds.filter(Boolean)));
+  const database = askMedDb();
+  if (!database) return null;
+  const eligible = new Set<string>();
+  const answers: Record<string, string> = {};
+  try {
+    for (let i = 0; i < ids.length; i += 90) {
+      const chunk = ids.slice(i, i + 90);
+      const marks = chunk.map(() => "?").join(",");
+      const [answerRows, firstSteps] = await Promise.all([
+        database.prepare(`SELECT app_user_id, answer FROM onboarding_answers
+            WHERE question = 'found_via' AND COALESCE(build, 'release') <> 'debug' AND app_user_id IN (${marks})`)
+          .bind(...chunk).all<{ app_user_id: string; answer: string }>(),
+        database.prepare(`SELECT app_user_id, app_version, MIN(first_at) AS first_at FROM funnel_events
+            WHERE platform = 'ios' AND COALESCE(build, 'release') <> 'debug' AND app_user_id IN (${marks})
+            GROUP BY app_user_id`)
+          .bind(...chunk).all<{ app_user_id: string; app_version: string | null }>(),
+      ]);
+      for (const row of answerRows.results || []) {
+        eligible.add(row.app_user_id);
+        try {
+          const keys = JSON.parse(row.answer);
+          if (Array.isArray(keys) && typeof keys[0] === "string") answers[row.app_user_id] = keys[0];
+        } catch {
+          // A malformed answer counts as no answer (Other).
+        }
+      }
+      for (const row of firstSteps.results || []) {
+        if (versionNumber(row.app_version) >= IOS_FOUND_VIA_VERSION) eligible.add(row.app_user_id);
+      }
+    }
+    return { eligible, answers };
+  } catch (error) {
+    console.error("AskMed iOS found-via answers unavailable", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 function askMedDb(): AskMedDb | undefined {
   try {
     return (getCloudflareContext().env as unknown as { ASKMED_DB?: AskMedDb }).ASKMED_DB;

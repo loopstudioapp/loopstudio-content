@@ -139,6 +139,32 @@ test('owner split: GrailScan, AskMed iOS and AskMed Android add up to the day, M
   assert.equal(androidSourceGroup('app_store'), 'other');
 });
 
+test('owner iOS sources: only buyers on iOS 1.7+, from the 1.7 release day, grouped like Android with App Store', () => {
+  const { combineOwnerStats, iosSourceGroup } = harness().load('lib/revenuecat/owner.ts');
+  const day = (date, revenue, extra = {}) => ({ date, revenue, purchase_revenue: revenue, new_subs: 1,
+    refund_amount: 0, refund_reversed_amount: 0, refund_count: 0, refund_reversed_count: 0,
+    adspend_with_vat: 0, openrouter_cost: 0, higgsfield_cost: 0, profit: 0, ...extra });
+  const snap = (app, days) => ({ today_vn: '2026-11-18', per_app: { [app]: { today_revenue: 0, new_revenue: 0, new_subs: 0, mrr: 0 } },
+    transactions: [], ads: {}, profit: { apple_commission_rate: .15, adspend_with_vat: 0 }, daily: days });
+  const grail = snap('GrailScan', [day('2026-11-17', 0), day('2026-11-18', 0)]);
+  const ask = snap('AskMed', [
+    day('2026-11-17', 50, { ios_by_user: { a: 50 } }),
+    day('2026-11-18', 400, { ios_by_user: { a: 100, b: 130, c: 70, old: 100 } }),
+  ]);
+  const iosFoundVia = { eligible: new Set(['a', 'b', 'c']), answers: { a: 'facebook', b: 'app_store' } };
+  const result = combineOwnerStats(grail, ask, undefined, { iosFoundVia });
+  assert.equal(result.daily[0].per_platform.ios.sources, undefined, 'no iOS sources before 1.7 went on sale');
+  assert.deepEqual({ ...result.daily[1].per_platform.ios.sources }, { meta: 100, organic: 0, seo: 0, app_store: 130, friend: 0, other: 70 },
+    'pre-1.7 buyers are left out; a 1.7 buyer with no answer is Other');
+  assert.equal(result.daily[1].per_platform.ios.revenue, 400, 'the iOS total itself is unchanged');
+  assert.equal(combineOwnerStats(grail, ask, undefined, { iosFoundVia: null }).daily[1].per_platform.ios.sources, undefined);
+  assert.equal(iosSourceGroup('instagram'), 'meta');
+  assert.equal(iosSourceGroup('lemon8'), 'organic');
+  assert.equal(iosSourceGroup('google'), 'seo');
+  assert.equal(iosSourceGroup('friend'), 'friend');
+  assert.equal(iosSourceGroup(undefined), 'other');
+});
+
 test('combined accounting sums app revenue/refunds, applies one shared cost ledger and combined RevenueCat threshold', () => {
   const { combineOwnerStats } = harness().load('lib/revenuecat/owner.ts');
   const snapshot = (app, revenue, newSubs) => ({

@@ -14,6 +14,8 @@ export type ReconciledDay = {
   adspend_with_vat?: number;
   // AskMed only: the Google Play part of the day (owner page iOS/Android split).
   android?: AndroidDay;
+  /** AskMed only: App Store gross revenue per buyer (owner page iOS found-via split). */
+  ios_by_user?: Record<string, number>;
 };
 type Run = {
   status: "running" | "complete" | "failed";
